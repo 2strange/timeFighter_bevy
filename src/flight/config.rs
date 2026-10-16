@@ -54,8 +54,9 @@ pub struct FlightConfig {
     /// Spawn pitch (rad); negative = nose down.
     pub spawn_pitch: f32,
 
-    /// Visual model of the player's jet: `None` = the built-in primitive jet,
-    /// `Some(model)` = a normalised glTF model from `assets/aircraft/`.
+    /// Visual model of the player's jet: a normalised glTF model from
+    /// `assets/aircraft/`, or `None` for the built-in primitive jet. The
+    /// primitive jet is also the fallback when the model fails to load.
     pub player_model: Option<AircraftModel>,
 }
 
@@ -83,7 +84,7 @@ impl Default for FlightConfig {
             spawn_position: Vec3::new(0.0, 500.0, 800.0),
             spawn_pitch: (-15.0_f32).to_radians(),
 
-            player_model: None,
+            player_model: Some(AircraftModel::F14Tomcat),
         }
     }
 }

@@ -1,5 +1,7 @@
-//! Placeholder low-poly jet built from primitives, in real dimensions
-//! (about 19 m long, 13 m span). Origin near the centre of mass, nose along −Z.
+//! The player's jet: the configured glTF model, or a low-poly jet built from
+//! primitives in real dimensions (about 19 m long, 13 m span) when no model
+//! is configured or the model fails to load. Origin near the centre of mass,
+//! nose along −Z.
 
 use std::f32::consts::FRAC_PI_2;
 
@@ -13,8 +15,8 @@ pub(super) fn spawn_player_jet(
     mut commands: Commands,
     cfg: Res<FlightConfig>,
     assets: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let jet = commands
         .spawn((
@@ -27,11 +29,38 @@ pub(super) fn spawn_player_jet(
             aircraft_body(Layer::Player),
         ))
         .id();
-    if let Some(model) = cfg.player_model {
-        commands.entity(jet).insert(model.scene(&assets));
-        return;
+    match cfg.player_model {
+        Some(model) => {
+            commands.entity(jet).insert(model.scene(&assets));
+        }
+        None => add_primitive_jet(&mut commands, jet, meshes, materials),
     }
+}
 
+/// Swaps a player model that failed to load for the primitive jet.
+pub(super) fn fall_back_to_primitive_jet(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    player: Query<(Entity, &WorldAssetRoot), With<PlayerAircraft>>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Ok((jet, scene)) = player.single() else {
+        return;
+    };
+    if assets.load_state(&scene.0).is_failed() {
+        warn!("player model failed to load, using the built-in jet");
+        commands.entity(jet).remove::<WorldAssetRoot>();
+        add_primitive_jet(&mut commands, jet, meshes, materials);
+    }
+}
+
+fn add_primitive_jet(
+    commands: &mut Commands,
+    jet: Entity,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let body = materials.add(StandardMaterial {
         base_color: Color::srgb(0.55, 0.58, 0.62),
         perceptual_roughness: 0.6,
@@ -106,4 +135,93 @@ pub(super) fn spawn_player_jet(
             jet.spawn((Mesh3d(mesh), MeshMaterial3d(material), transform));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use crate::{GamePlugin, test_support::headless_app};
+
+    fn player(app: &mut App) -> Entity {
+        app.world_mut()
+            .query_filtered::<Entity, With<PlayerAircraft>>()
+            .single(app.world())
+            .unwrap()
+    }
+
+    fn meshes_below(world: &World, root: Entity) -> usize {
+        let mut count = 0;
+        let mut stack = vec![root];
+        while let Some(entity) = stack.pop() {
+            count += usize::from(world.get::<Mesh3d>(entity).is_some());
+            if let Some(children) = world.get::<Children>(entity) {
+                stack.extend(children.iter());
+            }
+        }
+        count
+    }
+
+    /// Updates until `done` holds, at most 20 s (assets load on threads).
+    fn update_until(app: &mut App, mut done: impl FnMut(&mut App) -> bool) {
+        let start = Instant::now();
+        while !done(app) {
+            assert!(start.elapsed() < Duration::from_secs(20), "timed out");
+            app.update();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn player_flies_the_f14_by_default() {
+        let mut app = headless_app(GamePlugin);
+        app.update();
+        let jet = player(&mut app);
+        assert!(app.world().get::<WorldAssetRoot>(jet).is_some());
+        update_until(&mut app, |app| meshes_below(app.world(), jet) > 0);
+        // The glTF scene, not the primitive jet (which has no scene root).
+        assert!(app.world().get::<WorldAssetRoot>(jet).is_some());
+    }
+
+    #[test]
+    fn primitive_jet_without_a_model() {
+        let mut app = headless_app(GamePlugin);
+        app.insert_resource(FlightConfig {
+            player_model: None,
+            ..default()
+        });
+        app.update();
+        let jet = player(&mut app);
+        assert!(app.world().get::<WorldAssetRoot>(jet).is_none());
+        assert_eq!(meshes_below(app.world(), jet), 8);
+    }
+
+    #[test]
+    fn primitive_jet_replaces_a_model_that_fails_to_load() {
+        // A jet whose scene points at a missing file and has no meshes yet.
+        let mut app = headless_app(GamePlugin);
+        app.insert_resource(FlightConfig {
+            player_model: None,
+            ..default()
+        });
+        app.update();
+        let jet = player(&mut app);
+        let missing = app
+            .world()
+            .resource::<AssetServer>()
+            .load(GltfAssetLabel::Scene(0).from_asset("aircraft/missing.glb"));
+        app.world_mut()
+            .entity_mut(jet)
+            .despawn_related::<Children>()
+            .insert(WorldAssetRoot(missing));
+        app.update();
+        assert_eq!(meshes_below(app.world(), jet), 0);
+
+        update_until(&mut app, |app| {
+            app.world().get::<WorldAssetRoot>(jet).is_none()
+        });
+        app.update();
+        assert_eq!(meshes_below(app.world(), jet), 8);
+    }
 }

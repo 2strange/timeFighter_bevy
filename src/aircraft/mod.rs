@@ -22,14 +22,16 @@ pub enum AircraftModel {
     Mig29,
     Tu2,
     F4uCorsair,
+    Spitfire,
 }
 
 impl AircraftModel {
-    pub const ALL: [AircraftModel; 4] = [
+    pub const ALL: [AircraftModel; 5] = [
         AircraftModel::F14Tomcat,
         AircraftModel::Mig29,
         AircraftModel::Tu2,
         AircraftModel::F4uCorsair,
+        AircraftModel::Spitfire,
     ];
 
     /// File name in `assets/aircraft/`, without extension. Matches the
@@ -40,6 +42,7 @@ impl AircraftModel {
             AircraftModel::Mig29 => "mig_29",
             AircraftModel::Tu2 => "tupolev_tu_2",
             AircraftModel::F4uCorsair => "f4u_corsair",
+            AircraftModel::Spitfire => "spitfire",
         }
     }
 
@@ -49,6 +52,7 @@ impl AircraftModel {
             AircraftModel::Mig29 => "MiG-29",
             AircraftModel::Tu2 => "Tu-2",
             AircraftModel::F4uCorsair => "F4U Corsair",
+            AircraftModel::Spitfire => "Spitfire",
         }
     }
 

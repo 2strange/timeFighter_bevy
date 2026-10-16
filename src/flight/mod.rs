@@ -56,6 +56,7 @@ impl Plugin for PlayerFlightPlugin {
                 (
                     (input::keyboard_input, input::respawn).in_set(FlightSystems::Input),
                     readout::update_readout.after(FlightSystems::Simulate),
+                    jet::fall_back_to_primitive_jet,
                 ),
             );
     }
