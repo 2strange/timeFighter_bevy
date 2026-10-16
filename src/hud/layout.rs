@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+use crate::{combat::CrashInto, game_state::Outcome};
+
 /// Where an off-screen indicator sits: on the rectangle `margin` inside a
 /// viewport of `size`, in screen direction `direction` (x right, y down)
 /// from the centre.
@@ -52,4 +54,20 @@ pub fn gun_target(
         }
     }
     best.map(|(candidate, _)| candidate)
+}
+
+/// Headline of the result screen: what happened, in plain words.
+pub fn outcome_title(outcome: Outcome) -> String {
+    match outcome {
+        Outcome::Victory => "MISSION COMPLETE".into(),
+        Outcome::ShotDown => "SHOT DOWN".into(),
+        Outcome::Crashed(into) => match into {
+            CrashInto::Aircraft(name) => format!("RAMMED BY {}", name.to_uppercase()),
+            CrashInto::Building => "CRASHED INTO A BUILDING".into(),
+            CrashInto::Bridge => "CRASHED INTO A BRIDGE".into(),
+            CrashInto::Water => "CRASHED INTO THE RIVER".into(),
+            CrashInto::Ground => "CRASHED INTO THE GROUND".into(),
+            CrashInto::Obstacle => "CRASHED".into(),
+        },
+    }
 }

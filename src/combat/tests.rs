@@ -441,7 +441,10 @@ fn flying_into_the_world_destroys_the_player() {
         crashes.extend(read::<Destroyed>(&app));
     }
     assert_eq!(crashes.len(), 1, "{crashes:?}");
-    assert_eq!(crashes[0].cause, DestroyCause::Crash);
+    assert_eq!(
+        crashes[0].cause,
+        DestroyCause::Crash(super::CrashInto::Obstacle)
+    );
     assert_eq!(crashes[0].team, Team::Player);
 }
 
@@ -615,4 +618,181 @@ fn crossing_target_destroyed(lead: bool) -> bool {
 fn aiming_at_the_lead_point_hits_a_crossing_spitfire_and_aiming_at_it_does_not() {
     assert!(crossing_target_destroyed(true), "lead aim missed");
     assert!(!crossing_target_destroyed(false), "direct aim hit anyway");
+}
+
+#[test]
+fn kills_explode_and_hits_flash_where_they_happen() {
+    let mut app = app();
+    let jet = spawn_player(&mut app, high_up());
+    let enemy = spawn_target(&mut app, Vec3::new(0.0, 1_000.0, -500.0));
+    let point = Vec3::new(1.0, 1_000.0, -495.0);
+    app.world_mut().write_message(Hit {
+        projectile: Entity::PLACEHOLDER,
+        target: enemy,
+        point,
+        team: Team::Player,
+        weapon: Weapon::Missile,
+        damage: 100.0,
+    });
+    app.update();
+    let effects = |app: &mut App| {
+        app.world_mut()
+            .query::<(&super::Effect, &Transform)>()
+            .iter(app.world())
+            .map(|(e, t)| (e.kind, t.translation))
+            .collect::<Vec<_>>()
+    };
+    let now = effects(&mut app);
+    assert!(now.contains(&(super::EffectKind::Spark, point)), "{now:?}");
+    assert!(
+        now.iter()
+            .any(|(kind, at)| *kind == super::EffectKind::Explosion
+                && at.distance(Vec3::new(0.0, 1_000.0, -500.0)) < 1.0),
+        "{now:?}"
+    );
+
+    // The player's own crash explodes too, at the impact point.
+    let crash_at = Vec3::new(3.0, 999.0, -2.0);
+    app.world_mut()
+        .write_message(crate::physics::PlayerCrashed {
+            player: jet,
+            obstacle: Entity::PLACEHOLDER,
+            point: crash_at,
+        });
+    app.update();
+    assert!(effects(&mut app).contains(&(super::EffectKind::BigExplosion, crash_at)));
+
+    // All gone once played.
+    run_for(&mut app, super::EffectKind::BigExplosion.lifetime() + 0.1);
+    assert!(effects(&mut app).is_empty());
+}
+
+/// The city with its colliders and the combat plugin, for crash tests.
+fn city_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        PhysicsPlugin,
+        CombatPlugin,
+        CityPlugin,
+        CityCollidersPlugin,
+    ))
+    .init_resource::<ButtonInput<KeyCode>>()
+    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        1.0 / FPS,
+    )));
+    app.finish();
+    app.update();
+    app
+}
+
+fn crash_cause_at(position: Vec3) -> Option<DestroyCause> {
+    let mut app = city_app();
+    spawn_player(&mut app, Transform::from_translation(position));
+    for _ in 0..5 {
+        app.update();
+        if let Some(d) = read::<Destroyed>(&app).first() {
+            return Some(d.cause);
+        }
+    }
+    None
+}
+
+#[test]
+fn crashes_name_what_was_hit() {
+    let layout = city_app().world().resource::<CityLayout>().clone();
+    let (lo, hi) = layout
+        .buildings
+        .iter()
+        .map(|b| b.bounds())
+        .max_by(|a, b| a.1.y.total_cmp(&b.1.y))
+        .unwrap();
+    let in_building = Vec3::new((lo.x + hi.x) / 2.0, hi.y * 0.5, (lo.z + hi.z) / 2.0);
+    assert_eq!(
+        crash_cause_at(in_building),
+        Some(DestroyCause::Crash(super::CrashInto::Building))
+    );
+
+    // Centre of a river cell between two street lines, at the water.
+    let lines = &layout.lines;
+    let &(gx, gz) = layout
+        .river
+        .iter()
+        .find(|(gx, gz)| *gx > 0 && *gz > 0 && *gx < lines[0].len() && *gz < lines[1].len())
+        .expect("an inner river cell");
+    let x = (lines[0][gx - 1].max() + lines[0][gx].min()) / 2.0;
+    let z = (lines[1][gz - 1].max() + lines[1][gz].min()) / 2.0;
+    let depth = layout.config.river.as_ref().unwrap().water_depth;
+    assert_eq!(
+        crash_cause_at(Vec3::new(x, -depth + 0.5, z)),
+        Some(DestroyCause::Crash(super::CrashInto::Water))
+    );
+}
+
+#[test]
+fn next_target_key_cycles_through_the_enemies_in_the_cone() {
+    let mut app = app();
+    let jet = spawn_player(&mut app, high_up());
+    let ahead = |degrees: f32| {
+        let dir = Quat::from_rotation_y(degrees.to_radians()) * Vec3::NEG_Z;
+        high_up().translation + dir * 1_200.0
+    };
+    // Nearest the nose first: centre, then 8° left, then 15° right.
+    let centre = spawn_target(&mut app, ahead(0.0));
+    let left = spawn_target(&mut app, ahead(8.0));
+    let right = spawn_target(&mut app, ahead(-15.0));
+    spawn_target(&mut app, ahead(90.0)); // outside the cone
+    app.update();
+    let target = |app: &App| app.world().get::<LockOn>(jet).unwrap().target();
+    assert_eq!(target(&app), Some(centre), "starts on the nose");
+
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        press_key(&mut app, KeyCode::Tab);
+        seen.push(target(&app).unwrap());
+    }
+    assert_eq!(seen, vec![left, right, centre, left]);
+    // The right Alt/Option key does the same.
+    press_key(&mut app, KeyCode::AltRight);
+    assert_eq!(target(&app), Some(right));
+}
+
+#[test]
+fn after_a_missile_launch_the_seeker_moves_to_the_next_enemy() {
+    let mut app = app();
+    let jet = spawn_player(&mut app, high_up());
+    let first = spawn_target(&mut app, Vec3::new(0.0, 1_000.0, -1_500.0));
+    let second = spawn_target(&mut app, Vec3::new(200.0, 1_000.0, -1_600.0));
+    run_for(&mut app, 1.2);
+    assert_eq!(
+        app.world().get::<LockOn>(jet).unwrap().state,
+        LockState::Locked { target: first }
+    );
+    launch_at(&mut app, jet, None);
+    app.update();
+    app.update();
+    assert_eq!(
+        app.world().get::<LockOn>(jet).unwrap().target(),
+        Some(second),
+        "seeker moved on"
+    );
+    let missile_target = app
+        .world_mut()
+        .query::<&super::Missile>()
+        .single(app.world())
+        .unwrap()
+        .target;
+    assert_eq!(missile_target, Some(first));
+}
+
+/// Presses and releases `key` over one update.
+fn press_key(app: &mut App, key: KeyCode) {
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(key);
+    app.update();
+    let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keys.release(key);
+    keys.clear();
 }

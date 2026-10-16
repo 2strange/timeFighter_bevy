@@ -15,7 +15,8 @@ A modern jet fighter is pulled through a time vortex over the Bermuda Triangle a
 | Q / E or Left / Right | yaw |
 | Up / Down | throttle |
 | Space / left mouse button | gun |
-| Right Shift or Right Alt (Option) / right mouse button | missile (homes on a locked target) |
+| Right Shift / right mouse button | missile (homes on a locked target) |
+| Tab or Right Alt (Option) | next target (also automatic after a missile launch) |
 | Enter or R | fly again after the round is over |
 | P / Esc | pause (also when the window loses focus) |
 | I | show / hide the key help (shown for a few seconds when a round starts) |

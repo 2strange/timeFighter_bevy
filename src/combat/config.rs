@@ -139,15 +139,20 @@ impl Default for CombatConfig {
     }
 }
 
-/// Fire buttons. Austin flies with the left hand on WASD/QE and the right
-/// hand on the arrow keys, so each hand gets one weapon it reaches without
-/// moving: the left thumb holds Space for the gun, the right thumb or
-/// pinky fires a missile (Right Shift or Right Alt/Option, both next to
-/// the arrow keys on Mac and PC keyboards). Mouse buttons work as well.
+/// Weapon buttons for two-handed flying without moving a hand: left hand
+/// on WASD/QE, right hand on the arrow keys.
+/// - Gun: Space under the left thumb.
+/// - Missile: Right Shift under the right pinky, next to the arrow keys.
+/// - Next target: Tab under the left pinky (next to Q), or Right Alt/Option
+///   under the right thumb, so either hand can switch targets. The page
+///   suppresses the browser's own Tab handling.
+///
+/// Mouse buttons work for gun and missile as well.
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct CombatKeys {
     pub gun: Vec<KeyCode>,
     pub missile: Vec<KeyCode>,
+    pub next_target: Vec<KeyCode>,
     pub gun_mouse: Vec<MouseButton>,
     pub missile_mouse: Vec<MouseButton>,
 }
@@ -156,9 +161,32 @@ impl Default for CombatKeys {
     fn default() -> Self {
         Self {
             gun: vec![KeyCode::Space],
-            missile: vec![KeyCode::ShiftRight, KeyCode::AltRight],
+            missile: vec![KeyCode::ShiftRight],
+            next_target: vec![KeyCode::Tab, KeyCode::AltRight],
             gun_mouse: vec![MouseButton::Left],
             missile_mouse: vec![MouseButton::Right],
+        }
+    }
+}
+
+/// Short label of a key as printed on Mac and PC keyboards.
+pub fn key_label(key: KeyCode) -> String {
+    match key {
+        KeyCode::Space => "Space".into(),
+        KeyCode::Tab => "Tab".into(),
+        KeyCode::Enter => "Enter".into(),
+        KeyCode::ShiftRight => "R-Shift".into(),
+        KeyCode::ShiftLeft => "L-Shift".into(),
+        KeyCode::AltRight => "R-Alt".into(),
+        KeyCode::AltLeft => "L-Alt".into(),
+        KeyCode::ControlRight => "R-Ctrl".into(),
+        KeyCode::ControlLeft => "L-Ctrl".into(),
+        other => {
+            let name = format!("{other:?}");
+            name.strip_prefix("Key")
+                .or_else(|| name.strip_prefix("Digit"))
+                .unwrap_or(&name)
+                .to_string()
         }
     }
 }

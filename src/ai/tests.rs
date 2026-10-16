@@ -10,8 +10,8 @@ use super::{
 };
 use crate::{
     combat::{
-        CombatConfig, CombatPlugin, DestroyCause, Destroyed, Health, LockOn, LockState, Team,
-        Trigger,
+        CombatConfig, CombatPlugin, CrashInto, DestroyCause, Destroyed, Health, LockOn, LockState,
+        Team, Trigger,
     },
     flight::{FlightConfig, FlightInput, FlightPlugin, FlightState, PlayerAircraft},
     physics::{Layer, PhysicsPlugin, aircraft_body},
@@ -320,7 +320,7 @@ fn enemy_flying_into_a_building_crashes() {
             .copied());
     }
     let crash = crash.expect("enemy did not crash");
-    assert_eq!(crash.cause, DestroyCause::Crash);
+    assert_eq!(crash.cause, DestroyCause::Crash(CrashInto::Obstacle));
     assert!(app.world().get_entity(enemy).is_err(), "wreck removed");
 }
 

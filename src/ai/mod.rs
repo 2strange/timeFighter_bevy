@@ -20,8 +20,8 @@ pub use visuals::EnemyVisualsPlugin;
 use crate::{
     aircraft::AircraftModel,
     combat::{
-        AircraftVelocity, CombatRng, CombatSystems, Gun, GunSpec, Health, Hitbox, Missile, Team,
-        Trigger,
+        AircraftType, AircraftVelocity, CombatRng, CombatSystems, Gun, GunSpec, Health, Hitbox,
+        Missile, Team, Trigger,
     },
     flight::{FlightSystems, PlayerAircraft},
     physics::Layer,
@@ -249,6 +249,7 @@ pub fn enemy_bundle(kind: EnemyKind, skill: PilotSkill, transform: Transform) ->
             bank: 0.0,
         },
         Team::Enemy,
+        AircraftType(kind.display_name()),
         Health::full(stats.health),
         Hitbox {
             radius: stats.hitbox_radius,

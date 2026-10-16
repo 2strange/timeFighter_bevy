@@ -5,7 +5,8 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
 use super::{
-    AircraftVelocity, CombatKeys, CombatRng, GunSpec, Health, LockOn, MissileSpec, ShotFired, Team,
+    AircraftVelocity, CombatKeys, CombatRng, GunSpec, Health, LockOn, LockState, MissileSpec,
+    ShotFired, Team,
 };
 use crate::{
     flight::PlayerAircraft,
@@ -220,11 +221,11 @@ pub(super) fn launch_missiles(
         &Team,
         &Transform,
         Option<&AircraftVelocity>,
-        Option<&LockOn>,
+        Option<&mut LockOn>,
     )>,
 ) {
     let dt = frame_dt(&time);
-    for (shooter, mut rack, mut trigger, team, transform, velocity, lock) in &mut launchers {
+    for (shooter, mut rack, mut trigger, team, transform, velocity, mut lock) in &mut launchers {
         rack.reload = (rack.reload - dt).max(0.0);
         if !std::mem::take(&mut trigger.missile) || rack.count == 0 || rack.reload > 0.0 {
             continue;
@@ -236,6 +237,12 @@ pub(super) fn launch_missiles(
         let base_velocity = velocity.map_or(Vec3::ZERO, |v| v.0);
         // Leaves along the nose at the jet's own speed along it plus a kick.
         let speed = base_velocity.dot(forward).max(0.0) + rack.spec.launch_kick;
+        // The missile takes the locked target; the seeker moves on to the
+        // next one, so a second missile goes to another enemy.
+        let target = lock.as_deref().and_then(LockOn::locked_target);
+        if let (Some(_), Some(lock)) = (target, lock.as_mut()) {
+            lock.state = LockState::Searching;
+        }
         let position = transform.transform_point(rack.spec.launch_offset);
         commands.spawn((
             physics::projectile(
@@ -255,7 +262,7 @@ pub(super) fn launch_missiles(
             },
             Missile {
                 spec: rack.spec,
-                target: lock.and_then(LockOn::locked_target),
+                target,
                 speed,
             },
         ));

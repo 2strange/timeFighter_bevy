@@ -1,20 +1,24 @@
-//! Meshes for tracers and missiles. Visual only: the simulation in
-//! [`super::CombatPlugin`] never reads them.
+//! Meshes for tracers, missiles and explosions. Visual only: the
+//! simulation in [`super::CombatPlugin`] never reads them.
+//!
+//! Explosions are a few low-poly spheres and cubes animated by scale and
+//! position with shared unlit materials: no particles, no compute, cheap
+//! on WebGL2.
 
 use std::f32::consts::FRAC_PI_2;
 
 use bevy::{light::NotShadowCaster, prelude::*};
 use bevy_rapier3d::prelude::Velocity;
 
-use super::{Missile, Munition, Team, Weapon, weapons::heading};
+use super::{Effect, EffectKind, Missile, Munition, Team, Weapon, weapons::heading};
 
 pub struct CombatVisualsPlugin;
 
 impl Plugin for CombatVisualsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_visuals)
-            .add_systems(PostUpdate, dress_projectiles)
-            .add_systems(Update, point_missiles);
+        app.add_systems(Startup, (load_visuals, load_effect_visuals))
+            .add_systems(PostUpdate, (dress_projectiles, dress_effects))
+            .add_systems(Update, (point_missiles, animate_effects));
     }
 }
 
@@ -124,6 +128,139 @@ fn point_missiles(
         for child in children {
             if let Ok(mut model) = models.get_mut(*child) {
                 model.rotation = local;
+            }
+        }
+    }
+}
+
+#[derive(Resource)]
+struct EffectVisuals {
+    ball: Handle<Mesh>,
+    cube: Handle<Mesh>,
+    fire: Handle<StandardMaterial>,
+    core: Handle<StandardMaterial>,
+    smoke: Handle<StandardMaterial>,
+    debris: Handle<StandardMaterial>,
+}
+
+fn load_effect_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let unlit = |color: Color| StandardMaterial {
+        base_color: color,
+        unlit: true,
+        ..default()
+    };
+    commands.insert_resource(EffectVisuals {
+        // Unit diameter, low poly.
+        ball: meshes.add(Sphere::new(0.5).mesh().ico(1).expect("small subdivision")),
+        cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+        fire: materials.add(unlit(Color::srgb(1.0, 0.5, 0.12))),
+        core: materials.add(unlit(Color::srgb(1.0, 0.92, 0.6))),
+        smoke: materials.add(StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            ..unlit(Color::srgba(0.12, 0.11, 0.1, 0.65))
+        }),
+        debris: materials.add(unlit(Color::srgb(0.08, 0.08, 0.08))),
+    });
+}
+
+/// Parts of an explosion, animated from the parent effect's progress.
+#[derive(Component, Clone, Copy)]
+enum EffectPart {
+    Fire,
+    Core,
+    Smoke,
+    /// Flies off with this velocity (m/s), falling.
+    Debris(Vec3),
+}
+
+fn dress_effects(
+    mut commands: Commands,
+    visuals: Option<Res<EffectVisuals>>,
+    added: Query<(Entity, &Effect), Added<Effect>>,
+) {
+    let Some(visuals) = visuals else {
+        return;
+    };
+    for (entity, effect) in &added {
+        let mut parts = vec![
+            (EffectPart::Fire, visuals.fire.clone(), visuals.ball.clone()),
+            (EffectPart::Core, visuals.core.clone(), visuals.ball.clone()),
+        ];
+        if effect.kind != EffectKind::Spark {
+            parts.push((
+                EffectPart::Smoke,
+                visuals.smoke.clone(),
+                visuals.ball.clone(),
+            ));
+            // Debris in a fixed star pattern: looks random enough, costs no RNG.
+            let speed = effect.kind.size() * 2.5;
+            for i in 0..8 {
+                let angle = i as f32 * std::f32::consts::TAU / 8.0;
+                let up = 0.4 + 0.5 * ((i * 3) % 4) as f32 / 3.0;
+                let dir = Vec3::new(angle.cos(), up, angle.sin()).normalize();
+                parts.push((
+                    EffectPart::Debris(dir * speed),
+                    visuals.debris.clone(),
+                    visuals.cube.clone(),
+                ));
+            }
+        }
+        commands
+            .entity(entity)
+            .insert(Visibility::default())
+            .with_children(|effect| {
+                for (part, material, mesh) in parts {
+                    effect.spawn((
+                        part,
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        Transform::from_scale(Vec3::ZERO),
+                        NotShadowCaster,
+                    ));
+                }
+            });
+    }
+}
+
+fn animate_effects(
+    time: Res<Time>,
+    effects: Query<(&Effect, &Children)>,
+    mut parts: Query<(&mut EffectPart, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+    for (effect, children) in &effects {
+        let size = effect.kind.size();
+        let t = effect.progress();
+        // Fireball: swells fast, then collapses by 60 % of the lifetime.
+        let fire = if t < 0.12 {
+            t / 0.12
+        } else {
+            (1.0 - (t - 0.12) / 0.48).max(0.0)
+        };
+        for child in children {
+            let Ok((mut part, mut transform)) = parts.get_mut(*child) else {
+                continue;
+            };
+            match &mut *part {
+                EffectPart::Fire => transform.scale = Vec3::splat(size * fire),
+                EffectPart::Core => transform.scale = Vec3::splat(size * 0.6 * fire),
+                EffectPart::Smoke => {
+                    // Grows, drifts up and thins out at the end.
+                    let grow = (t / 0.5).min(1.0);
+                    let fade = ((1.0 - t) / 0.3).min(1.0);
+                    transform.scale = Vec3::splat(size * 1.5 * grow * fade);
+                    transform.translation.y = size * 0.6 * t;
+                }
+                EffectPart::Debris(velocity) => {
+                    velocity.y -= 9.81 * dt;
+                    transform.translation += *velocity * dt;
+                    transform.rotate_x(6.0 * dt);
+                    transform.scale = Vec3::splat(size * 0.06 * (1.0 - t));
+                }
             }
         }
     }
