@@ -53,18 +53,22 @@ pub enum AircraftModel {
     Mig29,
     Tu2,
     F4uCorsair,
+    /// The enemy fighter: "Low Poly Spitfire" (simplified to 5.5k triangles).
     Spitfire,
+    /// The first Spitfire model, kept in the showroom for comparison.
+    SpitfireClassic,
     B17,
     Lancaster,
 }
 
 impl AircraftModel {
-    pub const ALL: [AircraftModel; 7] = [
+    pub const ALL: [AircraftModel; 8] = [
         AircraftModel::F14Tomcat,
         AircraftModel::Mig29,
         AircraftModel::Tu2,
         AircraftModel::F4uCorsair,
         AircraftModel::Spitfire,
+        AircraftModel::SpitfireClassic,
         AircraftModel::B17,
         AircraftModel::Lancaster,
     ];
@@ -77,7 +81,8 @@ impl AircraftModel {
             AircraftModel::Mig29 => "mig_29",
             AircraftModel::Tu2 => "tupolev_tu_2",
             AircraftModel::F4uCorsair => "f4u_corsair",
-            AircraftModel::Spitfire => "spitfire",
+            AircraftModel::Spitfire => "spitfire_lp",
+            AircraftModel::SpitfireClassic => "spitfire",
             AircraftModel::B17 => "b17",
             AircraftModel::Lancaster => "lancaster",
         }
@@ -90,6 +95,7 @@ impl AircraftModel {
             AircraftModel::Tu2 => "Tu-2",
             AircraftModel::F4uCorsair => "F4U Corsair",
             AircraftModel::Spitfire => "Spitfire",
+            AircraftModel::SpitfireClassic => "Spitfire (first model)",
             AircraftModel::B17 => "B-17",
             AircraftModel::Lancaster => "Lancaster",
         }
@@ -103,7 +109,8 @@ impl AircraftModel {
             AircraftModel::Mig29 => ([-5.82, -1.63, -8.65], [5.82, 2.36, 8.65]),
             AircraftModel::Tu2 => ([-9.40, -2.23, -6.90], [9.40, 1.72, 6.90]),
             AircraftModel::F4uCorsair => ([-5.35, -1.49, -5.10], [5.35, 2.31, 5.10]),
-            AircraftModel::Spitfire => ([-4.91, -1.83, -4.56], [4.91, 1.62, 4.56]),
+            AircraftModel::Spitfire => ([-5.09, -0.84, -4.56], [5.09, 1.64, 4.56]),
+            AircraftModel::SpitfireClassic => ([-4.91, -1.83, -4.56], [4.91, 1.62, 4.56]),
             AircraftModel::B17 => ([-14.93, -2.38, -11.33], [15.31, 3.01, 11.33]),
             AircraftModel::Lancaster => ([-15.23, -3.145, -10.56], [15.24, 2.44, 10.56]),
         };
