@@ -14,6 +14,11 @@ mod test_support;
 
 use bevy::prelude::*;
 
+/// Longest time step (s) the simulation advances at once (flight model and
+/// physics). Below 10 fps the game runs in slow motion instead of letting
+/// things jump, e.g. after a hitch or a background tab.
+pub const MAX_STEP: f32 = 0.1;
+
 /// Everything the game adds on top of Bevy's `DefaultPlugins`.
 pub struct GamePlugin;
 
