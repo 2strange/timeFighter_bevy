@@ -221,3 +221,20 @@ fn other_keys_held_at_start_do_not_block_the_weapons() {
     app.update();
     assert!(!app.world().resource::<TriggerHold>().is_holding());
 }
+
+#[test]
+fn choosing_protect_in_the_menu_starts_a_protect_round() {
+    use crate::game_state::{GameMode, Mission};
+
+    let mut app = game();
+    go_to(&mut app, RowId::Mode);
+    tap(&mut app, KeyCode::ArrowRight); // Protect
+    tap(&mut app, KeyCode::Enter);
+    for _ in 0..3 {
+        app.update();
+    }
+    assert!(!menu(&app).open);
+    // The round that actually runs, not just the settings resource.
+    assert_eq!(app.world().resource::<Mission>().mode, GameMode::Protect);
+    assert!(app.world().resource::<Round>().is_running());
+}
