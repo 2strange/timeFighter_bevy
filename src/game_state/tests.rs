@@ -762,3 +762,45 @@ fn damage_still_queued_from_the_old_round_does_not_hit_the_new_city() {
     let health = app.world().resource::<crate::world::damage::CityHealth>();
     assert_eq!(health.center_intact_ratio, 1.0);
 }
+
+#[test]
+fn missiles_are_counted_per_mode() {
+    let protect: Vec<u32> = Difficulty::PRESETS
+        .iter()
+        .map(|d| d.params_for(GameMode::Protect).missiles)
+        .collect();
+    assert_eq!(protect, vec![20, 16, 16, 12, 12]);
+    for difficulty in Difficulty::PRESETS {
+        assert_eq!(
+            difficulty.params_for(GameMode::Hunt),
+            difficulty.params(),
+            "Hunt unchanged"
+        );
+    }
+    let custom = Difficulty::Custom(crate::game_state::DifficultyParams {
+        missiles: 7,
+        ..default()
+    });
+    assert_eq!(custom.params_for(GameMode::Protect).missiles, 7);
+}
+
+#[test]
+fn a_protect_round_arms_the_jet_with_the_protect_missiles() {
+    let (mut app, jet) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        protect(Difficulty::Normal),
+        true,
+    );
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 16);
+    app.insert_resource(GameSettings {
+        difficulty: Difficulty::Normal,
+        ..default()
+    });
+    app.world_mut().write_message(RestartRound);
+    app.update();
+    assert_eq!(
+        app.world().get::<MissileRack>(jet).unwrap().count,
+        8,
+        "Hunt"
+    );
+}

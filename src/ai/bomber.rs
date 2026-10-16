@@ -115,6 +115,7 @@ pub fn bomber_bundle(
         Health::full(stats.health),
         Hitbox {
             radius: stats.hitbox_radius,
+            gun_radius: kind.gun_radius(),
         },
         AircraftVelocity(transform.forward() * stats.cruise_speed),
         Turrets::new(stats.gun, TURRET_RANGE, mounts),

@@ -91,19 +91,18 @@ pub fn projectile_hits(
     }
 }
 
-/// Proximity fuses: a missile goes off when its path since the last frame
-/// passes within fuse range of an aircraft of the other side. It is then
-/// spent like a physics hit, so it cannot hit twice.
-pub fn missile_fuses(
+/// Hits by nearness: a missile's proximity fuse goes off when its path
+/// since the last frame passes within fuse range of an aircraft of the
+/// other side; a gun round hits when its path crosses the aircraft's gun
+/// sphere (its silhouette). The projectile is then spent like a physics
+/// hit, so it cannot hit twice.
+pub fn proximity_hits(
     mut commands: Commands,
-    missiles: Query<(Entity, &Munition, &Transform), Without<ProjectileSpent>>,
+    projectiles: Query<(Entity, &Munition, &Transform), Without<ProjectileSpent>>,
     targets: Query<(Entity, &Team, &Hitbox, &Transform, Option<&Health>)>,
     mut hits: MessageWriter<Hit>,
 ) {
-    for (entity, munition, transform) in &missiles {
-        if munition.fuse_radius <= 0.0 {
-            continue;
-        }
+    for (entity, munition, transform) in &projectiles {
         let from = munition.last_position;
         let to = transform.translation;
         let closest = targets
@@ -112,7 +111,14 @@ pub fn missile_fuses(
                 **team != munition.team && !health.is_some_and(|h| h.is_dead())
             })
             .filter_map(|(target, _, hitbox, target_tf, _)| {
-                let reach = hitbox.radius + munition.fuse_radius;
+                let reach = if munition.fuse_radius > 0.0 {
+                    hitbox.radius + munition.fuse_radius
+                } else {
+                    hitbox.gun_radius
+                };
+                if reach <= 0.0 {
+                    return None;
+                }
                 sweep_hits_sphere(from, to, target_tf.translation, reach)
                     .map(|point| (target, point, from.distance_squared(point)))
             })

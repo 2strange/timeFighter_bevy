@@ -284,7 +284,7 @@ fn start_round(
     // The whole city stands again. Applies this frame: the start runs
     // before the city's damage systems.
     repair.write(RepairCity);
-    let params = settings.difficulty.params().clamped();
+    let params = settings.difficulty.params_for(settings.mode).clamped();
     combat.player_missiles = params.missiles;
     combat.player_gun_unlimited = params.unlimited_gun;
     combat.lock.time = params.lock_time;

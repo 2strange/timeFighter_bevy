@@ -107,6 +107,13 @@ impl EnemyKind {
         }
     }
 
+    /// Gun rounds within this distance of the centre hit (m): half the
+    /// model's span, so the whole silhouette counts, wings included, and a
+    /// bit above and below it (arcade).
+    pub fn gun_radius(self) -> f32 {
+        0.5 * self.model().size().span()
+    }
+
     /// Bombers fly bomb runs at the city; fighters fight.
     pub fn is_bomber(self) -> bool {
         matches!(self, EnemyKind::Lancaster | EnemyKind::B17)
@@ -431,6 +438,7 @@ pub fn enemy_bundle(
         Health::full(stats.health),
         Hitbox {
             radius: stats.hitbox_radius,
+            gun_radius: kind.gun_radius(),
         },
         AircraftVelocity(transform.forward() * stats.cruise_speed),
         Gun::new(stats.gun, None),
