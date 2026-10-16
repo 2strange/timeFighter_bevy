@@ -1,56 +1,55 @@
 # TimeFighter
 
-A small arcade flight-combat game written in Rust with [Bevy](https://bevyengine.org), playable in the browser (WebAssembly).
+An arcade flight-combat game built with Rust and [Bevy](https://bevyengine.org), playable in the browser through WebAssembly.
 
-A modern jet fighter is pulled through a time vortex over the Bermuda Triangle and lands in the middle of a World War II bomber raid. Defend the city with machine guns, guided missiles and bombs.
+**Play:** [timefighter.trendgegner.com](https://timefighter.trendgegner.com)
 
-**Status:** early development.
+## Story
 
-## Start menu
+A modern jet takes off from its air base, flies into a strange storm, and is struck by a flash of lightning. It emerges in a parallel timeline where the neighbouring city is under attack by propeller-era bombers and fighters.
 
-The game opens in a start menu: mode (Hunt; Protect and Battle are coming),
-difficulty from Super Easy to Insane or Custom (missiles, enemies, flight
-size, enemy speed and aim, unlimited gun), and day or evening light. Arrow
-keys and Enter or the mouse; the browser remembers the choice.
+## Modes and difficulty
+
+- **Hunt:** playable now.
+- **Protect:** coming soon.
+- **Battle:** coming soon.
+
+Choose from Super Easy, Easy, Normal, Hard, Insane, or Custom. Custom mode lets you tune missiles, enemy count, flight size, enemy speed and accuracy, and unlimited machine-gun ammunition.
 
 ## Controls
 
 | Key | Action |
-|---|---|
-| W / S | pitch (W = nose down) |
-| A / D | roll |
-| Q / E or Left / Right | yaw |
-| Up / Down | throttle |
-| Space / left mouse button | gun |
-| Right Shift / right mouse button | missile (homes on a locked target) |
-| Tab or Right Alt (Option) | next target (also automatic after a missile launch) |
-| Enter or R | fly again after the round is over |
-| M | back to the start menu after a round |
-| P / Esc | pause (also when the window loses focus) |
-| I | show / hide the key help (shown for a few seconds when a round starts) |
+| --- | --- |
+| W / S | Pitch (W = nose down) |
+| A / D | Roll |
+| Q / E or Left / Right | Yaw |
+| Up / Down | Throttle |
+| Space / left mouse button | Machine gun |
+| Right Shift / right mouse button | Missile (homes on a locked target) |
+| Tab or Right Alt (Option) | Next target (also automatic after a missile launch) |
+| Enter or R | Fly again after a round |
+| M | Return to the start menu after a round |
+| P / Esc | Pause (also when the window loses focus) |
+| I | Show or hide key help (shown briefly when a round starts) |
 
-## Building
+## How it was built
+
+The game idea, architecture, and final sign-off are by Torsten Wetzel ([2strange](https://github.com/2strange) / [trendgegner](https://trendgegner.com)). The code was written by his team of Claude and Codex AI agents working in parallel, with cross-reviews and headless tests: Bob (lead), Maverick (flight, physics, build), Iceman (world), Goose (combat, AI, HUD), Marvin (tests, CI), and Riker (review).
+
+## Architecture
+
+The game is split into Bevy ECS plugins for flight, camera, Rapier physics with continuous collision detection (CCD), world and city generation, combat, AI, HUD, game state, and menus. One unit is one metre, Y is up, and aircraft point nose-first along −Z. Models are normalised once during import with `tools/normalize-aircraft`; visuals and collision shapes remain separate. Gameplay logic is covered by headless tests using `MinimalPlugins`.
+
+## Building locally
+
+Install the `wasm32-unknown-unknown` target and the `wasm-bindgen-cli` version pinned in `Cargo.lock`, then run:
 
 ```sh
-cargo test                  # headless tests, no window or GPU needed
-cargo run                   # native build
-scripts/build-web.sh        # browser build into dist/
+scripts/build-web.sh
 ```
 
-The browser build needs `rustup target add wasm32-unknown-unknown` and
-`wasm-bindgen-cli` in exactly the version pinned in `Cargo.lock`.
+Serve `dist/` with any static-file server.
 
-## Conventions
+## License
 
-- 1 unit = 1 metre, +Y up, aircraft noses point along −Z.
-- Gameplay logic lives in plugins that run headless, so it is tested
-  with `MinimalPlugins` without a renderer.
-- Bevy is pinned to an exact version.
-
-## Aircraft models
-
-The aircraft in `assets/aircraft/` are third-party models under CC-BY-4.0,
-normalised once by `tools/normalize-aircraft`. The browser build has an
-aircraft showroom page (`showroom.html`, same WebAssembly file) showing all
-models side by side with scale bars; natively run with `--showroom`. Authors and sources are listed
-in [`assets/aircraft/CREDITS.md`](assets/aircraft/CREDITS.md).
+The code is available under the [MIT License](LICENSE). Aircraft models are licensed separately under CC-BY-4.0; see the [aircraft credits](assets/aircraft/CREDITS.md) for authors and sources.
