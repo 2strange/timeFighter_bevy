@@ -730,6 +730,7 @@ fn spawn_flights(app: &mut App, flights: u32) -> Vec<Entity> {
                         slot,
                         offset,
                         holding: super::FlightGroup::holding_point(lead, 2_200.0),
+                        escort: None,
                     },
                 ))
                 .id();
@@ -872,6 +873,7 @@ fn spawn_bomber_flight(app: &mut App, flight: u32) -> Vec<Entity> {
                         slot,
                         offset,
                         holding: Vec3::ZERO,
+                        escort: None,
                     },
                 ))
                 .id()

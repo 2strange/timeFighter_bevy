@@ -501,6 +501,10 @@ pub fn enemy_bundle(
     )
 }
 
+/// Escorts waiting for an attack slot circle this high above their
+/// bombers (m).
+const ESCORT_HEIGHT: f32 = 150.0;
+
 /// Enemy thinking and flying, after the player moved and before combat
 /// aims and fires.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -556,6 +560,7 @@ fn fly_enemies(
     >,
     missiles: Query<(&Missile, &Transform), Without<Enemy>>,
     mut hits: MessageReader<Hit>,
+    bombers: Query<(&FlightGroup, &Transform), (With<BomberPilot>, Without<EnemyPilot>)>,
     mut enemies: Query<(
         Entity,
         &Enemy,
@@ -606,6 +611,18 @@ fn fly_enemies(
         |(_, _, _, group, pilot, _, tf, velocity, _)| (group, pilot.attacking, tf, velocity.0),
     ));
     let hit: Vec<Entity> = hits.read().map(|h| h.target).collect();
+    // Bomber flights by id: the leading (lowest slot) bomber's position, for
+    // escorts.
+    let mut bomber_flights: bevy::platform::collections::HashMap<u32, (u32, Vec3)> =
+        Default::default();
+    for (group, tf) in &bombers {
+        let entry = bomber_flights
+            .entry(group.id)
+            .or_insert((group.slot, tf.translation));
+        if group.slot <= entry.0 {
+            *entry = (group.slot, tf.translation);
+        }
+    }
 
     for (
         entity,
@@ -687,6 +704,15 @@ fn fly_enemies(
         // Without an attack slot: wait with the flight (still breaking
         // when threatened, see `think`).
         if !pilot.attacking && pilot.mode == PilotMode::Pursue {
+            // Escorts circle their bombers, above them, while they fly.
+            let escorting = group.and_then(|g| {
+                let (_, bombers_at) = bomber_flights.get(&g.escort?)?;
+                Some(FlightGroup {
+                    holding: *bombers_at + Vec3::Y * ESCORT_HEIGHT,
+                    ..*g
+                })
+            });
+            let group = escorting.as_ref().or(group);
             let (direction, speed) = tactics::holding_direction(
                 group,
                 group.and_then(|g| leaders.get(&g.id)),

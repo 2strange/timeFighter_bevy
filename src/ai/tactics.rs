@@ -32,6 +32,8 @@ pub struct FlightGroup {
     pub offset: Vec3,
     /// Centre of the holding circle.
     pub holding: Vec3,
+    /// Escorts circle this bomber flight (its id) instead, while it flies.
+    pub escort: Option<u32>,
 }
 
 impl FlightGroup {
