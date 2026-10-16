@@ -11,9 +11,13 @@ use super::{
     hits::sweep_hits_sphere,
 };
 use crate::{
-    ai::{EnemyKind, enemy_body},
+    aircraft::AircraftModel,
     flight::{FlightState, PlayerAircraft},
-    physics::{Layer, PhysicsPlugin, aircraft_body},
+    physics::{Layer, PhysicsPlugin, ProjectileHit, aircraft_body},
+    world::{
+        CityLayout, CityPlugin,
+        colliders::{CityBuilding, CityCollidersPlugin},
+    },
 };
 
 const FPS: f64 = 60.0;
@@ -64,7 +68,7 @@ fn spawn_target(app: &mut App, position: Vec3) -> Entity {
             Health::full(50.0),
             Hitbox { radius: 5.5 },
             AircraftVelocity::default(),
-            enemy_body(EnemyKind::Spitfire),
+            AircraftModel::Spitfire.body(Layer::Enemy),
             Transform::from_translation(position),
         ))
         .id()
@@ -439,4 +443,69 @@ fn flying_into_the_world_destroys_the_player() {
     assert_eq!(crashes.len(), 1, "{crashes:?}");
     assert_eq!(crashes[0].cause, DestroyCause::Crash);
     assert_eq!(crashes[0].team, Team::Player);
+}
+
+/// Hits recorded in `Update`, as the combat code sees them.
+#[derive(Resource, Default)]
+struct WorldHits(Vec<ProjectileHit>);
+
+fn record_hits(mut hits: MessageReader<ProjectileHit>, mut seen: ResMut<WorldHits>) {
+    seen.0.extend(hits.read().copied());
+}
+
+#[test]
+fn a_real_city_building_stops_gun_rounds() {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        PhysicsPlugin,
+        CombatPlugin,
+        CityPlugin,
+        CityCollidersPlugin,
+    ))
+    .init_resource::<ButtonInput<KeyCode>>()
+    .init_resource::<WorldHits>()
+    .add_systems(Update, record_hits)
+    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        1.0 / FPS,
+    )));
+    app.finish();
+    app.update();
+
+    // The tallest building; shoot at it along +X from the street in front
+    // of its west face, with an enemy right behind its east face.
+    let layout = app.world().resource::<CityLayout>().clone();
+    let (lo, hi) = layout
+        .buildings
+        .iter()
+        .map(|b| b.bounds())
+        .max_by(|a, b| a.1.y.total_cmp(&b.1.y))
+        .unwrap();
+    let height = hi.y * 0.3;
+    let z = (lo.z + hi.z) / 2.0;
+    // The shooter has no collider: only its rounds matter here.
+    app.world_mut().spawn((
+        PlayerAircraft,
+        FlightState::default(),
+        Transform::from_xyz(lo.x - 15.0, height, z).looking_to(Vec3::X, Vec3::Y),
+    ));
+    let enemy = spawn_target(&mut app, Vec3::new(hi.x + 30.0, height, z));
+    app.update();
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Space);
+    run_for(&mut app, 1.0);
+
+    assert_eq!(app.world().get::<Health>(enemy).unwrap().current, 50.0);
+    let hits = app.world().resource::<WorldHits>().0.clone();
+    let on_building = hits
+        .iter()
+        .filter(|h| app.world().get::<CityBuilding>(h.target).is_some())
+        .count();
+    assert!(
+        on_building > 10,
+        "{on_building} of {} hits on the building",
+        hits.len()
+    );
 }

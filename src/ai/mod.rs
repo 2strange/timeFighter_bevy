@@ -13,14 +13,13 @@ mod visuals;
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::{
-    ActiveCollisionTypes, ActiveEvents, Ccd, Collider, CollisionEvent, CollisionGroups, RigidBody,
-};
+use bevy_rapier3d::prelude::{CollisionEvent, CollisionGroups};
 
 pub use obstacles::ObstacleMap;
 pub use visuals::EnemyVisualsPlugin;
 
 use crate::{
+    aircraft::AircraftModel,
     combat::{
         AircraftVelocity, CombatRng, CombatSystems, DestroyCause, Destroyed, Gun, GunSpec, Health,
         Hitbox, Missile, Team, Trigger,
@@ -36,12 +35,12 @@ pub enum EnemyKind {
     Spitfire,
 }
 
-/// Size, strength and handling of an enemy type. Metres, seconds, radians.
+/// Strength and handling of an enemy type. Metres, seconds, radians.
+/// Dimensions and collider come from its [`AircraftModel`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EnemyStats {
-    pub length: f32,
-    pub span: f32,
     pub health: f32,
+    /// Sphere for missile proximity fuses (m), about half the span.
     pub hitbox_radius: f32,
     pub min_speed: f32,
     pub cruise_speed: f32,
@@ -56,12 +55,10 @@ pub struct EnemyStats {
 impl EnemyKind {
     pub fn stats(self) -> EnemyStats {
         match self {
-            // Real Spitfire: 9.1 m long, 11.2 m span. Arcade speeds: about
+            // Arcade speeds: about
             // a third of the jet's top speed, but a tighter turn than the
             // jet at speed, so the player wins with energy, not by turning.
             EnemyKind::Spitfire => EnemyStats {
-                length: 9.1,
-                span: 11.2,
                 health: 50.0,
                 hitbox_radius: 5.5,
                 min_speed: 120.0,
@@ -75,8 +72,14 @@ impl EnemyKind {
     }
 
     pub fn display_name(self) -> &'static str {
+        self.model().display_name()
+    }
+
+    /// Normalised model; it also gives the collider, so both share one
+    /// source of dimensions.
+    pub fn model(self) -> AircraftModel {
         match self {
-            EnemyKind::Spitfire => "Spitfire",
+            EnemyKind::Spitfire => AircraftModel::Spitfire,
         }
     }
 }
@@ -201,7 +204,7 @@ pub struct EnemyFlight {
 pub fn enemy_bundle(kind: EnemyKind, transform: Transform) -> impl Bundle {
     let stats = kind.stats();
     (
-        Name::new(kind.display_name()),
+        Name::new(format!("Enemy {}", kind.display_name())),
         Enemy { kind },
         EnemyPilot::default(),
         EnemyFlight {
@@ -216,43 +219,8 @@ pub fn enemy_bundle(kind: EnemyKind, transform: Transform) -> impl Bundle {
         AircraftVelocity(transform.forward() * stats.cruise_speed),
         Gun::new(stats.gun, None),
         Trigger::default(),
-        enemy_body(kind),
+        kind.model().body(Layer::Enemy),
         transform,
-    )
-}
-
-/// Kinematic collision body of an enemy, in its local frame (nose −Z), like
-/// the physics' `aircraft_body` but in the enemy's own size: the AI moves
-/// it, Rapier reports what it touches.
-pub fn enemy_body(kind: EnemyKind) -> impl Bundle {
-    let shape = match kind {
-        // 9.1 m long, 11.2 m span.
-        EnemyKind::Spitfire => Collider::compound(vec![
-            // Fuselage with spinner.
-            (Vec3::ZERO, Quat::IDENTITY, Collider::capsule_z(3.75, 0.8)),
-            // Wing.
-            (
-                Vec3::new(0.0, -0.35, -0.9),
-                Quat::IDENTITY,
-                Collider::cuboid(5.6, 0.2, 1.1),
-            ),
-            // Tailplane and fin.
-            (
-                Vec3::new(0.0, 0.5, 3.7),
-                Quat::IDENTITY,
-                Collider::cuboid(1.65, 0.8, 0.55),
-            ),
-        ]),
-    };
-    (
-        RigidBody::KinematicPositionBased,
-        shape,
-        Ccd::enabled(),
-        Layer::Enemy.groups(),
-        ActiveEvents::COLLISION_EVENTS,
-        // Kinematic bodies ignore static ones by default; crashes into the
-        // world must be reported.
-        ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_STATIC,
     )
 }
 

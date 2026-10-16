@@ -13,7 +13,7 @@ use crate::{
     },
     flight::{FlightConfig, FlightInput, FlightPlugin, FlightState, PlayerAircraft},
     physics::{Layer, PhysicsPlugin, aircraft_body},
-    world::CityPlugin,
+    world::{CityPlugin, colliders::CityCollidersPlugin},
 };
 
 fn app(fps: f64, with_city: bool) -> App {
@@ -30,7 +30,7 @@ fn app(fps: f64, with_city: bool) -> App {
         1.0 / fps,
     )));
     if with_city {
-        app.add_plugins(CityPlugin);
+        app.add_plugins((CityPlugin, CityCollidersPlugin));
     }
     app.finish();
     app.update();
@@ -39,21 +39,28 @@ fn app(fps: f64, with_city: bool) -> App {
 
 /// Player jet at `transform` flying at `speed` with constant `input`.
 fn spawn_player(app: &mut App, transform: Transform, speed: f32, input: FlightInput) -> Entity {
+    let jet = spawn_ghost_player(app, transform, speed, input);
+    app.world_mut()
+        .entity_mut(jet)
+        .insert(aircraft_body(Layer::Player));
+    app.update();
+    jet
+}
+
+/// Like [`spawn_player`] but without a collider: a bait that flies through
+/// buildings without crashing.
+fn spawn_ghost_player(
+    app: &mut App,
+    transform: Transform,
+    speed: f32,
+    input: FlightInput,
+) -> Entity {
     let mut state = FlightState::new(&FlightConfig::default());
     state.speed = speed;
     state.velocity = transform.forward() * speed;
-    let jet = app
-        .world_mut()
-        .spawn((
-            PlayerAircraft,
-            input,
-            state,
-            aircraft_body(Layer::Player),
-            transform,
-        ))
-        .id();
-    app.update();
-    jet
+    app.world_mut()
+        .spawn((PlayerAircraft, input, state, transform))
+        .id()
 }
 
 fn spawn_enemy(app: &mut App, transform: Transform) -> Entity {
@@ -111,16 +118,17 @@ fn river_channel_reads_as_street_level() {
 /// minute. None may come closer to roofs or ground than half
 /// its clearance, and none may crash.
 #[test]
-fn enemies_chasing_a_low_player_never_hit_ground_or_buildings() {
+fn enemies_chasing_a_low_player_never_hit_the_real_city() {
     let mut app = app(30.0, true);
     app.world_mut().resource_mut::<CombatConfig>().player_health = f32::MAX;
     app.update();
     let obstacles = app.world().resource::<ObstacleMap>().clone();
     assert!(obstacles.max_height() > 100.0, "city loaded");
 
-    // Low enough to fly between the towers (this test has no city
-    // colliders), so pursuing it leads right into them.
-    let jet = spawn_player(
+    // Low enough to fly between the towers; without a collider of its own
+    // it does not crash, so pursuing it leads right into them. The city
+    // has its colliders: an enemy touching anything would crash.
+    let jet = spawn_ghost_player(
         &mut app,
         Transform::from_xyz(0.0, 60.0, 600.0),
         180.0,
