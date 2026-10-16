@@ -2,6 +2,8 @@ use std::f32::consts::PI;
 
 use bevy::prelude::*;
 
+use crate::aircraft::AircraftModel;
+
 /// Tunables of the arcade flight model.
 ///
 /// Units: metres, seconds, radians. The defaults reproduce the feel of the
@@ -48,6 +50,10 @@ pub struct FlightConfig {
     pub spawn_position: Vec3,
     /// Spawn pitch (rad); negative = nose down.
     pub spawn_pitch: f32,
+
+    /// Visual model of the player's jet: `None` = the built-in primitive jet,
+    /// `Some(model)` = a normalised glTF model from `assets/aircraft/`.
+    pub player_model: Option<AircraftModel>,
 }
 
 impl Default for FlightConfig {
@@ -73,6 +79,8 @@ impl Default for FlightConfig {
 
             spawn_position: Vec3::new(0.0, 500.0, 800.0),
             spawn_pitch: (-15.0_f32).to_radians(),
+
+            player_model: None,
         }
     }
 }

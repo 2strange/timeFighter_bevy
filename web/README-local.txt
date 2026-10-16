@@ -17,5 +17,6 @@ Controls
     Left / Right  yaw left / right (same as Q / E)
     Up / Down     throttle (50 ... 500 m/s)
     R             reset to spawn
+    M             aircraft showroom (pauses; A/D, W/S, Q/E move the view)
 
 Stop the server with Ctrl+C when you are done.

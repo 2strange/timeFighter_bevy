@@ -28,6 +28,8 @@ bevy = { version = "=0.20.0", default-features = false, features = [
   "bevy_camera",
   "bevy_color",
   "bevy_mesh",
+  "bevy_gltf",
+  "png",
   "bevy_ui",
   "bevy_ui_render",
   "bevy_text",
@@ -36,6 +38,11 @@ bevy = { version = "=0.20.0", default-features = false, features = [
   "ktx2",
   "zstd_rust",
 ] }
+
+[dev-dependencies]
+# Same version and features as Bevy's glTF loader uses, so nothing extra builds.
+gltf = { version = "=1.4.1", default-features = false, features = ["utils"] }
+serde_json = "1"
 
 # Reasonable debug performance without slowing down our own crate's rebuilds.
 [profile.dev]

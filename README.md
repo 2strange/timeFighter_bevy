@@ -15,6 +15,7 @@ A modern jet fighter is pulled through a time vortex over the Bermuda Triangle a
 | Q / E or Left / Right | yaw |
 | Up / Down | throttle |
 | R | reset |
+| M | aircraft showroom (pauses the game) |
 
 ## Building
 
@@ -33,3 +34,9 @@ The browser build needs `rustup target add wasm32-unknown-unknown` and
 - Gameplay logic lives in plugins that run headless, so it is tested
   with `MinimalPlugins` without a renderer.
 - Bevy is pinned to an exact version.
+
+## Aircraft models
+
+The aircraft in `assets/aircraft/` are third-party models under CC-BY-4.0,
+normalised once by `tools/normalize-aircraft`. Authors and sources are listed
+in [`assets/aircraft/CREDITS.md`](assets/aircraft/CREDITS.md).

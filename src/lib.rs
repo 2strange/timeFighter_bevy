@@ -2,6 +2,7 @@
 //!
 //! Conventions: 1 unit = 1 metre, +Y up, aircraft noses point along −Z.
 
+pub mod aircraft;
 pub mod camera;
 pub mod flight;
 pub mod world;
@@ -17,6 +18,7 @@ impl Plugin for GamePlugin {
             flight::FlightPlugin,
             flight::PlayerFlightPlugin,
             camera::ChaseCameraPlugin,
+            aircraft::ShowroomPlugin,
             world::WorldPlugin,
         ));
     }

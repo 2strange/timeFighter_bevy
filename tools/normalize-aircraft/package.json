@@ -1,0 +1,13 @@
+{
+  "name": "normalize-aircraft",
+  "private": true,
+  "description": "Normalises aircraft glTF models to metres, +Y up, nose along -Z.",
+  "type": "module",
+  "scripts": {
+    "normalize": "node normalize.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/functions": "4.5.1"
+  }
+}

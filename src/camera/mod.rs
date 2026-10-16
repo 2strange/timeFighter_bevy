@@ -58,6 +58,11 @@ impl ChaseCameraConfig {
     }
 }
 
+/// Systems that place the camera. Anything overriding the camera view
+/// (e.g. the showroom) runs after this set.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CameraSystems;
+
 /// Marks the camera that follows the player.
 #[derive(Component, Debug, Default)]
 pub struct ChaseCamera {
@@ -71,7 +76,12 @@ impl Plugin for ChaseCameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChaseCameraConfig>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, follow_player.after(FlightSystems::Simulate));
+            .add_systems(
+                Update,
+                follow_player
+                    .in_set(CameraSystems)
+                    .after(FlightSystems::Simulate),
+            );
     }
 }
 

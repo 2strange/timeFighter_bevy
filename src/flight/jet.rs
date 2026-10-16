@@ -10,9 +10,25 @@ use super::{FlightConfig, FlightInput, FlightState, PlayerAircraft};
 pub(super) fn spawn_player_jet(
     mut commands: Commands,
     cfg: Res<FlightConfig>,
+    assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let jet = commands
+        .spawn((
+            Name::new("Player jet"),
+            PlayerAircraft,
+            FlightInput::default(),
+            FlightState::new(&cfg),
+            cfg.spawn_transform(),
+            Visibility::default(),
+        ))
+        .id();
+    if let Some(model) = cfg.player_model {
+        commands.entity(jet).insert(model.scene(&assets));
+        return;
+    }
+
     let body = materials.add(StandardMaterial {
         base_color: Color::srgb(0.55, 0.58, 0.62),
         perceptual_roughness: 0.6,
@@ -82,18 +98,9 @@ pub(super) fn spawn_player_jet(
         ),
     ];
 
-    commands
-        .spawn((
-            Name::new("Player jet"),
-            PlayerAircraft,
-            FlightInput::default(),
-            FlightState::new(&cfg),
-            cfg.spawn_transform(),
-            Visibility::default(),
-        ))
-        .with_children(|jet| {
-            for (mesh, material, transform) in parts {
-                jet.spawn((Mesh3d(mesh), MeshMaterial3d(material), transform));
-            }
-        });
+    commands.entity(jet).with_children(|jet| {
+        for (mesh, material, transform) in parts {
+            jet.spawn((Mesh3d(mesh), MeshMaterial3d(material), transform));
+        }
+    });
 }
