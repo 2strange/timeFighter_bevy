@@ -1,6 +1,7 @@
 //! Coarse height map of everything an aircraft can fly into, for the AI's
 //! terrain look-ahead. Not a collision model: each cell holds the highest
-//! roof that touches it, which is conservative.
+//! roof that touches it, which is conservative. Nothing counts below street
+//! level: the sunken river channel reads as 0 m, so pilots never dive into it.
 
 use bevy::prelude::*;
 

@@ -62,8 +62,10 @@ pub fn detect_projectile_hits(
     }
 }
 
-/// Interim crash detection: the flight model holds the jet at its minimum
-/// altitude, so touching it means the jet hit the ground.
+/// INTERIM crash detection until the physics colliders: the flight model
+/// holds the jet at its minimum altitude above the ground plane, so touching
+/// it counts as a crash. Ignores buildings; the river channel below street
+/// level is fatal.
 pub fn detect_player_ground_crash(
     cfg: Res<CombatConfig>,
     flight: Option<Res<FlightConfig>>,

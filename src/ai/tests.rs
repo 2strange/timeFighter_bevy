@@ -61,6 +61,31 @@ fn obstacle_map_holds_the_highest_roof_per_cell() {
     assert_eq!(map.height_at(120.0, 80.0), 60.0);
     assert_eq!(map.height_at(-500.0, 0.0), 0.0, "outside the grid");
     assert_eq!(map.height_at(120.0, 120.0), 0.0, "empty cell");
+
+    // Quay walls and water below street level read as street level.
+    let channel = ObstacleMap::from_boxes(
+        50.0,
+        [(Vec3::new(0.0, -20.0, 0.0), Vec3::new(100.0, 0.0, 100.0))],
+    );
+    assert_eq!(channel.height_at(50.0, 50.0), 0.0);
+}
+
+#[test]
+fn river_channel_reads_as_street_level() {
+    let layout = crate::world::CityLayout::generate(&crate::world::CityConfig::default());
+    assert!(!layout.river.is_empty(), "the default city has a river");
+    let map = ObstacleMap::from_layout(&layout);
+    let extent = layout.config.grid_half_extent;
+    let steps = (2.0 * extent / ObstacleMap::CELL) as i32;
+    let lowest = (0..=steps)
+        .flat_map(|i| (0..=steps).map(move |j| (i, j)))
+        .map(|(i, j)| {
+            let x = -extent + i as f32 * ObstacleMap::CELL;
+            let z = -extent + j as f32 * ObstacleMap::CELL;
+            map.height_at(x, z)
+        })
+        .fold(f32::INFINITY, f32::min);
+    assert!(lowest >= 0.0, "nothing below street level: {lowest}");
 }
 
 /// The player circles low over downtown, eight enemies chase it for a

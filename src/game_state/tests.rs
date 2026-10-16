@@ -295,3 +295,22 @@ fn pause_still_freezes_the_running_round() {
     run_for(&mut app, 0.2);
     assert!(round(&app).elapsed > elapsed);
 }
+
+#[test]
+fn r_does_not_reset_the_jet_during_a_round() {
+    let mut app = crate::test_support::headless_app(crate::GamePlugin);
+    for _ in 0..30 {
+        app.update();
+    }
+    let mut jets = app
+        .world_mut()
+        .query_filtered::<&Transform, With<PlayerAircraft>>();
+    let before = jets.single(app.world()).unwrap().translation;
+    let spawn = app.world().resource::<FlightConfig>().spawn_position;
+    assert!(before.distance(spawn) > 1.0, "jet has moved");
+
+    crate::test_support::tap(&mut app, KeyCode::KeyR);
+    let after = jets.single(app.world()).unwrap().translation;
+    assert!(after.distance(spawn) > 1.0, "R reset the jet mid-round");
+    assert_eq!(round(&app).phase, RoundPhase::Running);
+}

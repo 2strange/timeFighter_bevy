@@ -93,8 +93,10 @@ pub struct CombatConfig {
     pub player_missiles: u32,
     pub missile: MissileSpec,
     pub lock: LockSpec,
-    /// Interim until the physics layer reports crashes: the player crashes
-    /// when touching the flight model's minimum altitude.
+    /// INTERIM until the physics colliders report crashes: the player
+    /// crashes when touching the flight model's minimum altitude (3 m above
+    /// the ground plane). Buildings do not count yet, and flying low in the
+    /// sunken river channel is fatal.
     pub ground_crash: bool,
 }
 

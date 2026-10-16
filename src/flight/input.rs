@@ -27,13 +27,16 @@ pub(super) fn keyboard_input(
     }
 }
 
-/// R puts the jet back to its spawn point.
+/// R puts the jet back to its spawn point. Not during a combat round:
+/// there R restarts the round from the result screen, and a free reset in
+/// mid-fight would dodge every crash.
 pub(super) fn respawn(
     keys: Res<ButtonInput<KeyCode>>,
     cfg: Res<FlightConfig>,
+    round: Option<Res<crate::game_state::Round>>,
     mut player: Query<(&mut FlightState, &mut Transform), With<PlayerAircraft>>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyR) {
+    if round.is_some() || !keys.just_pressed(KeyCode::KeyR) {
         return;
     }
     for (mut state, mut transform) in &mut player {
