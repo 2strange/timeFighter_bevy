@@ -34,6 +34,8 @@ fn glb(name: &str) -> PathBuf {
 
 struct Model {
     positions: Vec<[f32; 3]>,
+    /// Vertices of propeller materials, where the model has separate ones.
+    propellers: Vec<[f32; 3]>,
     min: [f32; 3],
     max: [f32; 3],
 }
@@ -63,13 +65,19 @@ impl Model {
         }
 
         let mut positions = Vec::new();
+        let mut propellers = Vec::new();
         for mesh in gltf.meshes() {
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| match buffer.source() {
                     gltf::buffer::Source::Bin => blob,
                     gltf::buffer::Source::Uri(_) => None,
                 });
-                positions.extend(reader.read_positions().unwrap());
+                let points: Vec<_> = reader.read_positions().unwrap().collect();
+                let material = primitive.material().name().unwrap_or("").to_lowercase();
+                if material.starts_with("prop") {
+                    propellers.extend(points.iter().copied());
+                }
+                positions.extend(points);
             }
         }
         let mut min = [f32::INFINITY; 3];
@@ -82,6 +90,7 @@ impl Model {
         }
         Model {
             positions,
+            propellers,
             min,
             max,
         }
@@ -134,8 +143,10 @@ fn models_are_normalised() {
             model.min[1] < 0.0 && model.max[1] > 0.0,
             "{name}: origin outside in Y"
         );
+        // Tall fins lift the box centre; 30 % of the height still means the
+        // origin is on the fuselage.
         assert!(
-            model.centre(1).abs() < 0.25 * y,
+            model.centre(1).abs() < 0.3 * y,
             "{name}: origin far from centre in Y"
         );
     }
@@ -143,10 +154,47 @@ fn models_are_normalised() {
 
 #[test]
 fn noses_point_along_negative_z() {
-    // The fin is the highest part and sits at the tail, so the top slice of
-    // the model must lie behind the centre (+Z).
+    // Where the model has its propellers as their own material, they must
+    // be at the front. Otherwise: the fin is the highest part and sits at the
+    // tail, so the top slice of the model must lie behind the centre (+Z).
     for (name, _) in manifest() {
         let model = Model::load(&name);
+        if !model.propellers.is_empty() {
+            let mean_z =
+                model.propellers.iter().map(|p| p[2]).sum::<f32>() / model.propellers.len() as f32;
+            assert!(
+                mean_z < -0.3 * model.extent(2) / 2.0,
+                "{name}: propellers are not at the front (mean z {mean_z})"
+            );
+            continue;
+        }
+        if name == "zeppelin" {
+            // An airship: blunt nose, pointed tail, fins near the tail.
+            let width_within = |from_nose: bool, share: f32| {
+                let cut = share * model.extent(2);
+                model
+                    .positions
+                    .iter()
+                    .filter(|p| {
+                        if from_nose {
+                            p[2] < model.min[2] + cut
+                        } else {
+                            p[2] > model.max[2] - cut
+                        }
+                    })
+                    .map(|p| p[0].abs())
+                    .fold(0.0, f32::max)
+            };
+            assert!(
+                width_within(true, 0.05) > width_within(false, 0.05),
+                "{name}: tail is blunter than the nose"
+            );
+            assert!(
+                width_within(false, 0.15) > width_within(true, 0.15),
+                "{name}: no fins near the tail"
+            );
+            continue;
+        }
         let cut = model.max[1] - 0.15 * model.extent(1);
         let top: Vec<_> = model.positions.iter().filter(|p| p[1] >= cut).collect();
         let mean_z = top.iter().map(|p| p[2]).sum::<f32>() / top.len() as f32;

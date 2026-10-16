@@ -110,6 +110,139 @@
       "pose": "rest",
       "target_triangles": 5500,
       "max_texture": 512
+    },
+    {
+      "name": "bf109k4",
+      "source": "inbox/bf109k4",
+      "length": 9.02,
+      "forward": "+Z",
+      "up": "+Y",
+      "pose": "rest"
+    },
+    {
+      "name": "me309",
+      "source": "inbox/me309",
+      "length": 9.46,
+      "forward": "+Z",
+      "up": "+Y",
+      "pose": "rest"
+    },
+    {
+      "name": "he177",
+      "source": "inbox/he177",
+      "length": 22.0,
+      "forward": "+Z",
+      "up": "+Y",
+      "pose": "rest",
+      "mounts": [
+        {
+          "name": "front_gun",
+          "materials": "^He177$",
+          "pick": "front"
+        },
+        {
+          "name": "rear_gun",
+          "materials": "^He177$",
+          "pick": "rear"
+        },
+        {
+          "name": "top_turret",
+          "materials": "^He177$",
+          "pick": "top",
+          "z": [
+            -6.0,
+            3.0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "me264",
+      "source": "inbox/me264",
+      "length": 20.11,
+      "forward": "+Z",
+      "up": "+Y",
+      "pose": "rest",
+      "mounts": [
+        {
+          "name": "front_gun",
+          "materials": "^me264$",
+          "pick": "front"
+        },
+        {
+          "name": "rear_gun",
+          "materials": "^me264$",
+          "pick": "rear"
+        },
+        {
+          "name": "top_turret",
+          "materials": "^me264$",
+          "pick": "top",
+          "z": [
+            -6.0,
+            3.0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ju390",
+      "source": "inbox/ju390",
+      "length": 34.2,
+      "forward": "+Z",
+      "up": "+Y",
+      "pose": "rest",
+      "mounts": [
+        {
+          "name": "front_gun",
+          "materials": "^Ju390$",
+          "pick": "front"
+        },
+        {
+          "name": "rear_gun",
+          "materials": "^Ju390$",
+          "pick": "rear"
+        },
+        {
+          "name": "top_turret",
+          "materials": "^Ju390$",
+          "pick": "top",
+          "z": [
+            -6.0,
+            3.0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ju287",
+      "source": "inbox/ju287",
+      "length": 18.3,
+      "forward": "+Z",
+      "up": "+Y",
+      "pose": "rest",
+      "mounts": [
+        {
+          "name": "front_gun",
+          "materials": "^Ju287$",
+          "pick": "front"
+        },
+        {
+          "name": "rear_gun",
+          "materials": "^Ju287$",
+          "pick": "rear"
+        }
+      ]
+    },
+    {
+      "name": "zeppelin",
+      "source": "inbox/zeppelin",
+      "length": 245.0,
+      "forward": "+Z",
+      "up": "+Y",
+      "pose": "rest",
+      "drop_materials": "^(platte|Hangar)$",
+      "drop_nodes": "Zeppelin\\.1"
     }
   ]
 }
