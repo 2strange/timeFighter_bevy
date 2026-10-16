@@ -53,7 +53,8 @@ lto = "thin"
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"
-strip = "debuginfo"
+strip = true
+lto = "fat"
 panic = "abort"
 
 # Browser platform glue (timers, panic hook) only for the WASM target.

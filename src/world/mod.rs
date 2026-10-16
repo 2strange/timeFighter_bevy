@@ -92,7 +92,7 @@ fn ground_texture() -> Image {
         for x in 0..GROUND_TEXTURE_PX {
             let rgb = if x < 3 || y < 3 {
                 [0.20, 0.30, 0.16]
-            } else if (x / cell + y / cell) % 2 == 0 {
+            } else if (x / cell + y / cell).is_multiple_of(2) {
                 [0.36, 0.52, 0.26]
             } else {
                 [0.44, 0.58, 0.30]
@@ -125,8 +125,15 @@ fn ground_texture() -> Image {
         let mut next = Vec::with_capacity((half * half) as usize);
         for y in 0..half {
             for x in 0..half {
-                let px = [at(2 * x, 2 * y), at(2 * x + 1, 2 * y), at(2 * x, 2 * y + 1), at(2 * x + 1, 2 * y + 1)];
-                next.push(std::array::from_fn(|i| px.iter().map(|p| p[i]).sum::<f32>() / 4.0));
+                let px = [
+                    at(2 * x, 2 * y),
+                    at(2 * x + 1, 2 * y),
+                    at(2 * x, 2 * y + 1),
+                    at(2 * x + 1, 2 * y + 1),
+                ];
+                next.push(std::array::from_fn(|i| {
+                    px.iter().map(|p| p[i]).sum::<f32>() / 4.0
+                }));
             }
         }
         level = next;

@@ -44,11 +44,21 @@ fn transform(app: &App, jet: Entity) -> Transform {
 fn throttle_accelerates_at_configured_rate_up_to_max_speed() {
     let mut app = app(60);
     let cfg = app.world().resource::<FlightConfig>().clone();
-    let jet = spawn_jet(&mut app, FlightInput { throttle: 1.0, ..default() });
+    let jet = spawn_jet(
+        &mut app,
+        FlightInput {
+            throttle: 1.0,
+            ..default()
+        },
+    );
 
     run_for(&mut app, 2.0);
     let expected = cfg.speed_initial + 2.0 * cfg.throttle_rate;
-    assert!((state(&app, jet).speed - expected).abs() < 0.5, "{:?}", state(&app, jet));
+    assert!(
+        (state(&app, jet).speed - expected).abs() < 0.5,
+        "{:?}",
+        state(&app, jet)
+    );
 
     run_for(&mut app, 10.0);
     assert_eq!(state(&app, jet).speed, cfg.speed_max);
@@ -65,7 +75,13 @@ fn throttle_accelerates_at_configured_rate_up_to_max_speed() {
 fn roll_rate_approaches_but_never_exceeds_limit() {
     let mut app = app(60);
     let cfg = app.world().resource::<FlightConfig>().clone();
-    let jet = spawn_jet(&mut app, FlightInput { roll: 1.0, ..default() });
+    let jet = spawn_jet(
+        &mut app,
+        FlightInput {
+            roll: 1.0,
+            ..default()
+        },
+    );
 
     let mut previous = 0.0;
     for frame in 0..180 {
@@ -75,7 +91,10 @@ fn roll_rate_approaches_but_never_exceeds_limit() {
             assert!(transform(&app, jet).right().y > 0.1);
         }
         let rate = state(&app, jet).roll_rate;
-        assert!(rate <= cfg.max_roll_rate + 1e-6, "roll rate {rate} over limit");
+        assert!(
+            rate <= cfg.max_roll_rate + 1e-6,
+            "roll rate {rate} over limit"
+        );
         assert!(rate >= previous, "roll rate must build up monotonically");
         previous = rate;
     }
@@ -86,16 +105,31 @@ fn roll_rate_approaches_but_never_exceeds_limit() {
 #[test]
 fn centred_stick_damps_rotation_and_flies_straight() {
     let mut app = app(60);
-    let jet = spawn_jet(&mut app, FlightInput { pitch: 1.0, yaw: 1.0, ..default() });
+    let jet = spawn_jet(
+        &mut app,
+        FlightInput {
+            pitch: 1.0,
+            yaw: 1.0,
+            ..default()
+        },
+    );
     run_for(&mut app, 1.0);
     let spinning = state(&app, jet);
     assert!(spinning.pitch_rate > 1.0 && spinning.yaw_rate > 0.5);
 
-    app.world_mut().entity_mut(jet).insert(FlightInput::default());
+    app.world_mut()
+        .entity_mut(jet)
+        .insert(FlightInput::default());
     run_for(&mut app, 2.0);
     let settled = state(&app, jet);
-    assert!(settled.pitch_rate.abs() < 0.01 * spinning.pitch_rate, "{settled:?}");
-    assert!(settled.yaw_rate.abs() < 0.01 * spinning.yaw_rate, "{settled:?}");
+    assert!(
+        settled.pitch_rate.abs() < 0.01 * spinning.pitch_rate,
+        "{settled:?}"
+    );
+    assert!(
+        settled.yaw_rate.abs() < 0.01 * spinning.yaw_rate,
+        "{settled:?}"
+    );
 
     // Without rotation the heading stays put.
     run_for(&mut app, 1.0);
@@ -107,7 +141,12 @@ fn centred_stick_damps_rotation_and_flies_straight() {
 
 #[test]
 fn result_does_not_depend_on_frame_rate() {
-    let input = FlightInput { roll: 1.0, pitch: 0.5, throttle: 1.0, ..default() };
+    let input = FlightInput {
+        roll: 1.0,
+        pitch: 0.5,
+        throttle: 1.0,
+        ..default()
+    };
     let mut slow = app(30);
     let mut fast = app(144);
     let jet_slow = spawn_jet(&mut slow, input);
@@ -116,7 +155,10 @@ fn result_does_not_depend_on_frame_rate() {
     run_for(&mut fast, 2.0);
 
     let (a, b) = (state(&slow, jet_slow), state(&fast, jet_fast));
-    assert!((a.roll_rate - b.roll_rate).abs() < 0.02 * b.roll_rate, "{a:?} vs {b:?}");
+    assert!(
+        (a.roll_rate - b.roll_rate).abs() < 0.02 * b.roll_rate,
+        "{a:?} vs {b:?}"
+    );
     assert!((a.speed - b.speed).abs() < 0.5);
     let (ta, tb) = (transform(&slow, jet_slow), transform(&fast, jet_fast));
     assert!(ta.rotation.angle_between(tb.rotation) < 0.1);
@@ -127,7 +169,14 @@ fn result_does_not_depend_on_frame_rate() {
 fn jet_never_sinks_below_the_ground() {
     let mut app = app(60);
     let cfg = app.world().resource::<FlightConfig>().clone();
-    let jet = spawn_jet(&mut app, FlightInput { pitch: -1.0, throttle: 1.0, ..default() });
+    let jet = spawn_jet(
+        &mut app,
+        FlightInput {
+            pitch: -1.0,
+            throttle: 1.0,
+            ..default()
+        },
+    );
     run_for(&mut app, 15.0);
     assert!(transform(&app, jet).translation.y >= cfg.min_altitude);
 }
