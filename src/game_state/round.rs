@@ -9,8 +9,8 @@ use super::{GameSettings, Mission, MissionConfig, Pause, TriggerHold, WaveTrigge
 use crate::{
     ai::{AttackSlots, Enemy, FlightGroup, bomber_bundle, enemy_bundle},
     combat::{
-        Bomb, CombatConfig, CombatSystems, CrashInto, DestroyCause, Destroyed, Effect, Hit,
-        Munition, ShotFired, Team, Weapon, player_loadout,
+        Bomb, BombImpact, CombatConfig, CombatSystems, CrashInto, DestroyCause, Destroyed, Effect,
+        Hit, Munition, ShotFired, Team, Weapon, player_loadout,
     },
     flight::{
         FlightConfig, FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft,
@@ -18,7 +18,7 @@ use crate::{
     physics::{CrashSweep, EnemyCrashed, PlayerCrashed, ProjectileHit},
     world::{
         Lighting, LightingSystems,
-        damage::{CityDamageSystems, CityHealth, RepairCity},
+        damage::{CityDamageSystems, CityHealth, DamageArea, RepairCity},
     },
 };
 
@@ -155,6 +155,9 @@ impl Plugin for RoundPlugin {
                         .after(CombatSystems::Resolve)
                         // City health is current when the round decides.
                         .after(CityDamageSystems),
+                    // Bombs land (combat) before the city takes the damage,
+                    // all in one frame.
+                    CityDamageSystems.after(CombatSystems::Resolve),
                 ),
             )
             .add_systems(
@@ -188,7 +191,7 @@ pub fn weapons_free(
 /// On a restart, drops hits, crashes and shots still queued from the old
 /// round (for example from its last physics step), so none of them reach
 /// the new round's statistics, damage or victory count.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn drop_stale_messages(
     round: Res<Round>,
     projectile_hits: Option<ResMut<Messages<ProjectileHit>>>,
@@ -197,10 +200,18 @@ fn drop_stale_messages(
     hits: Option<ResMut<Messages<Hit>>>,
     destroyed: Option<ResMut<Messages<Destroyed>>>,
     shots: Option<ResMut<Messages<ShotFired>>>,
+    city: (
+        Option<ResMut<Messages<DamageArea>>>,
+        Option<ResMut<Messages<BombImpact>>>,
+    ),
 ) {
     if round.phase != RoundPhase::Starting {
         return;
     }
+    // Damage still queued from the old round's last bombs would otherwise
+    // land on the repaired city.
+    clear(city.0);
+    clear(city.1);
     clear(projectile_hits);
     clear(player_crashes);
     clear(enemy_crashes);

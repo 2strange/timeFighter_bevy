@@ -796,3 +796,80 @@ fn press_key(app: &mut App, key: KeyCode) {
     keys.release(key);
     keys.clear();
 }
+
+#[test]
+fn bombs_burst_on_the_ruin_not_on_the_old_roof() {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        PhysicsPlugin,
+        CombatPlugin,
+        crate::ai::AiPlugin,
+        CityPlugin,
+        CityCollidersPlugin,
+        crate::world::damage::CityDamagePlugin,
+    ))
+    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        1.0 / FPS,
+    )));
+    app.finish();
+    app.update();
+
+    let layout = app.world().resource::<CityLayout>().clone();
+    let (index, tallest) = layout
+        .buildings
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.height().total_cmp(&b.1.height()))
+        .unwrap();
+    let centre = tallest.parts[0].center;
+    let roof = tallest.height();
+    let map_height = |app: &App| {
+        app.world()
+            .resource::<crate::ai::ObstacleMap>()
+            .height_at(centre.x, centre.z)
+    };
+    assert!(map_height(&app) >= roof - 0.1);
+
+    // Destroy it, let colliders and the AI's map catch up.
+    app.world_mut()
+        .write_message(crate::world::damage::DamageArea {
+            point: Vec3::new(centre.x, roof * 0.5, centre.z),
+            radius: 1.0,
+            strength: 1.0,
+        });
+    for _ in 0..5 {
+        app.update();
+    }
+    assert!(
+        app.world()
+            .resource::<crate::world::damage::CityDamage>()
+            .destroyed[index]
+    );
+    assert!(
+        map_height(&app) < roof - 1.0,
+        "AI map still has the old roof"
+    );
+
+    // A bomb dropped right above it bursts on the stump (at most 18 m).
+    app.world_mut().spawn(super::bomb_bundle(
+        super::BombSpec::HEAVY,
+        Vec3::new(centre.x, roof + 50.0, centre.z),
+        Vec3::ZERO,
+    ));
+    let mut impact = None;
+    for _ in 0..(10 * 60) {
+        app.update();
+        if let Some(i) = read::<super::BombImpact>(&app).first() {
+            impact = Some(i.point);
+            break;
+        }
+    }
+    let impact = impact.expect("bomb never landed");
+    assert!(
+        impact.y < 20.0,
+        "burst at {:.0} m (roof was {roof:.0} m)",
+        impact.y
+    );
+}

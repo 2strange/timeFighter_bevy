@@ -5,7 +5,7 @@
 
 use bevy::{platform::collections::HashMap, prelude::*};
 
-use super::{Enemy, EnemyPilot};
+use super::{AiConfig, Enemy, EnemyPilot};
 use crate::flight::PlayerAircraft;
 
 /// At most this many enemies attack at the same time.
@@ -51,17 +51,20 @@ pub const HOLDING_RADIUS: f32 = 700.0;
 /// first).
 pub(super) fn assign_attack_slots(
     slots: Res<AttackSlots>,
+    cfg: Res<AiConfig>,
     player: Query<&Transform, With<PlayerAircraft>>,
     mut enemies: Query<(Entity, &Transform, &mut EnemyPilot), With<Enemy>>,
 ) {
-    let target = player.single().map_or(Vec3::ZERO, |t| t.translation);
+    let player = player.single().ok().map(|t| t.translation);
+    let target = player.unwrap_or(Vec3::ZERO);
     let mut attackers: Vec<(Entity, f32)> = Vec::new();
     let mut waiting: Vec<(Entity, bool, f32)> = Vec::new();
     for (entity, transform, pilot) in &enemies {
         let distance = transform.translation.distance(target);
         if pilot.attacking {
             attackers.push((entity, distance));
-        } else {
+        } else if pilot.slot_rest <= 0.0 || pilot.provoked > 0.0 {
+            // A pilot that just gave up a search rests first, unless hit.
             waiting.push((entity, pilot.provoked > 0.0, distance));
         }
     }
@@ -78,7 +81,11 @@ pub(super) fn assign_attack_slots(
         waiting.sort_by(|a, b| b.1.cmp(&a.1).then(a.2.total_cmp(&b.2)));
         for (entity, _, _) in waiting.iter().take(max - attackers.len()) {
             if let Ok((_, _, mut pilot)) = enemies.get_mut(*entity) {
+                // Sent in with the player's position (as if by radio).
                 pilot.attacking = true;
+                pilot.aware = cfg.awareness;
+                pilot.last_seen = player;
+                pilot.searching = 0.0;
             }
         }
     }

@@ -741,3 +741,24 @@ fn protect_flies_the_configured_bomber() {
         crate::ai::EnemyKind::Lancaster
     );
 }
+
+#[test]
+fn damage_still_queued_from_the_old_round_does_not_hit_the_new_city() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        protect(Difficulty::Normal),
+        true,
+    );
+    // The old round's last bombs and a restart in the same frame.
+    app.world_mut()
+        .write_message(crate::world::damage::DamageArea {
+            point: Vec3::ZERO,
+            radius: 3_000.0,
+            strength: 1.0,
+        });
+    app.world_mut().write_message(RestartRound);
+    run_for(&mut app, 0.5);
+    assert_eq!(round(&app).phase, RoundPhase::Running);
+    let health = app.world().resource::<crate::world::damage::CityHealth>();
+    assert_eq!(health.center_intact_ratio, 1.0);
+}
