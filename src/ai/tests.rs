@@ -395,7 +395,9 @@ fn collision_course_is_detected_and_escaped() {
         )
     };
     // Head-on, 1 km apart, closing at 400 m/s: steer away.
-    let head_on = escape(Vec3::new(0.0, 800.0, -1_000.0), Vec3::Z * 250.0).expect("escape");
+    let head_on = escape(Vec3::new(0.0, 800.0, -1_000.0), Vec3::Z * 250.0)
+        .expect("escape")
+        .0;
     assert!(
         head_on.dot(Vec3::NEG_Z) < 0.95,
         "turns off the line: {head_on:?}"
@@ -408,25 +410,49 @@ fn collision_course_is_detected_and_escaped() {
     assert!(escape(Vec3::new(0.0, 800.0, 100.0), Vec3::Z * 250.0).is_none());
 }
 
-/// Collisions involving the player (rammings) in the last update.
-fn rammings(app: &App) -> usize {
-    let world = app.world();
-    world
-        .resource::<Messages<crate::physics::PlayerCrashed>>()
-        .iter_current_update_messages()
-        .count()
-        + world
-            .resource::<Messages<crate::physics::EnemyCrashed>>()
-            .iter_current_update_messages()
-            .count()
+/// What a bait run produced.
+struct BaitRun {
+    /// Collisions between the player and an enemy.
+    rammings: usize,
+    /// Enemies that flew into the world.
+    enemy_crashes: usize,
+    /// Closest pass between two enemies (m).
+    closest: f32,
 }
 
 /// Runs the bait scenario and returns (rammings, closest enemy-enemy pass).
 fn bait_scenario(input: FlightInput, enemies: &[Transform], seconds: u32) -> (usize, f32) {
+    let run = bait_run(800.0, false, input, enemies, seconds);
+    (run.rammings, run.closest)
+}
+
+/// A player bait at `altitude` flying with `input`, optionally over a flat
+/// ground collider, among `enemies` (alternately veterans and rookies).
+fn bait_run(
+    altitude: f32,
+    ground: bool,
+    input: FlightInput,
+    enemies: &[Transform],
+    seconds: u32,
+) -> BaitRun {
     let mut app = app(60.0, false);
     app.world_mut().resource_mut::<CombatConfig>().player_health = f32::MAX;
+    if ground {
+        app.world_mut().spawn((
+            crate::physics::Ground,
+            RigidBody::Fixed,
+            Collider::cuboid(20_000.0, 50.0, 20_000.0),
+            Layer::World.groups(),
+            Transform::from_xyz(0.0, -50.0, 0.0),
+        ));
+    }
     app.update();
-    spawn_player(&mut app, Transform::from_xyz(0.0, 800.0, 0.0), 250.0, input);
+    let jet = spawn_player(
+        &mut app,
+        Transform::from_xyz(0.0, altitude, 0.0),
+        250.0,
+        input,
+    );
     for (i, transform) in enemies.iter().enumerate() {
         let skill = if i % 2 == 0 {
             PilotSkill::VETERAN
@@ -440,11 +466,28 @@ fn bait_scenario(input: FlightInput, enemies: &[Transform], seconds: u32) -> (us
             *transform,
         ));
     }
-    let mut rams = 0;
-    let mut closest = f32::INFINITY;
+    let mut run = BaitRun {
+        rammings: 0,
+        enemy_crashes: 0,
+        closest: f32::INFINITY,
+    };
     for _ in 0..(seconds * 60) {
         app.update();
-        rams += rammings(&app);
+        let world = app.world();
+        run.rammings += world
+            .resource::<Messages<crate::physics::PlayerCrashed>>()
+            .iter_current_update_messages()
+            .count();
+        for crash in world
+            .resource::<Messages<crate::physics::EnemyCrashed>>()
+            .iter_current_update_messages()
+        {
+            if crash.obstacle == jet {
+                run.rammings += 1;
+            } else {
+                run.enemy_crashes += 1;
+            }
+        }
         let positions: Vec<Vec3> = app
             .world_mut()
             .query_filtered::<&Transform, With<super::Enemy>>()
@@ -453,11 +496,27 @@ fn bait_scenario(input: FlightInput, enemies: &[Transform], seconds: u32) -> (us
             .collect();
         for (i, a) in positions.iter().enumerate() {
             for b in &positions[i + 1..] {
-                closest = closest.min(a.distance(*b));
+                run.closest = run.closest.min(a.distance(*b));
             }
         }
     }
-    (rams, closest)
+    run
+}
+
+/// `count` enemies on a ring of `radius` around the origin, facing in.
+fn ring(count: usize, radius: f32, altitude: f32) -> Vec<Transform> {
+    (0..count)
+        .map(|i| {
+            let angle = i as f32 * std::f32::consts::TAU / count as f32;
+            let position = Vec3::new(
+                angle.cos() * radius,
+                altitude + 15.0 * (i % 8) as f32,
+                angle.sin() * radius,
+            );
+            Transform::from_translation(position)
+                .looking_at(Vec3::new(0.0, position.y, 0.0), Vec3::Y)
+        })
+        .collect()
 }
 
 #[test]
@@ -530,4 +589,88 @@ fn slower_difficulty_slows_the_enemies() {
     let speed = app.world().get::<super::EnemyFlight>(slow).unwrap().speed;
     let max = EnemyKind::Spitfire.stats().max_speed;
     assert!(speed <= max * 0.8 + 0.01, "speed {speed} m/s");
+}
+
+#[test]
+fn a_running_avoidance_is_held_against_a_competing_contact() {
+    let left = Vec3::NEG_X;
+    let right = Vec3::X;
+    // Two contacts alternate as "most urgent" from frame to frame.
+    let mut state = None;
+    let mut directions = Vec::new();
+    for frame in 0..60 {
+        let found = if frame % 2 == 0 {
+            (left, 2.0)
+        } else {
+            (right, 1.8)
+        };
+        state = super::update_avoidance(state, Some(found), 1.2, 1.0 / 60.0);
+        directions.push(state.unwrap().direction);
+    }
+    let switches = directions.windows(2).filter(|w| w[0] != w[1]).count();
+    assert_eq!(switches, 0, "flipped {switches} times");
+
+    // A much more urgent contact does take over at once.
+    let urgent = super::update_avoidance(state, Some((Vec3::Y, 0.3)), 1.2, 1.0 / 60.0).unwrap();
+    assert_eq!(urgent.direction, Vec3::Y);
+    // Without contacts the manoeuvre ends after its hold time.
+    let mut state = Some(urgent);
+    for _ in 0..80 {
+        state = super::update_avoidance(state, None, 1.2, 1.0 / 60.0);
+    }
+    assert!(state.is_none());
+}
+
+#[test]
+fn non_finite_difficulty_factors_fall_back_to_normal() {
+    let tuning = EnemyTuning {
+        speed: f32::NAN,
+        accuracy: f32::INFINITY,
+    };
+    let stats = EnemyKind::Spitfire.stats().tuned(tuning);
+    assert_eq!(stats, EnemyKind::Spitfire.stats());
+
+    // And such an enemy flies without panicking.
+    let mut app = app(60.0, false);
+    app.world_mut().spawn(enemy_bundle(
+        EnemyKind::Spitfire,
+        PilotSkill::VETERAN,
+        tuning,
+        Transform::from_xyz(0.0, 800.0, 0.0),
+    ));
+    for _ in 0..60 {
+        app.update();
+    }
+}
+
+#[test]
+fn low_level_traffic_over_the_ground_neither_rams_nor_crashes() {
+    let input = FlightInput {
+        yaw: 0.15,
+        ..default()
+    };
+    let run = bait_run(150.0, true, input, &ring(8, 1_800.0, 200.0), 40);
+    assert_eq!(run.rammings, 0, "rammings");
+    assert_eq!(run.enemy_crashes, 0, "enemies flew into the ground");
+    assert!(run.closest > 15.0, "closest pass {:.0} m", run.closest);
+}
+
+#[test]
+fn forty_eight_enemies_at_once_stay_stable() {
+    // The custom maximum, all in the air together (normally flights come
+    // one after another): a stability and cost smoke test.
+    let input = FlightInput {
+        yaw: 0.15,
+        ..default()
+    };
+    let started = std::time::Instant::now();
+    let run = bait_run(600.0, true, input, &ring(48, 2_500.0, 500.0), 20);
+    eprintln!(
+        "48 enemies, 20 s at 60 fps: {:.1} s wall clock, closest pass {:.0} m",
+        started.elapsed().as_secs_f32(),
+        run.closest
+    );
+    assert_eq!(run.rammings, 0, "rammings");
+    assert_eq!(run.enemy_crashes, 0, "crashes");
+    assert!(run.closest > 10.0, "closest pass {:.0} m", run.closest);
 }

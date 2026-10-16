@@ -595,3 +595,17 @@ fn restart_keys_wait_while_something_else_holds_the_game() {
     press(&mut app, KeyCode::Enter);
     assert_eq!(round(&app).phase, RoundPhase::Running);
 }
+
+#[test]
+fn non_finite_custom_values_count_as_normal() {
+    let custom = Difficulty::Custom(crate::game_state::DifficultyParams {
+        enemy_speed: f32::NAN,
+        enemy_accuracy: f32::NEG_INFINITY,
+        ..default()
+    });
+    let params = custom.params().clamped();
+    assert_eq!((params.enemy_speed, params.enemy_accuracy), (1.0, 1.0));
+    let mission = Mission::hunt(custom);
+    let tuning = mission.waves[0].groups[0].tuning;
+    assert_eq!((tuning.speed, tuning.accuracy), (1.0, 1.0));
+}

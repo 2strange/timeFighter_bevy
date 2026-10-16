@@ -54,6 +54,7 @@ pub struct EnemyStats {
 impl EnemyStats {
     /// With the difficulty's factors applied.
     pub fn tuned(self, tuning: EnemyTuning) -> Self {
+        let tuning = tuning.sanitized();
         Self {
             min_speed: self.min_speed * tuning.speed,
             cruise_speed: self.cruise_speed * tuning.speed,
@@ -262,8 +263,49 @@ pub struct EnemyPilot {
     pub burst_left: f32,
     /// Time until the next burst may start (s).
     pub burst_pause: f32,
-    /// Collision avoidance under way: escape direction and time left (s).
-    pub avoiding: Option<(Vec3, f32)>,
+    /// Collision avoidance under way.
+    pub avoiding: Option<Avoidance>,
+}
+
+/// One collision avoidance manoeuvre, held until it is done.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Avoidance {
+    pub direction: Vec3,
+    /// Seconds the manoeuvre is still held.
+    pub time_left: f32,
+    /// Seconds until the closest approach it avoids.
+    pub closest_in: f32,
+}
+
+/// Only a contact this much more urgent (closest approach in less than
+/// this share of the current one's time) replaces a running avoidance.
+/// Otherwise two contacts would make the pilot flip back and forth.
+const URGENT_SHARE: f32 = 0.5;
+
+/// Next avoidance state from the current one and this frame's most urgent
+/// collision course (`(direction, seconds to closest approach)`), if any.
+pub fn update_avoidance(
+    current: Option<Avoidance>,
+    found: Option<(Vec3, f32)>,
+    hold: f32,
+    dt: f32,
+) -> Option<Avoidance> {
+    let running = current
+        .map(|a| Avoidance {
+            time_left: a.time_left - dt,
+            closest_in: (a.closest_in - dt).max(0.0),
+            ..a
+        })
+        .filter(|a| a.time_left > 0.0);
+    match (running, found) {
+        (Some(a), Some((_, t))) if t >= a.closest_in * URGENT_SHARE => Some(a),
+        (_, Some((direction, t))) => Some(Avoidance {
+            direction,
+            time_left: hold,
+            closest_in: t,
+        }),
+        (running, None) => running,
+    }
 }
 
 /// Per-round factors on an enemy, from the difficulty.
@@ -273,6 +315,17 @@ pub struct EnemyTuning {
     pub speed: f32,
     /// Factor on gun accuracy: the gun's scatter is divided by it.
     pub accuracy: f32,
+}
+
+impl EnemyTuning {
+    /// Factors that are not positive finite numbers count as 1.
+    pub fn sanitized(self) -> Self {
+        let sane = |f: f32| if f.is_finite() && f > 0.0 { f } else { 1.0 };
+        Self {
+            speed: sane(self.speed),
+            accuracy: sane(self.accuracy),
+        }
+    }
 }
 
 impl Default for EnemyTuning {
@@ -438,15 +491,11 @@ fn fly_enemies(
         );
         // Nobody rams on purpose: a collision course beats everything but
         // the ground.
-        if let Some(escape) =
-            collision_escape(&cfg, &pilot.skill, entity, position, velocity.0, &traffic)
-        {
-            pilot.avoiding = Some((escape, cfg.avoid_time));
-        }
-        if let Some((escape, left)) = pilot.avoiding {
-            decision.direction = escape;
+        let found = collision_escape(&cfg, &pilot.skill, entity, position, velocity.0, &traffic);
+        pilot.avoiding = update_avoidance(pilot.avoiding, found, cfg.avoid_time, dt);
+        if let Some(avoidance) = pilot.avoiding {
+            decision.direction = avoidance.direction;
             decision.fire = false;
-            pilot.avoiding = (left - dt > 0.0).then_some((escape, left - dt));
         }
         trigger.gun = decision.fire;
 
@@ -492,7 +541,7 @@ pub(crate) fn collision_escape_for(
     position: Vec3,
     velocity: Vec3,
     others: impl Iterator<Item = (Vec3, Vec3, bool)>,
-) -> Option<Vec3> {
+) -> Option<(Vec3, f32)> {
     let mut most_urgent: Option<(f32, Vec3)> = None;
     for (other_position, other_velocity, is_player) in others {
         let r = other_position - position;
@@ -522,7 +571,7 @@ pub(crate) fn collision_escape_for(
             most_urgent = Some((t, (away + ahead * 0.3).normalize_or(away)));
         }
     }
-    most_urgent.map(|(_, escape)| escape)
+    most_urgent.map(|(t, escape)| (escape, t))
 }
 
 fn collision_escape(
@@ -532,7 +581,7 @@ fn collision_escape(
     position: Vec3,
     velocity: Vec3,
     traffic: &[Traffic],
-) -> Option<Vec3> {
+) -> Option<(Vec3, f32)> {
     let others = traffic
         .iter()
         .filter(|t| t.entity != Some(me))
