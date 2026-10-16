@@ -192,11 +192,22 @@ fn clear<M: Message>(messages: Option<ResMut<Messages<M>>>) {
 
 fn restart(
     keys: Option<Res<ButtonInput<KeyCode>>>,
+    pause: Option<Res<Pause>>,
     mut requests: MessageReader<RestartRound>,
     mut round: ResMut<Round>,
 ) {
     let requested = requests.read().count() > 0;
+    // The keys act on the result screen only, and not while something else
+    // holds the game (the player's pause, a menu using the same keys).
+    let held_otherwise = pause.is_some_and(|p| {
+        Pause {
+            round_over: false,
+            ..*p
+        }
+        .is_paused()
+    });
     let key = matches!(round.phase, RoundPhase::Over(_))
+        && !held_otherwise
         && keys.is_some_and(|k| k.any_just_pressed(RESTART_KEYS));
     if requested || key {
         round.phase = RoundPhase::Starting;
