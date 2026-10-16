@@ -8,7 +8,7 @@
 use bevy::{
     asset::RenderAssetUsages,
     light::NotShadowCaster,
-    mesh::{Indices, PrimitiveTopology},
+    mesh::{Indices, PrimitiveTopology, VertexAttributeValues},
     prelude::*,
 };
 
@@ -128,7 +128,8 @@ pub(super) struct EngineFlame {
 /// One wing tip's recent positions (world space) with their age and strength.
 #[derive(Component, Default)]
 pub(super) struct VortexTrail {
-    tip: usize,
+    /// The wing tip in the jet's frame.
+    tip: Vec3,
     samples: Vec<(Vec3, f32, f32)>,
 }
 
@@ -188,11 +189,12 @@ fn spawn_jet_fx(
         cull_mode: None,
         ..default()
     });
-    for tip in 0..2 {
+    for tip in points.wing_tips {
         commands.spawn((
             VortexTrail {
                 tip,
-                samples: Vec::new(),
+                // About a second of samples at high frame rates.
+                samples: Vec::with_capacity(160),
             },
             Mesh3d(meshes.add(empty_ribbon())),
             MeshMaterial3d(trail_material.clone()),
@@ -209,7 +211,6 @@ fn empty_ribbon() -> Mesh {
         RenderAssetUsages::default(),
     )
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new())
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new())
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, Vec::<[f32; 4]>::new())
     .with_inserted_indices(Indices::U32(Vec::new()))
 }
@@ -251,14 +252,15 @@ fn update_trails(
     };
     let now = time.elapsed_secs();
     let strength = vortex_strength(&flight, state);
-    let tips = JetFxPoints::for_model(flight.player_model).wing_tips;
     let eye = camera.iter().next().map(|c| c.translation());
 
     for (mut trail, mesh, mut visibility) in &mut trails {
-        let tip = jet.transform_point(tips[trail.tip]);
-        if time.delta_secs() > 0.0 {
-            trail.samples.push((tip, now, strength));
+        // Nothing moves while paused: keep the mesh as it is.
+        if time.delta_secs() == 0.0 {
+            continue;
         }
+        let tip = jet.transform_point(trail.tip);
+        trail.samples.push((tip, now, strength));
         trail
             .samples
             .retain(|(_, at, _)| now - at <= cfg.trail_seconds);
@@ -278,7 +280,10 @@ fn update_trails(
     }
 }
 
-/// Rebuilds a ribbon through `samples`, facing `eye`, fading with age.
+/// Updates a ribbon through `samples` in place: facing `eye`, fading with
+/// age. The vertex buffers keep their capacity between frames; indices are
+/// only rewritten when the number of samples changes. The material is
+/// unlit, so the ribbon has no normals.
 fn build_ribbon(
     mesh: &mut Mesh,
     samples: &[(Vec3, f32, f32)],
@@ -286,9 +291,8 @@ fn build_ribbon(
     cfg: &JetFxConfig,
     eye: Option<Vec3>,
 ) {
-    let mut positions = Vec::with_capacity(samples.len() * 2);
-    let mut colors = Vec::with_capacity(samples.len() * 2);
-    for (i, &(point, at, strength)) in samples.iter().enumerate() {
+    let edges = |i: usize| {
+        let (point, _, _) = samples[i];
         let next = samples
             .get(i + 1)
             .or(samples.get(i.wrapping_sub(1)))
@@ -296,23 +300,37 @@ fn build_ribbon(
         let along = (next - point).try_normalize().unwrap_or(Vec3::Z);
         let to_eye = eye.map_or(Vec3::Y, |e| (e - point).normalize_or(Vec3::Y));
         let side = along.cross(to_eye).try_normalize().unwrap_or(Vec3::X) * cfg.trail_width / 2.0;
-        let fade = 1.0 - ((now - at) / cfg.trail_seconds).clamp(0.0, 1.0);
-        let alpha = cfg.trail_alpha * strength * fade;
-        for p in [point - side, point + side] {
-            positions.push(p.to_array());
-            colors.push([1.0, 1.0, 1.0, alpha]);
+        [point - side, point + side]
+    };
+
+    if let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+    {
+        positions.clear();
+        for i in 0..samples.len() {
+            positions.extend(edges(i).map(|p| p.to_array()));
         }
     }
-    let mut indices = Vec::with_capacity(samples.len().saturating_sub(1) * 6);
-    for i in 0..samples.len().saturating_sub(1) as u32 {
-        let a = i * 2;
-        indices.extend_from_slice(&[a, a + 1, a + 2, a + 1, a + 3, a + 2]);
+    if let Some(VertexAttributeValues::Float32x4(colors)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_COLOR)
+    {
+        colors.clear();
+        for &(_, at, strength) in samples {
+            let fade = 1.0 - ((now - at) / cfg.trail_seconds).clamp(0.0, 1.0);
+            let color = [1.0, 1.0, 1.0, cfg.trail_alpha * strength * fade];
+            colors.extend([color, color]);
+        }
     }
-    let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-    mesh.insert_indices(Indices::U32(indices));
+    if let Some(Indices::U32(indices)) = mesh.indices_mut() {
+        let wanted = samples.len().saturating_sub(1) * 6;
+        if indices.len() != wanted {
+            indices.clear();
+            for i in 0..samples.len().saturating_sub(1) as u32 {
+                let a = i * 2;
+                indices.extend_from_slice(&[a, a + 1, a + 2, a + 1, a + 3, a + 2]);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -326,6 +344,27 @@ mod tests {
             pitch_rate,
             ..default()
         }
+    }
+
+    #[test]
+    fn ribbon_updates_reuse_their_buffers() {
+        let cfg = JetFxConfig::default();
+        let mut mesh = empty_ribbon();
+        let samples: Vec<_> = (0..12)
+            .map(|i| (Vec3::new(0.0, 0.0, i as f32), i as f32 * 0.05, 1.0))
+            .collect();
+        build_ribbon(&mut mesh, &samples, 0.6, &cfg, Some(Vec3::Y * 10.0));
+        let buffer = |mesh: &Mesh| match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(VertexAttributeValues::Float32x3(v)) => (v.as_ptr(), v.len()),
+            _ => panic!("positions missing"),
+        };
+        let first = buffer(&mesh);
+        assert_eq!(first.1, 24);
+        assert_eq!(mesh.indices().unwrap().len(), 11 * 6);
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_none());
+        // Same size again: same allocation.
+        build_ribbon(&mut mesh, &samples, 0.7, &cfg, Some(Vec3::Y * 10.0));
+        assert_eq!(buffer(&mesh), first);
     }
 
     #[test]
