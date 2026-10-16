@@ -21,9 +21,10 @@ use rows::{Action, Nav, navigate};
 pub use selection::{CustomField, MenuMode, MenuSelection, RowId};
 
 use crate::{
+    combat::CombatKeys,
     flight::{KeyHelpAppExt, KeyHelpSection},
-    game_state::{GameSettings, Pause, RestartRound, Round, RoundPhase},
-    world::Lighting,
+    game_state::{GameSettings, Pause, RestartRound, Round, RoundPhase, TriggerHold},
+    world::{Lighting, LightingSystems},
 };
 
 /// Opens the menu from the result screen.
@@ -69,7 +70,10 @@ impl Plugin for MenuPlugin {
                 Update,
                 (
                     open_from_result_screen,
-                    menu_input.run_if(|menu: Res<Menu>| menu.open),
+                    menu_input
+                        .run_if(|menu: Res<Menu>| menu.open)
+                        // The light preview applies in the same frame.
+                        .before(LightingSystems),
                     sync_pause,
                     rebuild_menu,
                     show_result_button,
@@ -170,6 +174,7 @@ fn menu_input(
     mut settings: ResMut<GameSettings>,
     mut lighting: ResMut<Lighting>,
     mut restart: MessageWriter<RestartRound>,
+    (mut hold, combat): (ResMut<TriggerHold>, Res<CombatKeys>),
 ) {
     let rows = selection.rows();
     let cursor = rows.iter().position(|r| r.id == menu.cursor).unwrap_or(0);
@@ -202,6 +207,22 @@ fn menu_input(
             storage::save(&selection.to_line());
             restart.write(RestartRound);
             menu.open = false;
+            // The Space or click that started must not fire the gun: weapon
+            // inputs still down wait until they are released once.
+            let weapon_keys: Vec<_> = combat.gun.iter().chain(&combat.missile).copied().collect();
+            let weapon_mouse: Vec<_> = combat
+                .gun_mouse
+                .iter()
+                .chain(&combat.missile_mouse)
+                .copied()
+                .collect();
+            hold.hold_pressed(
+                (&keys, &weapon_keys),
+                pointer
+                    .mouse
+                    .as_deref()
+                    .map(|m| (m, weapon_mouse.as_slice())),
+            );
         }
         Action::None => {}
     }

@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use super::{GameSettings, Mission, Pause, WaveTrigger};
+use super::{GameSettings, Mission, Pause, TriggerHold, WaveTrigger};
 use crate::{
     ai::{Enemy, enemy_bundle},
     combat::{
@@ -156,9 +156,16 @@ impl Plugin for RoundPlugin {
     }
 }
 
-/// Weapons fire only while the round runs and the game is not paused.
-pub fn weapons_free(round: Option<Res<Round>>, pause: Option<Res<Pause>>) -> bool {
-    round.is_some_and(|r| r.is_running()) && !pause.is_some_and(|p| p.is_paused())
+/// Weapons fire only while the round runs, the game is not paused, and no
+/// input held over from the menu is still down (see [`TriggerHold`]).
+pub fn weapons_free(
+    round: Option<Res<Round>>,
+    pause: Option<Res<Pause>>,
+    hold: Option<Res<TriggerHold>>,
+) -> bool {
+    round.is_some_and(|r| r.is_running())
+        && !pause.is_some_and(|p| p.is_paused())
+        && !hold.is_some_and(|h| h.is_holding())
 }
 
 /// On a restart, drops hits, crashes and shots still queued from the old

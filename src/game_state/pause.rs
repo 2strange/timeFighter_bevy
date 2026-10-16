@@ -39,6 +39,65 @@ impl Pause {
     }
 }
 
+/// Inputs that were held when play (re)started. Weapons stay silent until
+/// each of them has been released once, so the Space or click that pressed
+/// Start does not also fire the gun in the first frame of the round.
+#[derive(Resource, Debug, Default, Clone, PartialEq)]
+pub struct TriggerHold {
+    keys: Vec<KeyCode>,
+    mouse: Vec<MouseButton>,
+}
+
+impl TriggerHold {
+    /// Holds those of `keys` and `mouse` that are pressed right now.
+    pub fn hold_pressed(
+        &mut self,
+        keys: (&ButtonInput<KeyCode>, &[KeyCode]),
+        mouse: Option<(&ButtonInput<MouseButton>, &[MouseButton])>,
+    ) {
+        self.keys = keys
+            .1
+            .iter()
+            .copied()
+            .filter(|k| keys.0.pressed(*k))
+            .collect();
+        self.mouse = mouse.map_or(vec![], |(input, buttons)| {
+            buttons
+                .iter()
+                .copied()
+                .filter(|b| input.pressed(*b))
+                .collect()
+        });
+    }
+
+    pub fn is_holding(&self) -> bool {
+        !self.keys.is_empty() || !self.mouse.is_empty()
+    }
+}
+
+fn release_trigger_hold(
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    mouse: Option<Res<ButtonInput<MouseButton>>>,
+    mut hold: ResMut<TriggerHold>,
+) {
+    if !hold.is_holding() {
+        return;
+    }
+    let keys_down = |k: &KeyCode| keys.as_ref().is_some_and(|keys| keys.pressed(*k));
+    let mouse_down = |b: &MouseButton| mouse.as_ref().is_some_and(|m| m.pressed(*b));
+    let still_keys: Vec<_> = hold.keys.iter().copied().filter(|k| keys_down(k)).collect();
+    let still_mouse: Vec<_> = hold
+        .mouse
+        .iter()
+        .copied()
+        .filter(|b| mouse_down(b))
+        .collect();
+    if still_keys.len() != hold.keys.len() || still_mouse.len() != hold.mouse.len() {
+        hold.keys = still_keys;
+        hold.mouse = still_mouse;
+    }
+}
+
 /// Redraw interval while the player has paused and gives no input.
 const IDLE_REDRAW: Duration = Duration::from_secs(1);
 
@@ -54,11 +113,15 @@ pub struct PausePlugin;
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Pause>()
+            .init_resource::<TriggerHold>()
             .add_key_help(KeyHelpSection::Game, "P / Esc", "pause")
             .add_systems(Startup, spawn_pause_screen)
             .add_systems(
                 Update,
-                (toggle_pause, pause_when_window_hidden, apply_pause).chain(),
+                (
+                    (toggle_pause, pause_when_window_hidden, apply_pause).chain(),
+                    release_trigger_hold,
+                ),
             );
     }
 }

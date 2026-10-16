@@ -251,8 +251,14 @@ impl MenuSelection {
         rows.push(Row {
             id: RowId::Lighting,
             label: "Light".into(),
-            choices: vec![Choice::new("Day"), Choice::new("Evening")],
-            selected: usize::from(self.lighting == Lighting::Evening),
+            choices: Lighting::ALL
+                .iter()
+                .map(|l| Choice::new(l.label()))
+                .collect(),
+            selected: Lighting::ALL
+                .iter()
+                .position(|l| *l == self.lighting)
+                .unwrap_or(0),
         });
         rows.push(Row {
             id: RowId::Start,
@@ -288,11 +294,9 @@ impl MenuSelection {
                 }
             }
             RowId::Lighting => {
-                self.lighting = if index == 1 {
-                    Lighting::Evening
-                } else {
-                    Lighting::Day
-                };
+                if let Some(lighting) = Lighting::ALL.get(index) {
+                    self.lighting = *lighting;
+                }
             }
             RowId::Start => {}
         }
@@ -305,14 +309,7 @@ impl MenuSelection {
             "v=1".to_owned(),
             format!("mode={}", self.mode.label().to_lowercase()),
             format!("level={}", self.level),
-            format!(
-                "light={}",
-                if self.lighting == Lighting::Evening {
-                    "evening"
-                } else {
-                    "day"
-                }
-            ),
+            format!("light={}", self.lighting.label().to_lowercase()),
             format!("edited={}", u8::from(self.custom_edited)),
         ];
         for field in CustomField::ALL {
@@ -341,11 +338,12 @@ impl MenuSelection {
                     }
                 }
                 "light" => {
-                    selection.lighting = if value == "evening" {
-                        Lighting::Evening
-                    } else {
-                        Lighting::Day
-                    };
+                    if let Some(lighting) = Lighting::ALL
+                        .into_iter()
+                        .find(|l| l.label().eq_ignore_ascii_case(value))
+                    {
+                        selection.lighting = lighting;
+                    }
                 }
                 "edited" => selection.custom_edited = value == "1",
                 _ => {

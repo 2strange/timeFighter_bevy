@@ -153,3 +153,46 @@ fn holding_a_key_moves_once() {
     app.update();
     assert_eq!(menu(&app).cursor, RowId::Difficulty);
 }
+
+fn shots_fired(app: &mut App) -> usize {
+    let messages = app.world().resource::<Messages<crate::combat::ShotFired>>();
+    messages.iter_current_update_messages().count()
+}
+
+#[test]
+fn space_held_through_start_does_not_fire_until_pressed_again() {
+    let mut app = game();
+    // Space starts the game from the menu and is held down afterwards.
+    key(&mut app, KeyCode::Space, ButtonState::Pressed);
+    app.update();
+    assert!(!menu(&app).open);
+    let mut fired = 0;
+    for _ in 0..30 {
+        app.update();
+        fired += shots_fired(&mut app);
+    }
+    assert_eq!(fired, 0, "held Space fired the gun after Start");
+
+    // Released and pressed again: now it fires.
+    key(&mut app, KeyCode::Space, ButtonState::Released);
+    app.update();
+    key(&mut app, KeyCode::Space, ButtonState::Pressed);
+    let mut fired = 0;
+    for _ in 0..10 {
+        app.update();
+        fired += shots_fired(&mut app);
+    }
+    assert!(fired > 0, "gun did not fire after a fresh press");
+}
+
+#[test]
+fn other_keys_held_at_start_do_not_block_the_weapons() {
+    let mut app = game();
+    // Accelerating while pressing Enter: throttle is not a weapon input.
+    key(&mut app, KeyCode::ArrowUp, ButtonState::Pressed);
+    app.update();
+    tap(&mut app, KeyCode::Enter);
+    assert!(!menu(&app).open);
+    app.update();
+    assert!(!app.world().resource::<TriggerHold>().is_holding());
+}

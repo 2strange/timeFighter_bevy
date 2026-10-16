@@ -9,7 +9,7 @@ mod settings;
 mod tests;
 
 pub use mission::{Formation, GameMode, Mission, SpawnGroup, WaveSpec, WaveTrigger};
-pub use pause::{Pause, PausePlugin};
+pub use pause::{Pause, PausePlugin, TriggerHold};
 pub use round::{
     Outcome, RESTART_KEYS, RestartRound, Round, RoundPhase, RoundPlugin, RoundStats, RoundSystems,
     weapons_free,
