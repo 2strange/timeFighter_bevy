@@ -4,7 +4,7 @@
 use bevy::prelude::*;
 
 use super::AircraftModel;
-use crate::camera::CameraSystems;
+use crate::{camera::CameraSystems, game_state::Pause};
 
 /// Where the showroom floats, well away from the flying area.
 const ORIGIN: Vec3 = Vec3::new(0.0, 1_500.0, -1_500.0);
@@ -60,18 +60,14 @@ impl Plugin for ShowroomPlugin {
 fn toggle(
     keys: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<ShowroomState>,
-    mut time: ResMut<Time<Virtual>>,
+    mut pause: ResMut<Pause>,
     mut help: Query<&mut Visibility, With<ShowroomHelp>>,
 ) {
     if !keys.just_pressed(KeyCode::KeyM) {
         return;
     }
     state.active = !state.active;
-    if state.active {
-        time.pause();
-    } else {
-        time.unpause();
-    }
+    pause.showroom = state.active;
     for mut visibility in &mut help {
         *visibility = if state.active {
             Visibility::Visible

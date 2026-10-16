@@ -5,6 +5,7 @@
 pub mod aircraft;
 pub mod camera;
 pub mod flight;
+pub mod game_state;
 pub mod world;
 
 use bevy::prelude::*;
@@ -19,6 +20,7 @@ impl Plugin for GamePlugin {
             flight::PlayerFlightPlugin,
             camera::ChaseCameraPlugin,
             aircraft::ShowroomPlugin,
+            game_state::PausePlugin,
             world::WorldPlugin,
         ));
     }

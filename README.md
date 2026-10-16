@@ -15,6 +15,7 @@ A modern jet fighter is pulled through a time vortex over the Bermuda Triangle a
 | Q / E or Left / Right | yaw |
 | Up / Down | throttle |
 | R | reset |
+| P / Esc | pause (also when the window loses focus) |
 | M | aircraft showroom (pauses the game) |
 
 ## Building
