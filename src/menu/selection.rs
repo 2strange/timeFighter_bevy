@@ -372,6 +372,41 @@ impl MenuSelection {
         *self != before
     }
 
+    /// Applies a start request from the start page (`mode` and `level`,
+    /// by name like `protect` / `hard` or by index); unknown values are
+    /// ignored.
+    pub fn apply_request(&mut self, request: &str) {
+        for (key, value) in super::storage::parse(request) {
+            let value = value.to_lowercase();
+            match key {
+                "mode" => {
+                    if let Some(mode) = MenuMode::ALL
+                        .into_iter()
+                        .find(|m| m.available() && m.label().eq_ignore_ascii_case(&value))
+                    {
+                        self.mode = mode;
+                    }
+                }
+                "level" => {
+                    let by_name = |name: &str| name.to_lowercase().replace(' ', "-") == value;
+                    let level = value.parse::<usize>().ok().or_else(|| {
+                        if value == "custom" {
+                            Some(CUSTOM_LEVEL)
+                        } else {
+                            Difficulty::PRESETS
+                                .iter()
+                                .position(|d| by_name(d.display_name()))
+                        }
+                    });
+                    if let Some(level) = level.filter(|l| *l < LEVELS) {
+                        self.select(RowId::Difficulty, level);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// One line for storage.
     pub fn to_line(&self) -> String {
         let mut parts = vec![
