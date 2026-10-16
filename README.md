@@ -12,7 +12,7 @@ A modern jet fighter is pulled through a time vortex over the Bermuda Triangle a
 |---|---|
 | W / S | pitch (W = nose down) |
 | A / D | roll |
-| Q / E | yaw |
+| Q / E or Left / Right | yaw |
 | Up / Down | throttle |
 | R | reset |
 

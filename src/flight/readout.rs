@@ -36,7 +36,7 @@ pub(super) fn update_readout(
     let throttle = (state.speed - cfg.speed_min) / (cfg.speed_max - cfg.speed_min) * 100.0;
     text.0 = format!(
         "SPD {:>5.0} km/h  ({:>3.0} m/s)\nALT {:>5.0} m\nTHR {:>5.0} %\n\n\
-         W/S pitch   A/D roll   Q/E yaw\nUp/Down throttle   R reset",
+         W/S pitch   A/D roll   Q/E or Left/Right yaw\nUp/Down throttle   R reset",
         state.speed * 3.6,
         state.speed,
         transform.translation.y,

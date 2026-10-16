@@ -14,6 +14,7 @@ Controls
     W / S         pitch (W = nose down, S = nose up)
     A / D         roll left / right
     Q / E         yaw left / right
+    Left / Right  yaw left / right (same as Q / E)
     Up / Down     throttle (50 ... 500 m/s)
     R             reset to spawn
 
