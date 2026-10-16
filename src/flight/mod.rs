@@ -16,7 +16,7 @@ use bevy::prelude::*;
 
 use crate::game_state::RoundSystems;
 
-pub use config::FlightConfig;
+pub use config::{FlightConfig, PLAYER_SPAWN, SPAWN_AIM, spawn_pitch_towards};
 pub use key_help::{KeyHelpAppExt, KeyHelpLines, KeyHelpSection};
 pub use model::{FlightInput, FlightState, step};
 

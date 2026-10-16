@@ -41,13 +41,28 @@ fn transform(app: &App, jet: Entity) -> Transform {
 }
 
 #[test]
+fn spawn_is_over_the_southern_suburbs_facing_the_centre() {
+    let cfg = FlightConfig::default();
+    let at = cfg.spawn_transform();
+    assert_eq!(at.translation, Vec3::new(0.0, 400.0, 4_000.0));
+    // The nose points at the aim point above the centre.
+    let to_aim = (super::SPAWN_AIM - at.translation).normalize();
+    assert!(
+        at.forward().angle_between(to_aim) < 1e-4,
+        "{:?}",
+        at.forward()
+    );
+}
+
+#[test]
 fn aircraft_axes_and_spawn_pitch_follow_the_world_convention() {
     // Check the world-space convention directly, without relying on Transform::forward().
     assert_eq!(Quat::IDENTITY * Vec3::NEG_Z, Vec3::NEG_Z);
     assert_eq!(Quat::IDENTITY * Vec3::Y, Vec3::Y);
 
     let cfg = FlightConfig::default();
-    assert_eq!(cfg.spawn_pitch, (-15.0_f32).to_radians());
+    // Starts over the suburbs, nose slightly down towards the centre.
+    assert!(cfg.spawn_pitch < 0.0 && cfg.spawn_pitch > (-10.0_f32).to_radians());
 
     let spawn_nose = cfg.spawn_transform().rotation * Vec3::NEG_Z;
     let expected_nose = Vec3::new(0.0, cfg.spawn_pitch.sin(), -cfg.spawn_pitch.cos());

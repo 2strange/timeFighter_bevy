@@ -60,6 +60,19 @@ pub struct FlightConfig {
     pub player_model: Option<AircraftModel>,
 }
 
+/// Where the player starts: over the southern suburbs, 4 km south (+Z) of
+/// the city centre at 400 m, flying north (−Z) towards downtown.
+pub const PLAYER_SPAWN: Vec3 = Vec3::new(0.0, 400.0, 4_000.0);
+
+/// The point the spawn heading looks at: the city centre, at about the
+/// height of the downtown towers, so the skyline fills the view.
+pub const SPAWN_AIM: Vec3 = Vec3::new(0.0, 100.0, 0.0);
+
+/// Pitch (rad) that points a nose along −Z from `from` at `to`'s height.
+pub fn spawn_pitch_towards(from: Vec3, to: Vec3) -> f32 {
+    (to.y - from.y).atan2((from.z - to.z).max(1.0))
+}
+
 impl Default for FlightConfig {
     fn default() -> Self {
         Self {
@@ -81,8 +94,8 @@ impl Default for FlightConfig {
             max_dt: crate::MAX_STEP,
             min_altitude: -30.0,
 
-            spawn_position: Vec3::new(0.0, 500.0, 800.0),
-            spawn_pitch: (-15.0_f32).to_radians(),
+            spawn_position: PLAYER_SPAWN,
+            spawn_pitch: spawn_pitch_towards(PLAYER_SPAWN, SPAWN_AIM),
 
             player_model: Some(AircraftModel::F14Tomcat),
         }
