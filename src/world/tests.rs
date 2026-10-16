@@ -652,6 +652,20 @@ fn city_stays_within_render_budget() {
         layout.bridges.len(),
         layout.farms.len()
     );
+    // Static colliders: one body per building and bridge, land boxes and
+    // the water plane; boxes inside them.
+    let land = meshes::land_rects(&layout, &quads).len();
+    let bodies = layout.buildings.len() + layout.bridges.len() + land + 1;
+    let boxes: usize = layout
+        .buildings
+        .iter()
+        .map(|b| b.collision_boxes().count())
+        .chain(layout.bridges.iter().map(|b| b.collision_boxes().count()))
+        .sum::<usize>()
+        + land;
+    println!("collider bodies {bodies} (land {land}), boxes {boxes}");
+    assert!(bodies <= 15_000, "too many collider bodies");
+    assert!(boxes <= 16_000, "too many collider boxes");
     // Phase 1 measured smooth on Austin's Mac at ~7k buildings / ~136k
     // triangles; the enlarged city (~12k / ~225k) keeps ~10 % headroom.
     assert!(layout.buildings.len() <= 14_000, "too many buildings");
