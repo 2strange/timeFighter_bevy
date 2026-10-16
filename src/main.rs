@@ -30,12 +30,13 @@ fn main() {
         .run();
 }
 
-/// The browser console only gets warnings and errors.
+/// The browser console gets warnings and errors, plus the game's own info
+/// lines (e.g. the city fingerprint for comparing builds).
 fn log_settings() -> LogPlugin {
     if cfg!(target_arch = "wasm32") {
         LogPlugin {
             level: bevy::log::Level::WARN,
-            filter: "wgpu=error".into(),
+            filter: "wgpu=error,timefighter=info".into(),
             ..default()
         }
     } else {
