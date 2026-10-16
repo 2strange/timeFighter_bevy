@@ -27,3 +27,29 @@ pub fn format_time(seconds: f32) -> String {
     let total = seconds.max(0.0) as u32;
     format!("{}:{:02}", total / 60, total % 60)
 }
+
+/// The enemy the gun pipper is for: the locked target if it is in front,
+/// otherwise the enemy closest to the nose within `cone`. Candidates are
+/// `(entity, position, velocity)`.
+pub fn gun_target(
+    position: Vec3,
+    forward: Vec3,
+    locked: Option<Entity>,
+    cone: f32,
+    candidates: impl Iterator<Item = (Entity, Vec3, Vec3)>,
+) -> Option<(Entity, Vec3, Vec3)> {
+    let mut best: Option<((Entity, Vec3, Vec3), f32)> = None;
+    for candidate in candidates {
+        let angle = forward.angle_between(candidate.1 - position);
+        if angle > cone {
+            continue;
+        }
+        if Some(candidate.0) == locked {
+            return Some(candidate);
+        }
+        if best.is_none_or(|(_, a)| angle < a) {
+            best = Some((candidate, angle));
+        }
+    }
+    best.map(|(candidate, _)| candidate)
+}

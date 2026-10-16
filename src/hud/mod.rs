@@ -10,14 +10,14 @@ mod tests;
 
 use bevy::{platform::collections::HashSet, prelude::*};
 
-pub use layout::{edge_point, format_time};
+pub use layout::{edge_point, format_time, gun_target};
 
 use crate::{
     ai::Enemy,
     camera::{CameraSystems, ChaseCamera},
     combat::{
-        CombatConfig, Destroyed, Gun, Health, Hit, LockOn, LockState, MissileRack, Team,
-        in_seeker_cone,
+        AircraftVelocity, CombatConfig, Destroyed, Gun, Health, Hit, LockOn, LockState,
+        MissileRack, Team, gun_lead, in_seeker_cone,
     },
     flight::{FlightState, PlayerAircraft},
     game_state::{Mission, Outcome, Round, RoundPhase, RoundSystems},
@@ -35,6 +35,11 @@ const RETICLE_RANGE: f32 = 800.0;
 const EDGE_MARGIN: f32 = 28.0;
 const MARKER_SIZE: f32 = 30.0;
 const RETICLE_SIZE: f32 = 26.0;
+const PIPPER_SIZE: f32 = 12.0;
+/// The lead pipper considers targets up to this far off the nose (rad).
+const PIPPER_CONE: f32 = 30.0 * std::f32::consts::PI / 180.0;
+/// Within this distance (m) the pipper fills in: close enough to hit well.
+const PIPPER_GOOD_RANGE: f32 = 900.0;
 
 pub struct HudPlugin;
 
@@ -49,6 +54,7 @@ impl Plugin for HudPlugin {
                     update_texts,
                     sync_markers,
                     place_reticle_and_markers,
+                    place_pipper,
                     update_result_screen,
                 )
                     .chain()
@@ -86,6 +92,10 @@ enum HudText {
 
 #[derive(Component)]
 struct Reticle;
+
+/// Lead pipper: where to put the gun reticle so the rounds meet the target.
+#[derive(Component)]
+struct Pipper;
 
 /// Box around an enemy on screen, or a dot at the screen edge pointing to it.
 #[derive(Component)]
@@ -228,6 +238,22 @@ fn spawn_hud(mut commands: Commands) {
                         below.spawn((HudText::Splash, text("", 18.0, HUD)));
                     });
             });
+
+            // Lead pipper.
+            hud.spawn((
+                Pipper,
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: px(PIPPER_SIZE),
+                    height: px(PIPPER_SIZE),
+                    border: UiRect::all(px(2)),
+                    border_radius: BorderRadius::MAX,
+                    ..default()
+                },
+                BorderColor::all(TRACKING),
+                BackgroundColor(Color::NONE),
+                Visibility::Hidden,
+            ));
 
             // Result screen.
             hud.spawn((
@@ -531,6 +557,71 @@ fn place_reticle_and_markers(
                 }
                 color.set_if_neq(TextColor(tint));
             }
+        }
+    }
+}
+
+/// Shows where to aim the gun: for the locked target, or else the enemy
+/// closest to the nose, if the rounds can reach it. Put the reticle on the
+/// pipper and the rounds meet the target.
+#[allow(clippy::type_complexity)]
+fn place_pipper(
+    round: Res<Round>,
+    camera: Query<(&Camera, &Transform), With<ChaseCamera>>,
+    player: Query<
+        (&Transform, Option<&AircraftVelocity>, &Gun, Option<&LockOn>),
+        With<PlayerAircraft>,
+    >,
+    enemies: Query<(Entity, &Transform, Option<&AircraftVelocity>), With<Enemy>>,
+    mut pipper: Query<(&mut Node, &mut Visibility, &mut BackgroundColor), With<Pipper>>,
+) {
+    let Ok((mut node, mut visibility, mut fill)) = pipper.single_mut() else {
+        return;
+    };
+    let solution = (|| {
+        if round.outcome().is_some() {
+            return None;
+        }
+        let (camera, camera_tf) = camera.single().ok()?;
+        let (jet, jet_velocity, gun, lock) = player.single().ok()?;
+        let shooter_velocity = jet_velocity.map_or(Vec3::ZERO, |v| v.0);
+        let candidates = enemies.iter().map(|(entity, tf, velocity)| {
+            (entity, tf.translation, velocity.map_or(Vec3::ZERO, |v| v.0))
+        });
+        let (_, position, velocity) = gun_target(
+            jet.translation,
+            jet.forward().as_vec3(),
+            lock.and_then(LockOn::locked_target),
+            PIPPER_CONE,
+            candidates,
+        )?;
+        let to_target = position - jet.translation;
+        let (direction, flight_time) =
+            gun_lead(to_target, shooter_velocity, velocity, gun.spec.muzzle_speed)?;
+        if flight_time > gun.spec.lifetime {
+            return None;
+        }
+        // Same depth as the reticle, so both line up exactly when aimed.
+        let aim = jet.translation + direction * RETICLE_RANGE;
+        let p = camera
+            .world_to_viewport(&GlobalTransform::from(*camera_tf), aim)
+            .ok()?;
+        Some((p, to_target.length()))
+    })();
+    match solution {
+        Some((p, distance)) => {
+            node.left = px(p.x - PIPPER_SIZE / 2.0);
+            node.top = px(p.y - PIPPER_SIZE / 2.0);
+            visibility.set_if_neq(Visibility::Visible);
+            let color = if distance <= PIPPER_GOOD_RANGE {
+                TRACKING
+            } else {
+                Color::NONE
+            };
+            fill.set_if_neq(BackgroundColor(color));
+        }
+        None => {
+            visibility.set_if_neq(Visibility::Hidden);
         }
     }
 }

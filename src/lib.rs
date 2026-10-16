@@ -45,20 +45,6 @@ impl Plugin for GamePlugin {
             hud::HudPlugin,
             audio::SoundHooksPlugin,
         ));
-
-        // Key help for combat and rounds; can move into those plugins.
-        use flight::{KeyHelpAppExt, KeyHelpSection};
-        app.add_key_help(KeyHelpSection::Weapons, "Space / left mouse", "machine gun")
-            .add_key_help(
-                KeyHelpSection::Weapons,
-                "Right Shift / right Alt (Option) / right mouse",
-                "missile (homes on a locked target)",
-            )
-            .add_key_help(
-                KeyHelpSection::Round,
-                "Enter / R",
-                "fly again after a round",
-            );
     }
 }
 

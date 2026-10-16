@@ -25,10 +25,10 @@ pub use config::{CombatConfig, CombatKeys, GunSpec, LockSpec, MissileSpec};
 pub use lock::{LockOn, LockState, in_seeker_cone};
 pub use rng::CombatRng;
 pub use visuals::CombatVisualsPlugin;
-pub use weapons::{Gun, Missile, MissileRack, Munition, Trigger, Weapon};
+pub use weapons::{Gun, Missile, MissileRack, Munition, Trigger, Weapon, gun_lead};
 
 use crate::{
-    flight::{FlightState, FlightSystems, PlayerAircraft},
+    flight::{FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft},
     physics::{EnemyCrashed, PlayerCrashed, ProjectileHit},
 };
 
@@ -142,6 +142,12 @@ pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
+        app.add_key_help(KeyHelpSection::Weapons, "Space / left mouse", "machine gun")
+            .add_key_help(
+                KeyHelpSection::Weapons,
+                "Right Shift / right Alt (Option) / right mouse",
+                "missile (homes on a locked target)",
+            );
         app.init_resource::<CombatConfig>()
             .init_resource::<CombatKeys>()
             .init_resource::<CombatRng>()

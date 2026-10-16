@@ -509,3 +509,110 @@ fn a_real_city_building_stops_gun_rounds() {
         hits.len()
     );
 }
+
+#[test]
+fn gun_lead_meets_the_target() {
+    let cases = [
+        // (to target, shooter velocity, target velocity)
+        (
+            Vec3::new(0.0, 0.0, -500.0),
+            Vec3::ZERO,
+            Vec3::new(170.0, 0.0, 0.0),
+        ),
+        (
+            Vec3::new(200.0, 50.0, -700.0),
+            Vec3::NEG_Z * 300.0,
+            Vec3::new(-150.0, 20.0, 60.0),
+        ),
+        (
+            Vec3::new(0.0, 0.0, -300.0),
+            Vec3::NEG_Z * 450.0,
+            Vec3::NEG_Z * 160.0,
+        ),
+    ];
+    let speed = CombatConfig::default().player_gun.muzzle_speed;
+    for (to_target, shooter, target) in cases {
+        let (direction, t) = super::gun_lead(to_target, shooter, target, speed).unwrap();
+        assert!((direction.length() - 1.0).abs() < 1e-4);
+        let round = (shooter + direction * speed) * t;
+        let enemy = to_target + target * t;
+        assert!(
+            round.distance(enemy) < 0.05,
+            "miss by {} m",
+            round.distance(enemy)
+        );
+    }
+    // A target running away faster than the rounds cannot be caught.
+    assert!(
+        super::gun_lead(
+            Vec3::NEG_Z * 500.0,
+            Vec3::ZERO,
+            Vec3::NEG_Z * 2_000.0,
+            speed
+        )
+        .is_none()
+    );
+}
+
+/// A target flying straight at constant speed.
+#[derive(Component)]
+struct Cruise(Vec3);
+
+fn cruise(time: Res<Time>, mut targets: Query<(&Cruise, &mut Transform, &mut AircraftVelocity)>) {
+    for (cruise, mut transform, mut velocity) in &mut targets {
+        velocity.0 = cruise.0;
+        transform.translation += cruise.0 * time.delta_secs();
+    }
+}
+
+/// Keeps the jet's nose on the gun lead (or straight on the target),
+/// like a pilot holding the reticle on the pipper.
+#[derive(Resource)]
+struct AimWithLead(bool);
+
+fn aim_at_target(
+    lead: Res<AimWithLead>,
+    targets: Query<(&Transform, &AircraftVelocity), With<Cruise>>,
+    mut jet: Query<&mut Transform, (With<PlayerAircraft>, Without<Cruise>)>,
+) {
+    let (Ok((target, velocity)), Ok(mut jet)) = (targets.single(), jet.single_mut()) else {
+        return;
+    };
+    let to_target = target.translation - jet.translation;
+    let speed = CombatConfig::default().player_gun.muzzle_speed;
+    let direction = if lead.0 {
+        super::gun_lead(to_target, Vec3::ZERO, velocity.0, speed)
+            .unwrap()
+            .0
+    } else {
+        to_target.normalize()
+    };
+    jet.look_to(direction, Vec3::Y);
+}
+
+fn crossing_target_destroyed(lead: bool) -> bool {
+    let mut app = app();
+    app.insert_resource(AimWithLead(lead)).add_systems(
+        Update,
+        (cruise, aim_at_target)
+            .chain()
+            .before(super::CombatSystems::Aim),
+    );
+    spawn_player(&mut app, high_up());
+    // A Spitfire crossing 500 m ahead at 170 m/s.
+    let target = spawn_target(&mut app, Vec3::new(-150.0, 1_000.0, -500.0));
+    app.world_mut()
+        .entity_mut(target)
+        .insert(Cruise(Vec3::X * 170.0));
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Space);
+    run_for(&mut app, 1.5);
+    app.world().get_entity(target).is_err()
+}
+
+#[test]
+fn aiming_at_the_lead_point_hits_a_crossing_spitfire_and_aiming_at_it_does_not() {
+    assert!(crossing_target_destroyed(true), "lead aim missed");
+    assert!(!crossing_target_destroyed(false), "direct aim hit anyway");
+}

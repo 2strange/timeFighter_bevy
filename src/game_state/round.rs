@@ -12,7 +12,9 @@ use crate::{
         CombatConfig, CombatSystems, DestroyCause, Destroyed, Hit, Munition, ShotFired, Team,
         Weapon, player_loadout,
     },
-    flight::{FlightConfig, FlightState, FlightSystems, PlayerAircraft},
+    flight::{
+        FlightConfig, FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft,
+    },
     physics::{CrashSweep, EnemyCrashed, PlayerCrashed, ProjectileHit},
 };
 
@@ -117,6 +119,11 @@ pub struct RoundPlugin;
 
 impl Plugin for RoundPlugin {
     fn build(&self, app: &mut App) {
+        app.add_key_help(
+            KeyHelpSection::Round,
+            "Enter / R",
+            "fly again after a round",
+        );
         app.init_resource::<Mission>()
             .init_resource::<Round>()
             .add_message::<RestartRound>()
@@ -302,7 +309,7 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
         }
         for group in &wave.groups {
             for transform in group.transforms() {
-                commands.spawn(enemy_bundle(group.kind, transform));
+                commands.spawn(enemy_bundle(group.kind, group.skill, transform));
             }
         }
         round.spawned += wave.enemy_count();

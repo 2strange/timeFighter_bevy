@@ -469,3 +469,25 @@ fn paused_weapons_neither_fire_nor_fire_later() {
         combat.player_missiles
     );
 }
+
+#[test]
+fn hunt_sends_rookies_first_and_veterans_second() {
+    let (mut app, _) = app();
+    let skills = |app: &mut App| {
+        app.world_mut()
+            .query::<&crate::ai::EnemyPilot>()
+            .iter(app.world())
+            .map(|p| p.skill)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        skills(&mut app)
+            .iter()
+            .all(|s| *s == crate::ai::PilotSkill::ROOKIE)
+    );
+    shoot_down_all(&mut app);
+    app.update();
+    let second = skills(&mut app);
+    assert!(!second.is_empty());
+    assert!(second.iter().all(|s| *s == crate::ai::PilotSkill::VETERAN));
+}

@@ -5,7 +5,9 @@ use std::time::Duration;
 use bevy::{prelude::*, time::TimeUpdateStrategy, transform::TransformPlugin};
 use bevy_rapier3d::prelude::{Collider, RigidBody};
 
-use super::{AiConfig, AiPlugin, EnemyKind, EnemyPilot, ObstacleMap, PilotMode, enemy_bundle};
+use super::{
+    AiConfig, AiPlugin, EnemyKind, EnemyPilot, ObstacleMap, PilotMode, PilotSkill, enemy_bundle,
+};
 use crate::{
     combat::{
         CombatConfig, CombatPlugin, DestroyCause, Destroyed, Health, LockOn, LockState, Team,
@@ -65,7 +67,11 @@ fn spawn_ghost_player(
 
 fn spawn_enemy(app: &mut App, transform: Transform) -> Entity {
     app.world_mut()
-        .spawn(enemy_bundle(EnemyKind::Spitfire, transform))
+        .spawn(enemy_bundle(
+            EnemyKind::Spitfire,
+            PilotSkill::VETERAN,
+            transform,
+        ))
         .id()
 }
 
@@ -333,4 +339,40 @@ fn a_zero_lookahead_step_is_clamped_and_still_avoids_the_ground() {
         lowest = lowest.min(app.world().get::<Transform>(enemy).unwrap().translation.y);
     }
     assert!(lowest > 20.0, "dipped to {lowest:.0} m");
+}
+
+#[test]
+fn rookies_take_longer_than_veterans_to_break() {
+    let break_after = |skill: PilotSkill| {
+        let mut app = app(60.0, false);
+        spawn_player(
+            &mut app,
+            Transform::from_xyz(0.0, 800.0, 0.0),
+            200.0,
+            FlightInput::default(),
+        );
+        let enemy = app
+            .world_mut()
+            .spawn(enemy_bundle(
+                EnemyKind::Spitfire,
+                skill,
+                Transform::from_xyz(0.0, 800.0, -400.0),
+            ))
+            .id();
+        for frame in 0..120 {
+            app.update();
+            let pilot = app.world().get::<EnemyPilot>(enemy).unwrap();
+            if matches!(pilot.mode, PilotMode::Break { .. }) {
+                return Some(frame as f32 / 60.0);
+            }
+        }
+        None
+    };
+    let veteran = break_after(PilotSkill::VETERAN).expect("veteran breaks");
+    let rookie = break_after(PilotSkill::ROOKIE).expect("rookie breaks");
+    assert!(veteran < 0.05, "veteran after {veteran} s");
+    assert!(
+        rookie >= PilotSkill::ROOKIE.reaction - 0.02,
+        "rookie after {rookie} s"
+    );
 }

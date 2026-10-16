@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use super::{TargetMarker, edge_point, format_time};
+use super::{TargetMarker, edge_point, format_time, gun_target};
 use crate::{GamePlugin, ai::Enemy, test_support::headless_app};
 
 #[test]
@@ -49,4 +49,25 @@ fn full_game_runs_headless_with_one_marker_per_enemy() {
         .count();
     assert!(enemies > 0, "first wave spawned");
     assert_eq!(markers, enemies);
+}
+
+#[test]
+fn pipper_target_prefers_the_lock_then_the_nose() {
+    let a = Entity::from_raw_u32(1).unwrap();
+    let b = Entity::from_raw_u32(2).unwrap();
+    let c = Entity::from_raw_u32(3).unwrap();
+    let cone = 30_f32.to_radians();
+    let candidates = || {
+        [
+            (a, Vec3::new(100.0, 0.0, -1_000.0), Vec3::ZERO), // ~6° off
+            (b, Vec3::new(10.0, 0.0, -400.0), Vec3::ZERO),    // ~1.4° off
+            (c, Vec3::new(0.0, 0.0, 400.0), Vec3::ZERO),      // behind
+        ]
+        .into_iter()
+    };
+    let pick =
+        |locked| gun_target(Vec3::ZERO, Vec3::NEG_Z, locked, cone, candidates()).map(|t| t.0);
+    assert_eq!(pick(None), Some(b), "closest to the nose");
+    assert_eq!(pick(Some(a)), Some(a), "the lock wins");
+    assert_eq!(pick(Some(c)), Some(b), "a lock behind does not count");
 }

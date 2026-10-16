@@ -268,6 +268,41 @@ pub(super) fn launch_missiles(
     }
 }
 
+/// Where to point a gun so its rounds meet a target: the unit direction
+/// to fire along and the time of flight (s). `to_target` is the target's
+/// position relative to the shooter; rounds leave at `muzzle_speed` on top
+/// of the shooter's velocity, and the target keeps its velocity (arcade
+/// rounds fly straight). `None` when the rounds cannot catch the target.
+pub fn gun_lead(
+    to_target: Vec3,
+    shooter_velocity: Vec3,
+    target_velocity: Vec3,
+    muzzle_speed: f32,
+) -> Option<(Vec3, f32)> {
+    // In the shooter's moving frame the round flies at `muzzle_speed`:
+    // |to_target + v·t| = muzzle_speed·t, a quadratic in t.
+    let v = target_velocity - shooter_velocity;
+    let a = v.dot(v) - muzzle_speed * muzzle_speed;
+    let b = 2.0 * to_target.dot(v);
+    let c = to_target.dot(to_target);
+    let t = if a.abs() < 1e-6 {
+        (b < 0.0).then(|| -c / b)?
+    } else {
+        let disc = b * b - 4.0 * a * c;
+        if disc < 0.0 {
+            return None;
+        }
+        let root = disc.sqrt();
+        let (t1, t2) = ((-b - root) / (2.0 * a), (-b + root) / (2.0 * a));
+        [t1, t2]
+            .into_iter()
+            .filter(|t| *t > 0.0)
+            .min_by(f32::total_cmp)?
+    };
+    let direction = (to_target + v * t).try_normalize()?;
+    Some((direction, t))
+}
+
 /// Rotation that points −Z along `velocity`.
 pub fn heading(velocity: Vec3) -> Quat {
     let Some(dir) = velocity.try_normalize() else {

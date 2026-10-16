@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use crate::ai::EnemyKind;
+use crate::ai::{EnemyKind, PilotSkill};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum GameMode {
@@ -69,6 +69,7 @@ pub struct SpawnGroup {
     /// Initial flight direction (horizontal is fine; normalised on spawn).
     pub heading: Vec3,
     pub formation: Formation,
+    pub skill: PilotSkill,
 }
 
 impl SpawnGroup {
@@ -112,27 +113,39 @@ impl Default for Mission {
 }
 
 impl Mission {
-    /// Mode 1: two flights of four Spitfires. The first comes head-on from
-    /// the city (the player starts at z = +800 m flying along −Z), the
-    /// second from the flank once the first is nearly gone.
+    /// Mode 1: two flights of four Spitfires. The first, rookies, comes
+    /// head-on from the city (the player starts at z = +800 m flying along
+    /// −Z); the second, veterans, from the flank once the first is nearly
+    /// gone. The fight gets harder as it goes on.
     pub fn hunt() -> Self {
-        let spitfires = |count, lead: Vec3, heading: Vec3| SpawnGroup {
+        let spitfires = |count, lead: Vec3, heading: Vec3, skill| SpawnGroup {
             kind: EnemyKind::Spitfire,
             count,
             lead,
             heading,
             formation: Formation::Vic { spacing: 45.0 },
+            skill,
         };
         Self {
             mode: GameMode::Hunt,
             waves: vec![
                 WaveSpec {
                     trigger: WaveTrigger::AtStart,
-                    groups: vec![spitfires(4, Vec3::new(0.0, 700.0, -2_800.0), Vec3::Z)],
+                    groups: vec![spitfires(
+                        4,
+                        Vec3::new(0.0, 700.0, -2_800.0),
+                        Vec3::Z,
+                        PilotSkill::ROOKIE,
+                    )],
                 },
                 WaveSpec {
                     trigger: WaveTrigger::WhenEnemiesAtMost(1),
-                    groups: vec![spitfires(4, Vec3::new(-3_200.0, 900.0, -600.0), Vec3::X)],
+                    groups: vec![spitfires(
+                        4,
+                        Vec3::new(-3_200.0, 900.0, -600.0),
+                        Vec3::X,
+                        PilotSkill::VETERAN,
+                    )],
                 },
             ],
             end_delay: 1.5,

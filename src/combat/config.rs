@@ -23,13 +23,15 @@ pub struct GunSpec {
 }
 
 impl GunSpec {
-    /// The jet's cannon: fast, tight, 1.5 s of flight (about 1.6 km).
+    /// The jet's cannon: fast and tight, 1.3 s of flight (about 1.6 km).
+    /// Three hits bring down a Spitfire. Faster rounds need less lead, so
+    /// fast WWII fighters stay hittable.
     pub const JET_CANNON: GunSpec = GunSpec {
         rate: 20.0,
-        muzzle_speed: 1_050.0,
-        spread: 0.35_f32 * (std::f32::consts::PI / 180.0),
-        damage: 10.0,
-        lifetime: 1.5,
+        muzzle_speed: 1_200.0,
+        spread: 0.3_f32 * (std::f32::consts::PI / 180.0),
+        damage: 17.0,
+        lifetime: 1.3,
         muzzle_offset: 12.0,
         radius: 0.5,
     };

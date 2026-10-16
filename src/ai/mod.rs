@@ -116,10 +116,6 @@ pub struct AiConfig {
     pub player_aim_cone: f32,
     /// A missile homing on the enemy is noticed within this distance (m).
     pub missile_warning: f32,
-    /// How long a break turn lasts (s, random in range).
-    pub break_time: (f32, f32),
-    /// Pause after a break before the next one (s).
-    pub break_cooldown: f32,
     /// Head-on pass closer than this (m) makes the pilot extend ...
     pub overshoot_range: f32,
     /// ... for this long (s) before turning back in.
@@ -150,8 +146,6 @@ impl Default for AiConfig {
             tail_cone: 40_f32.to_radians(),
             player_aim_cone: 12_f32.to_radians(),
             missile_warning: 1_800.0,
-            break_time: (1.8, 3.2),
-            break_cooldown: 2.0,
             overshoot_range: 150.0,
             extend_time: 2.5,
 
@@ -178,9 +172,51 @@ pub enum PilotMode {
     Extend { direction: Vec3 },
 }
 
+/// How well a pilot fights. Missions put rookies in early waves and
+/// veterans later, so the fight gets harder as it goes on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PilotSkill {
+    /// How long a threat (player on the tail, missile coming) must last
+    /// before the pilot breaks (s). Gives the player a moment to shoot.
+    pub reaction: f32,
+    /// Pause after a break before the next one (s).
+    pub break_cooldown: f32,
+    /// How long a break turn lasts (s, random in range).
+    pub break_time: (f32, f32),
+    /// Share of the aircraft type's turn rate the pilot uses.
+    pub turn_rate: f32,
+}
+
+impl PilotSkill {
+    /// Slow to notice a pursuer, breaks less often and less hard.
+    pub const ROOKIE: PilotSkill = PilotSkill {
+        reaction: 0.8,
+        break_cooldown: 4.0,
+        break_time: (1.2, 2.2),
+        turn_rate: 0.85,
+    };
+
+    /// Breaks at once and often: the original behaviour.
+    pub const VETERAN: PilotSkill = PilotSkill {
+        reaction: 0.0,
+        break_cooldown: 2.0,
+        break_time: (1.8, 3.2),
+        turn_rate: 1.0,
+    };
+}
+
+impl Default for PilotSkill {
+    fn default() -> Self {
+        Self::VETERAN
+    }
+}
+
 /// Decision state of an enemy pilot.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct EnemyPilot {
+    pub skill: PilotSkill,
+    /// How long the current threat has lasted (s).
+    pub threat_time: f32,
     pub mode: PilotMode,
     /// Time left in `Break` or `Extend` (s).
     pub mode_time: f32,
@@ -200,13 +236,14 @@ pub struct EnemyFlight {
     pub bank: f32,
 }
 
-/// Everything an enemy of `kind` needs, at `transform` (nose along −Z).
-pub fn enemy_bundle(kind: EnemyKind, transform: Transform) -> impl Bundle {
+/// Everything an enemy of `kind` flown with `skill` needs, at `transform`
+/// (nose along −Z).
+pub fn enemy_bundle(kind: EnemyKind, skill: PilotSkill, transform: Transform) -> impl Bundle {
     let stats = kind.stats();
     (
         Name::new(format!("Enemy {}", kind.display_name())),
         Enemy { kind },
-        EnemyPilot::default(),
+        EnemyPilot { skill, ..default() },
         EnemyFlight {
             speed: stats.cruise_speed,
             bank: 0.0,
@@ -317,10 +354,11 @@ fn fly_enemies(
         let desired = keep_in_arena(&cfg, position, decision.direction);
         let desired = avoid_terrain(&cfg, &obstacles, position, velocity.0, forward, desired);
 
-        // Turn the nose towards the wish, at most `turn_rate`.
-        let new_forward = forward.rotate_towards(desired, stats.turn_rate * dt);
+        // Turn the nose towards the wish, at most the pilot's turn rate.
+        let turn_rate = stats.turn_rate * pilot.skill.turn_rate;
+        let new_forward = forward.rotate_towards(desired, turn_rate * dt);
         let yaw_rate = heading_change(forward, new_forward) / dt;
-        let bank_target = (yaw_rate / stats.turn_rate).clamp(-1.0, 1.0) * cfg.max_bank;
+        let bank_target = (yaw_rate / turn_rate).clamp(-1.0, 1.0) * cfg.max_bank;
         flight.bank += (bank_target - flight.bank) * (1.0 - (-cfg.bank_response * dt).exp());
 
         let speed_change = stats.acceleration * dt;
@@ -377,12 +415,20 @@ fn think(
             let on_my_tail = distance < cfg.tail_range
                 && (-forward).angle_between(to_player) < cfg.tail_cone
                 && player.forward.angle_between(-to_player) < cfg.player_aim_cone;
-            if (on_my_tail || incoming.is_some()) && pilot.break_cooldown <= 0.0 {
+            pilot.threat_time = if on_my_tail || incoming.is_some() {
+                pilot.threat_time + dt
+            } else {
+                0.0
+            };
+            if pilot.threat_time > 0.0
+                && pilot.threat_time >= pilot.skill.reaction
+                && pilot.break_cooldown <= 0.0
+            {
                 pilot.mode = PilotMode::Break {
                     side: if rng.coin() { 1.0 } else { -1.0 },
                     vertical: rng.range(-0.3, 0.45),
                 };
-                pilot.mode_time = rng.range(cfg.break_time.0, cfg.break_time.1);
+                pilot.mode_time = rng.range(pilot.skill.break_time.0, pilot.skill.break_time.1);
             } else if distance < cfg.overshoot_range && forward.dot(player.forward) < -0.3 {
                 let climb = Vec3::new(forward.x, forward.y.max(0.0) + 0.15, forward.z);
                 pilot.mode = PilotMode::Extend {
@@ -394,7 +440,8 @@ fn think(
         PilotMode::Break { .. } | PilotMode::Extend { .. } => {
             if pilot.mode_time <= 0.0 {
                 pilot.mode = PilotMode::Pursue;
-                pilot.break_cooldown = cfg.break_cooldown;
+                pilot.break_cooldown = pilot.skill.break_cooldown;
+                pilot.threat_time = 0.0;
             }
         }
     }
