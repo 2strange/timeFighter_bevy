@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 use super::{GameSettings, Mission, Pause, TriggerHold, WaveTrigger};
 use crate::{
-    ai::{Enemy, enemy_bundle},
+    ai::{AttackSlots, Enemy, FlightGroup, enemy_bundle},
     combat::{
         CombatConfig, CombatSystems, CrashInto, DestroyCause, Destroyed, Effect, Hit, Munition,
         ShotFired, Team, Weapon, player_loadout,
@@ -98,6 +98,10 @@ impl Round {
         self.spawned.saturating_sub(self.destroyed)
     }
 }
+
+/// Waiting flights circle this far from the map centre (m), on the
+/// bearing they came from.
+const HOLDING_DISTANCE: f32 = 2_200.0;
 
 /// Starts a fresh round, whatever the current phase.
 #[derive(Message, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -229,6 +233,7 @@ fn start_round(
     settings: Res<GameSettings>,
     mut mission: ResMut<Mission>,
     mut combat: ResMut<CombatConfig>,
+    mut slots: ResMut<AttackSlots>,
     flight: Option<Res<FlightConfig>>,
     pause: Option<ResMut<Pause>>,
     leftovers: Query<Entity, Or<(With<Enemy>, With<Munition>, With<Effect>)>>,
@@ -253,6 +258,8 @@ fn start_round(
     let params = settings.difficulty.params().clamped();
     combat.player_missiles = params.missiles;
     combat.player_gun_unlimited = params.unlimited_gun;
+    combat.lock.time = params.lock_time;
+    slots.max = params.attackers;
     for entity in &leftovers {
         commands.entity(entity).despawn();
     }
@@ -336,13 +343,18 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
         if !due {
             break;
         }
-        for group in &wave.groups {
-            for transform in group.transforms() {
-                commands.spawn(enemy_bundle(
-                    group.kind,
-                    group.skill,
-                    group.tuning,
-                    transform,
+        for (g, group) in wave.groups.iter().enumerate() {
+            let id = (round.next_wave * 16 + g) as u32;
+            let holding = FlightGroup::holding_point(group.lead, HOLDING_DISTANCE);
+            for (slot, transform) in group.transforms().enumerate() {
+                commands.spawn((
+                    enemy_bundle(group.kind, group.skill, group.tuning, transform),
+                    FlightGroup {
+                        id,
+                        slot: slot as u32,
+                        offset: group.formation.slot(slot as u32),
+                        holding,
+                    },
                 ));
             }
         }
