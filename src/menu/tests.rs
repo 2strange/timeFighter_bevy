@@ -96,12 +96,37 @@ fn choosing_with_arrows_and_enter_starts_a_round_with_those_settings() {
 }
 
 #[test]
-fn greyed_out_modes_are_skipped() {
+fn protect_can_be_chosen_and_greyed_out_modes_are_skipped() {
     let mut app = game();
     go_to(&mut app, RowId::Mode);
     tap(&mut app, KeyCode::ArrowRight);
     tap(&mut app, KeyCode::ArrowRight);
-    assert_eq!(app.world().resource::<MenuSelection>().mode, MenuMode::Hunt);
+    assert_eq!(
+        app.world().resource::<MenuSelection>().mode,
+        MenuMode::Protect
+    );
+    tap(&mut app, KeyCode::Enter);
+    assert_eq!(settings(&app).mode, crate::game_state::GameMode::Protect);
+}
+
+#[test]
+fn long_value_lists_show_as_arrows() {
+    let mut app = game();
+    {
+        let mut selection = app.world_mut().resource_mut::<MenuSelection>();
+        selection.select(RowId::Mode, 1);
+        selection.select(RowId::Difficulty, 5);
+    }
+    app.update();
+    let buttons: Vec<MenuButton> = app
+        .world_mut()
+        .query::<&MenuButton>()
+        .iter(app.world())
+        .copied()
+        .filter(|b| b.row == RowId::Custom(CustomField::WaveInterval))
+        .collect();
+    // 25 steps, but only "<" and ">".
+    assert_eq!(buttons.len(), 2, "{}", buttons.len());
 }
 
 #[test]
