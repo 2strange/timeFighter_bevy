@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 
 use super::GameMode;
-use crate::world::Lighting;
+use crate::{ai::EnemyKind, world::Lighting};
 
 /// The player's choices. A round reads them when it starts, so changes
 /// apply from the next round on.
@@ -16,6 +16,22 @@ pub struct GameSettings {
     pub mode: GameMode,
     pub difficulty: Difficulty,
     pub lighting: Lighting,
+}
+
+/// Technical choices behind the modes, not offered in the menu (yet).
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct MissionConfig {
+    /// The bomber type of Protect: `EnemyKind::Lancaster` (default) or
+    /// `EnemyKind::B17`, both with their own model, size and gunners.
+    pub bomber: EnemyKind,
+}
+
+impl Default for MissionConfig {
+    fn default() -> Self {
+        Self {
+            bomber: EnemyKind::Lancaster,
+        }
+    }
 }
 
 /// How hard a round is.

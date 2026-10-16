@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use super::{Difficulty, GameSettings, PilotMix};
+use super::{Difficulty, GameSettings, MissionConfig, PilotMix};
 use crate::ai::{EnemyKind, EnemyTuning, PilotSkill};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -216,17 +216,17 @@ impl Mission {
     }
 
     /// The mission for the player's settings.
-    pub fn from_settings(settings: &GameSettings) -> Self {
+    pub fn from_settings(settings: &GameSettings, config: &MissionConfig) -> Self {
         match settings.mode {
             GameMode::Hunt => Self::hunt(settings.difficulty),
-            GameMode::Protect => Self::protect(settings.difficulty),
+            GameMode::Protect => Self::protect(settings.difficulty, config.bomber),
         }
     }
 
     /// Mode 2, Protect: flights of four bombers, one after another (a fixed
     /// interval apart, or as soon as the sky is clear), each flying at the
     /// city centre from a different side and bombing it until shot down.
-    pub fn protect(difficulty: Difficulty) -> Self {
+    pub fn protect(difficulty: Difficulty, bomber: EnemyKind) -> Self {
         let params = difficulty.params().clamped();
         let tuning = EnemyTuning {
             speed: params.enemy_speed,
@@ -242,7 +242,7 @@ impl Mission {
                         WaveTrigger::AfterSecondsOrCleared(i as f32 * params.wave_interval)
                     },
                     groups: vec![SpawnGroup {
-                        kind: EnemyKind::Lancaster,
+                        kind: bomber,
                         count: params.bombers_per_wave,
                         lead,
                         heading,

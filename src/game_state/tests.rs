@@ -648,7 +648,7 @@ fn easy_levels_lock_faster_and_send_fewer_attackers() {
 fn protect_sends_bomber_flights_by_the_table() {
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
-        let mission = Mission::protect(difficulty);
+        let mission = Mission::protect(difficulty, crate::ai::EnemyKind::Lancaster);
         assert_eq!(
             mission.waves.len() as u32,
             params.bomber_waves,
@@ -713,4 +713,31 @@ fn protect_is_lost_when_the_centre_falls_and_a_restart_rebuilds_it() {
     assert_eq!(round(&app).phase, RoundPhase::Running);
     let health = app.world().resource::<crate::world::damage::CityHealth>();
     assert_eq!(health.center_intact_ratio, 1.0, "city rebuilt");
+}
+
+#[test]
+fn protect_flies_the_configured_bomber() {
+    for bomber in [crate::ai::EnemyKind::Lancaster, crate::ai::EnemyKind::B17] {
+        let (mut app, _) = custom_app(
+            FlightConfig::default().spawn_transform(),
+            protect(Difficulty::SuperEasy),
+            true,
+        );
+        app.insert_resource(crate::game_state::MissionConfig { bomber });
+        app.world_mut().write_message(RestartRound);
+        app.update();
+        let kinds: Vec<_> = app
+            .world_mut()
+            .query::<(&Enemy, &crate::combat::Turrets)>()
+            .iter(app.world())
+            .map(|(e, t)| (e.kind, t.mounts.len()))
+            .collect();
+        assert_eq!(kinds.len(), 4, "{bomber:?}");
+        // Front and rear gunners from the model's mounts.
+        assert!(kinds.iter().all(|k| *k == (bomber, 2)), "{kinds:?}");
+    }
+    assert_eq!(
+        crate::game_state::MissionConfig::default().bomber,
+        crate::ai::EnemyKind::Lancaster
+    );
 }

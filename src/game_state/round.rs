@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use super::{GameSettings, Mission, Pause, TriggerHold, WaveTrigger};
+use super::{GameSettings, Mission, MissionConfig, Pause, TriggerHold, WaveTrigger};
 use crate::{
     ai::{AttackSlots, Enemy, FlightGroup, bomber_bundle, enemy_bundle},
     combat::{
@@ -138,6 +138,7 @@ impl Plugin for RoundPlugin {
         // The city's damage plugin registers it too.
         .add_message::<RepairCity>();
         app.init_resource::<GameSettings>()
+            .init_resource::<MissionConfig>()
             .init_resource::<Mission>()
             .init_resource::<Round>()
             .add_message::<RestartRound>()
@@ -243,6 +244,7 @@ fn start_round(
     mut commands: Commands,
     mut round: ResMut<Round>,
     settings: Res<GameSettings>,
+    mission_config: Res<MissionConfig>,
     mut mission: ResMut<Mission>,
     mut combat: ResMut<CombatConfig>,
     mut slots: ResMut<AttackSlots>,
@@ -267,7 +269,7 @@ fn start_round(
         pause.round_over = false;
     }
     // The player's choices apply from this round on.
-    *mission = Mission::from_settings(&settings);
+    *mission = Mission::from_settings(&settings, &mission_config);
     // The whole city stands again. Applies this frame: the start runs
     // before the city's damage systems.
     repair.write(RepairCity);

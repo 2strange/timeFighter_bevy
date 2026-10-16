@@ -39,6 +39,7 @@ use crate::{
 pub enum EnemyKind {
     Spitfire,
     Lancaster,
+    B17,
 }
 
 /// Strength and handling of an enemy type. Metres, seconds, radians.
@@ -93,7 +94,7 @@ impl EnemyKind {
             },
             // A heavy bomber: slow, sluggish, tough (about 12 cannon hits
             // or 2 missiles); its gun is the turrets'.
-            EnemyKind::Lancaster => EnemyStats {
+            EnemyKind::Lancaster | EnemyKind::B17 => EnemyStats {
                 health: 200.0,
                 hitbox_radius: 13.0,
                 min_speed: 95.0,
@@ -108,7 +109,7 @@ impl EnemyKind {
 
     /// Bombers fly bomb runs at the city; fighters fight.
     pub fn is_bomber(self) -> bool {
-        matches!(self, EnemyKind::Lancaster)
+        matches!(self, EnemyKind::Lancaster | EnemyKind::B17)
     }
 
     pub fn display_name(self) -> &'static str {
@@ -121,6 +122,7 @@ impl EnemyKind {
         match self {
             EnemyKind::Spitfire => AircraftModel::Spitfire,
             EnemyKind::Lancaster => AircraftModel::Lancaster,
+            EnemyKind::B17 => AircraftModel::B17,
         }
     }
 }
