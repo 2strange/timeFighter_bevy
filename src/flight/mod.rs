@@ -2,13 +2,13 @@
 //!
 //! [`FlightPlugin`] holds only the simulation and runs headless (tests use
 //! `MinimalPlugins`). [`PlayerFlightPlugin`] adds keyboard input, the jet's
-//! mesh and the on-screen readout and needs the full `DefaultPlugins`.
+//! model and the key help (F1) and needs the full `DefaultPlugins`.
 
 mod config;
 mod input;
 mod jet;
+mod key_help;
 mod model;
-mod readout;
 #[cfg(test)]
 mod tests;
 
@@ -45,17 +45,17 @@ impl Plugin for FlightPlugin {
     }
 }
 
-/// Player jet with keyboard control, mesh and readout.
+/// Player jet with keyboard control, model and key help.
 pub struct PlayerFlightPlugin;
 
 impl Plugin for PlayerFlightPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (jet::spawn_player_jet, readout::spawn_readout))
+        app.add_systems(Startup, (jet::spawn_player_jet, key_help::spawn_key_help))
             .add_systems(
                 Update,
                 (
                     (input::keyboard_input, input::respawn).in_set(FlightSystems::Input),
-                    readout::update_readout.after(FlightSystems::Simulate),
+                    key_help::toggle_key_help,
                     jet::fall_back_to_primitive_jet,
                 ),
             );

@@ -18,6 +18,7 @@ Controls
     Up / Down     throttle (50 ... 500 m/s)
     R             reset to spawn
     P / Esc       pause (also automatic when the tab loses focus)
+    F1            show / hide the key help
 
 Aircraft showroom: http://localhost:8000/showroom.html
 (drag with the mouse to orbit, scroll to zoom; or A/D, W/S, Q/E)

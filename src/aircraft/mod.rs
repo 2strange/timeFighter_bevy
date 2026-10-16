@@ -13,6 +13,8 @@ mod tests;
 
 use bevy::prelude::*;
 
+use crate::physics::{AircraftSize, Layer, aircraft_body_sized};
+
 pub use showroom::{ShowroomPlugin, ShowroomView};
 
 /// Normalised aircraft models available in `assets/aircraft/`.
@@ -54,6 +56,27 @@ impl AircraftModel {
             AircraftModel::F4uCorsair => "F4U Corsair",
             AircraftModel::Spitfire => "Spitfire",
         }
+    }
+
+    /// Bounding box of the normalised model (checked against the file by
+    /// a test); its collider is built from it.
+    pub fn size(self) -> AircraftSize {
+        let (min, max) = match self {
+            AircraftModel::F14Tomcat => return AircraftSize::JET,
+            AircraftModel::Mig29 => ([-5.82, -1.63, -8.65], [5.82, 2.36, 8.65]),
+            AircraftModel::Tu2 => ([-9.40, -2.23, -6.90], [9.40, 1.72, 6.90]),
+            AircraftModel::F4uCorsair => ([-5.35, -1.49, -5.10], [5.35, 2.31, 5.10]),
+            AircraftModel::Spitfire => ([-4.91, -1.83, -4.56], [4.91, 1.62, 4.56]),
+        };
+        AircraftSize {
+            min: Vec3::from_array(min),
+            max: Vec3::from_array(max),
+        }
+    }
+
+    /// Kinematic body and collider for this model on `layer`.
+    pub fn body(self, layer: Layer) -> impl Bundle {
+        aircraft_body_sized(layer, self.size())
     }
 
     /// Asset path of the model's scene, relative to `assets/`.

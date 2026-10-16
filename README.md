@@ -16,6 +16,7 @@ A modern jet fighter is pulled through a time vortex over the Bermuda Triangle a
 | Up / Down | throttle |
 | R | reset |
 | P / Esc | pause (also when the window loses focus) |
+| F1 | show / hide the key help |
 
 ## Building
 

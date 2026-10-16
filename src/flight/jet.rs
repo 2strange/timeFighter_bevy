@@ -7,7 +7,7 @@ use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::*;
 
-use crate::physics::{Layer, aircraft_body};
+use crate::physics::{AircraftSize, Layer, aircraft_body_sized};
 
 use super::{FlightConfig, FlightInput, FlightState, PlayerAircraft};
 
@@ -26,7 +26,11 @@ pub(super) fn spawn_player_jet(
             FlightState::new(&cfg),
             cfg.spawn_transform(),
             Visibility::default(),
-            aircraft_body(Layer::Player),
+            aircraft_body_sized(
+                Layer::Player,
+                cfg.player_model
+                    .map_or(AircraftSize::JET, |model| model.size()),
+            ),
         ))
         .id();
     match cfg.player_model {

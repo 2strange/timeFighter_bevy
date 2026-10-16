@@ -154,3 +154,53 @@ fn noses_point_along_negative_z() {
         );
     }
 }
+
+#[test]
+fn sizes_match_the_files() {
+    for model in AircraftModel::ALL {
+        let file = Model::load(model.file_stem());
+        let size = model.size();
+        for i in 0..3 {
+            assert!(
+                (size.min[i] - file.min[i]).abs() < 0.02
+                    && (size.max[i] - file.max[i]).abs() < 0.02,
+                "{model:?} axis {i}: size {size:?}, file {:?}..{:?}",
+                file.min,
+                file.max
+            );
+        }
+    }
+}
+
+#[test]
+fn colliders_fill_but_do_not_exceed_the_models() {
+    for model in AircraftModel::ALL {
+        let size = model.size();
+        let aabb = size.collider().raw.compute_local_aabb();
+        let (min, max) = (
+            [aabb.mins.x, aabb.mins.y, aabb.mins.z],
+            [aabb.maxs.x, aabb.maxs.y, aabb.maxs.z],
+        );
+        for i in 0..3 {
+            assert!(
+                min[i] >= size.min[i] - 0.3,
+                "{model:?} sticks out below axis {i}"
+            );
+            assert!(
+                max[i] <= size.max[i] + 0.3,
+                "{model:?} sticks out above axis {i}"
+            );
+        }
+        // Nose to tail and wing tip to wing tip are covered.
+        assert!(
+            max[2] - min[2] >= 0.95 * size.length(),
+            "{model:?} too short"
+        );
+        assert!(
+            max[0] - min[0] >= 0.95 * size.span(),
+            "{model:?} too narrow"
+        );
+        // The fin reaches the top.
+        assert!(max[1] >= 0.9 * size.max.y, "{model:?} fin too low");
+    }
+}

@@ -84,36 +84,76 @@ pub struct PlayerCrashed {
 #[derive(Component, Debug)]
 pub struct Ground;
 
-/// Collider and body for an aircraft, in its local frame (nose −Z, metres).
+/// An aircraft's bounding box in its local frame (nose −Z, metres), from
+/// which its collider is built.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AircraftSize {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+impl AircraftSize {
+    /// A 19 m jet with 13.9 m span (the F-14 and the built-in jet).
+    pub const JET: AircraftSize = AircraftSize {
+        min: Vec3::new(-6.97, -1.54, -9.55),
+        max: Vec3::new(6.97, 2.99, 9.55),
+    };
+
+    pub fn length(&self) -> f32 {
+        self.max.z - self.min.z
+    }
+
+    pub fn span(&self) -> f32 {
+        self.max.x - self.min.x
+    }
+
+    /// Fuselage capsule over the full length, a wing box over the full
+    /// span, and a fin box up to the top of the tail. Proportions of the
+    /// boxes are generic; the outer dimensions match the model, so hits
+    /// at the wing tips, nose and tail count.
+    pub fn collider(&self) -> Collider {
+        let length = self.length();
+        let span = self.span();
+        let centre_z = (self.min.z + self.max.z) / 2.0;
+        let radius = (0.065 * length).min(self.max.y.max(0.1));
+        let mut parts = vec![
+            (
+                Vec3::new(0.0, 0.0, centre_z),
+                Quat::IDENTITY,
+                Collider::capsule_z(length / 2.0 - radius, radius),
+            ),
+            (
+                Vec3::new(0.0, -0.2 * radius, centre_z + 0.05 * length),
+                Quat::IDENTITY,
+                Collider::cuboid(span / 2.0, (0.2 * radius).max(0.1), 0.11 * length),
+            ),
+        ];
+        let fin_height = self.max.y - radius;
+        if fin_height > 0.1 {
+            parts.push((
+                Vec3::new(0.0, radius + fin_height / 2.0, self.max.z - 0.12 * length),
+                Quat::IDENTITY,
+                Collider::cuboid(0.06 * span, fin_height / 2.0, 0.07 * length),
+            ));
+        }
+        Collider::compound(parts)
+    }
+}
+
+/// Collider and body for a jet-sized aircraft; see [`aircraft_body_sized`].
+pub fn aircraft_body(layer: Layer) -> impl Bundle {
+    aircraft_body_sized(layer, AircraftSize::JET)
+}
+
+/// Collider and body for an aircraft of `size`.
 ///
-/// A compound of fuselage capsule, wing box and fin box sized for a 19 m
-/// jet with 13 m span, close to both the built-in jet and the F-14 model.
 /// Aircraft are kinematic: the flight model moves them, Rapier only checks
 /// what they touch, with CCD so a fast jet does not pass through a wall
 /// between two frames.
-pub fn aircraft_body(layer: Layer) -> impl Bundle {
+pub fn aircraft_body_sized(layer: Layer, size: AircraftSize) -> impl Bundle {
     (
         RigidBody::KinematicPositionBased,
-        Collider::compound(vec![
-            // Fuselage: 19 m long including the rounded ends.
-            (
-                Vec3::new(0.0, 0.0, 0.0),
-                Quat::IDENTITY,
-                Collider::capsule_z(8.3, 1.2),
-            ),
-            // Wings: 13 m span, 4.5 m chord.
-            (
-                Vec3::new(0.0, -0.2, 1.8),
-                Quat::IDENTITY,
-                Collider::cuboid(6.5, 0.25, 2.25),
-            ),
-            // Fins.
-            (
-                Vec3::new(0.0, 2.2, 6.8),
-                Quat::IDENTITY,
-                Collider::cuboid(1.45, 1.6, 1.4),
-            ),
-        ]),
+        size.collider(),
         Ccd::enabled(),
         layer.groups(),
         ActiveEvents::COLLISION_EVENTS,
