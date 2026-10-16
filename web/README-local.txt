@@ -4,7 +4,7 @@ TimeFighter - browser build
 Browsers refuse to load WebAssembly from file://, so serve this folder
 with any static web server on your own machine, for example:
 
-    cd timefighter-phase0
+    cd <this folder>
     python3 -m http.server 8000
 
 Then open http://localhost:8000 in Chrome, Firefox or Safari and click
