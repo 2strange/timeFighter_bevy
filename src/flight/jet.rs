@@ -5,6 +5,8 @@ use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::*;
 
+use crate::physics::{Layer, aircraft_body};
+
 use super::{FlightConfig, FlightInput, FlightState, PlayerAircraft};
 
 pub(super) fn spawn_player_jet(
@@ -22,6 +24,7 @@ pub(super) fn spawn_player_jet(
             FlightState::new(&cfg),
             cfg.spawn_transform(),
             Visibility::default(),
+            aircraft_body(Layer::Player),
         ))
         .id();
     if let Some(model) = cfg.player_model {

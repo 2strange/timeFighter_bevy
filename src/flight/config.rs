@@ -42,8 +42,11 @@ pub struct FlightConfig {
     /// huge jumps after a stall, e.g. when the browser tab was in background.
     pub max_dt: f32,
 
-    /// The jet is held at least this high above the ground plane (m).
-    /// Placeholder until terrain collision and crashing exist.
+    /// Safety net (m): the jet's centre never goes below this height. It
+    /// lies under the lowest ground (the river's water at −20 m), so the jet
+    /// always touches a world collider first and the physics reports
+    /// `PlayerCrashed`; the clamp only keeps it from falling out of the
+    /// world until gameplay reacts.
     pub min_altitude: f32,
 
     /// Spawn position (m).
@@ -75,7 +78,7 @@ impl Default for FlightConfig {
             idle_damping_per_second: 0.98_f32.powi(60),
 
             max_dt: 0.1,
-            min_altitude: 3.0,
+            min_altitude: -25.0,
 
             spawn_position: Vec3::new(0.0, 500.0, 800.0),
             spawn_pitch: (-15.0_f32).to_radians(),
