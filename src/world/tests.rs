@@ -4,8 +4,12 @@ use bevy::{math::Rect, prelude::*};
 
 use super::{
     CityPlugin, WorldRenderConfig,
-    layout::{Bridge, BuildingKind, CityConfig, CityLayout, RiverConfig, Roof, StreetClass, Zone},
+    layout::{
+        Bridge, BuildingKind, CityConfig, CityLayout, MAX_LINES_PER_SIDE, RiverConfig, Roof,
+        StreetClass, Zone, street_lines,
+    },
     meshes::{self, Surface},
+    rng::Rng,
 };
 
 fn city() -> CityLayout {
@@ -269,6 +273,33 @@ fn ground_is_one_flat_layer_without_gaps_or_overlaps() {
         .sum();
     let rel = (area - f64::from(edge) * f64::from(edge)).abs() / f64::from(edge * edge);
     assert!(rel < 1e-6, "ground area off by {rel}");
+
+    // No two quads share any area. With the exact area sum above this makes
+    // the quads a true partition. Quads are bucketed on a coarse grid so only
+    // neighbours are compared.
+    const BUCKET: f32 = 500.0;
+    let mut buckets: std::collections::HashMap<(i32, i32), Vec<usize>> = Default::default();
+    for (n, q) in quads.iter().enumerate() {
+        let lo = (q.rect.min / BUCKET).floor().as_ivec2();
+        let hi = ((q.rect.max / BUCKET).ceil() - 1.0).as_ivec2();
+        for bx in lo.x..=hi.x {
+            for bz in lo.y..=hi.y {
+                buckets.entry((bx, bz)).or_default().push(n);
+            }
+        }
+    }
+    for members in buckets.values() {
+        for (k, &a) in members.iter().enumerate() {
+            for &b in &members[k + 1..] {
+                assert!(
+                    quads[a].rect.intersect(quads[b].rect).is_empty(),
+                    "ground quads overlap: {:?} and {:?}",
+                    quads[a].rect,
+                    quads[b].rect
+                );
+            }
+        }
+    }
     assert!(
         quads
             .iter()
@@ -402,7 +433,7 @@ fn city_plugin_inserts_the_layout_headless() {
 /// Fixed fingerprint of the default city. If a deliberate generator change
 /// moves it, update the constant; if it differs between native and WASM,
 /// the generator is not platform-independent.
-const DEFAULT_CITY_FINGERPRINT: u64 = 0x4e5a_c39e_0a65_fe94;
+const DEFAULT_CITY_FINGERPRINT: u64 = 0xcea3_7e18_ab72_c89c;
 
 #[test]
 fn default_city_matches_golden_fingerprint() {
@@ -644,7 +675,9 @@ fn every_paved_street_across_the_river_has_one_bridge() {
         .iter()
         .filter(|&&(a, i, g)| layout.segment_active(a, i, g))
         .collect();
-    assert!(paved.len() >= 20, "only {} bridges", paved.len());
+    // Pinned for the default seed: a generator change that adds or drops
+    // bridges must show up here.
+    assert_eq!(layout.bridges.len(), 72);
     assert_eq!(paved.len(), layout.bridges.len());
     for &&(axis, i, g) in &paved {
         let n = layout
@@ -794,4 +827,49 @@ fn invalid_river_configs_are_rejected() {
         let err = CityLayout::try_generate(&cfg).expect_err(reason);
         assert!(err.contains(reason), "expected '{reason}' in: {err}");
     }
+}
+
+#[test]
+fn street_lines_terminate_even_where_f32_stops_advancing() {
+    // Far beyond any valid config: at ~3e8 m a 3 m step no longer changes
+    // an f32, so an unbounded loop would spin forever.
+    let cfg = CityConfig {
+        grid_half_extent: 1.0e12,
+        block_min: 1.0,
+        block_max: 1.0,
+        street_width: 1.0,
+        avenue_width: 1.0,
+        boulevard_width: 1.0,
+        ..default()
+    };
+    let lines = street_lines(&cfg, &mut Rng::stream(1, 1, 0, 0));
+    assert!(lines.len() <= 2 * MAX_LINES_PER_SIDE + 1);
+    assert!(lines.windows(2).all(|w| w[0].center < w[1].center));
+}
+
+#[test]
+fn huge_grids_are_rejected_before_generation() {
+    let cfg = CityConfig {
+        grid_half_extent: 1.0e9,
+        inner_half_extent: 2.0e9,
+        ground_half_extent: 2.0e9,
+        patch_size: 1.0e7,
+        ..default()
+    };
+    let err = CityLayout::try_generate(&cfg).expect_err("huge grid");
+    assert!(err.contains("street lines"), "{err}");
+}
+
+#[test]
+fn fingerprint_covers_bridge_details() {
+    let layout = city();
+    let mut changed = layout.clone();
+    changed.bridges[0].parts[1].roof_color[0] += 0.01;
+    assert_ne!(changed.fingerprint(), layout.fingerprint());
+    let mut changed = layout.clone();
+    changed.bridges[0].parts[0].underside = false;
+    assert_ne!(changed.fingerprint(), layout.fingerprint());
+    let mut changed = layout.clone();
+    changed.bridges[0].parts.pop();
+    assert_ne!(changed.fingerprint(), layout.fingerprint());
 }
