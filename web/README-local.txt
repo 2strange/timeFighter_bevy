@@ -21,7 +21,7 @@ Controls
                                   missile (homes on a locked target)
     Enter / R     fly again after a round
     P / Esc       pause (also automatic when the tab loses focus)
-    F1            show / hide the key help
+    I             show / hide the key help (shown when a round starts)
 
 Aircraft showroom: http://localhost:8000/showroom.html
 (drag with the mouse to orbit, scroll to zoom; or A/D, W/S, Q/E)

@@ -1,9 +1,20 @@
-//! Key help on F1. Hidden by default; speed and altitude are on the HUD.
+//! Key help on I (function keys need fn on a Mac). Shown for a few seconds
+//! when a round starts, so new pilots find the weapon keys; otherwise hidden
+//! until I is pressed. Speed and altitude are on the HUD.
 //!
 //! The help lists what plugins register with [`KeyHelpAppExt::add_key_help`],
 //! so whoever adds a key documents it next to the code that reads it.
 
 use bevy::prelude::*;
+
+use crate::game_state::{RestartRound, Round, RoundPhase};
+
+/// Key that shows and hides the help.
+pub const HELP_KEY: KeyCode = KeyCode::KeyI;
+
+/// How long the help stays up after a round starts (s of game time, so a
+/// pause does not eat it).
+pub const AUTO_SHOW_SECONDS: f32 = 8.0;
 
 /// Where a line goes in the help; lower comes first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,7 +51,7 @@ impl KeyHelpLines {
 }
 
 pub trait KeyHelpAppExt {
-    /// Adds a line to the F1 key help, e.g.
+    /// Adds a line to the key help, e.g.
     /// `app.add_key_help(KeyHelpSection::Weapons, "Space", "machine gun")`.
     fn add_key_help(&mut self, section: KeyHelpSection, keys: &str, action: &str) -> &mut Self;
 }
@@ -93,26 +104,64 @@ pub(super) fn update_key_help(lines: Res<KeyHelpLines>, mut help: Query<&mut Tex
     }
 }
 
+/// I toggles the help. A round start shows it for [`AUTO_SHOW_SECONDS`];
+/// pressing I meanwhile takes over (and cancels the timer).
 pub(super) fn toggle_key_help(
     keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    round: Option<Res<Round>>,
+    mut restarts: MessageReader<RestartRound>,
+    mut was_running: Local<bool>,
+    mut auto_hide_in: Local<Option<f32>>,
     mut help: Query<&mut Visibility, With<KeyHelp>>,
 ) {
-    if !keys.just_pressed(KeyCode::F1) {
-        return;
+    // Runs before the round systems: a restart shows up as a phase other
+    // than Running for one frame, or as a pending restart request.
+    if restarts.read().count() > 0 {
+        *was_running = false;
     }
-    for mut visibility in &mut help {
-        *visibility = match *visibility {
-            Visibility::Hidden => Visibility::Visible,
-            _ => Visibility::Hidden,
-        };
+    let running = round.is_some_and(|r| r.phase == RoundPhase::Running);
+    let round_started = running && !*was_running;
+    *was_running = running;
+
+    let show = if keys.just_pressed(HELP_KEY) {
+        *auto_hide_in = None;
+        help.iter().next().map(|v| *v == Visibility::Hidden)
+    } else if round_started {
+        *auto_hide_in = Some(AUTO_SHOW_SECONDS);
+        Some(true)
+    } else if let Some(left) = auto_hide_in.as_mut() {
+        *left -= time.delta_secs();
+        (*left <= 0.0).then(|| {
+            *auto_hide_in = None;
+            false
+        })
+    } else {
+        None
+    };
+
+    if let Some(show) = show {
+        for mut visibility in &mut help {
+            *visibility = if show {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use bevy::{input::ButtonState, time::TimeUpdateStrategy};
+
     use super::*;
     use crate::{
         GamePlugin,
+        flight::{FlightInput, PlayerAircraft},
+        game_state::Pause,
         test_support::{headless_app, tap},
     };
 
@@ -125,15 +174,70 @@ mod tests {
         (*visibility, text.0.clone())
     }
 
-    #[test]
-    fn f1_toggles_the_key_help_which_starts_hidden() {
+    /// The game with 0.1 s frames, so seconds of game time pass quickly.
+    fn game() -> App {
         let mut app = headless_app(GamePlugin);
-        app.update();
-        assert_eq!(help(&mut app).0, Visibility::Hidden);
-        tap(&mut app, KeyCode::F1);
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            100,
+        )));
+        app
+    }
+
+    fn frames(app: &mut App, n: usize) {
+        for _ in 0..n {
+            app.update();
+        }
+    }
+
+    #[test]
+    fn help_shows_when_a_round_starts_and_hides_after_a_few_seconds() {
+        let mut app = game();
+        frames(&mut app, 3);
         assert_eq!(help(&mut app).0, Visibility::Visible);
-        tap(&mut app, KeyCode::F1);
+        frames(&mut app, (AUTO_SHOW_SECONDS * 10.0) as usize - 10);
+        assert_eq!(help(&mut app).0, Visibility::Visible, "hidden too early");
+        frames(&mut app, 15);
         assert_eq!(help(&mut app).0, Visibility::Hidden);
+
+        // The next round shows it again.
+        app.world_mut().write_message(RestartRound);
+        frames(&mut app, 3);
+        assert_eq!(help(&mut app).0, Visibility::Visible);
+    }
+
+    #[test]
+    fn i_toggles_the_help_and_overrides_the_timer() {
+        let mut app = game();
+        frames(&mut app, 3);
+        tap(&mut app, HELP_KEY);
+        assert_eq!(help(&mut app).0, Visibility::Hidden);
+        tap(&mut app, HELP_KEY);
+        assert_eq!(help(&mut app).0, Visibility::Visible);
+        // Opened by hand: stays up past the auto-hide time.
+        frames(&mut app, (AUTO_SHOW_SECONDS * 10.0) as usize + 10);
+        assert_eq!(help(&mut app).0, Visibility::Visible);
+        tap(&mut app, HELP_KEY);
+        assert_eq!(help(&mut app).0, Visibility::Hidden);
+    }
+
+    #[test]
+    fn i_is_not_used_by_anything_else() {
+        let mut app = game();
+        frames(&mut app, 3);
+        let before = *app
+            .world_mut()
+            .query_filtered::<&FlightInput, With<PlayerAircraft>>()
+            .single(app.world())
+            .unwrap();
+        crate::test_support::key(&mut app, HELP_KEY, ButtonState::Pressed);
+        app.update();
+        let during = *app
+            .world_mut()
+            .query_filtered::<&FlightInput, With<PlayerAircraft>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(before, during);
+        assert!(!app.world().resource::<Pause>().is_paused());
     }
 
     #[test]
