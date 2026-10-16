@@ -247,7 +247,10 @@ pub fn player_loadout(cfg: &CombatConfig) -> impl Bundle {
         },
         AircraftVelocity::default(),
         AircraftType("jet"),
-        Gun::new(cfg.player_gun, Some(cfg.player_gun_ammo)),
+        Gun::new(
+            cfg.player_gun,
+            (!cfg.player_gun_unlimited).then_some(cfg.player_gun_ammo),
+        ),
         MissileRack::new(cfg.missile, cfg.player_missiles),
         LockOn::default(),
         Trigger::default(),

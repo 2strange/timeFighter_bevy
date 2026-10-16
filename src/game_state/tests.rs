@@ -10,7 +10,10 @@ use bevy::{
 };
 use bevy_rapier3d::prelude::{Collider, RigidBody};
 
-use super::{Mission, Outcome, Pause, PausePlugin, RestartRound, Round, RoundPhase, RoundPlugin};
+use super::{
+    Difficulty, GameSettings, Mission, Outcome, Pause, PausePlugin, RestartRound, Round,
+    RoundPhase, RoundPlugin,
+};
 use crate::{
     ai::{AiPlugin, Enemy},
     audio::{Sound, SoundCue, SoundHooksPlugin},
@@ -47,9 +50,11 @@ fn app_with_jet_at(jet_at: Transform) -> (App, Entity) {
     .add_message::<WindowFocused>()
     .add_message::<WindowOccluded>()
     .insert_resource(TimeUpdateStrategy::ManualDuration(FRAME));
-    let mut mission = Mission::hunt();
-    mission.end_delay = 0.5;
-    app.insert_resource(mission);
+    // Hard: two flights of four, the layout most tests below assume.
+    app.insert_resource(GameSettings {
+        difficulty: Difficulty::Hard,
+        ..default()
+    });
     // Flat ground with its top at y = 0 (the city builds its own).
     app.world_mut().spawn((
         Ground,
@@ -210,7 +215,7 @@ fn being_shot_down_loses_the_round() {
         .filter(|c| c.sound == Sound::Defeat)
         .count();
     assert_eq!(defeat, 1, "defeat sound hook");
-    run_for(&mut app, 1.0);
+    run_for(&mut app, 2.0);
     assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::ShotDown));
 }
 
@@ -248,7 +253,7 @@ fn restart_resets_round_player_and_enemies() {
     release(&mut app, KeyCode::Space);
     app.world_mut().get_mut::<Health>(jet).unwrap().current = 40.0;
     *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_xyz(0.0, 0.5, 0.0);
-    run_for(&mut app, 1.0);
+    run_for(&mut app, 2.0);
     assert_eq!(
         round(&app).phase,
         RoundPhase::Over(Outcome::Crashed(CrashInto::Ground))
@@ -307,7 +312,7 @@ fn restart_resets_round_player_and_enemies() {
 
     // Crash detection is armed again: the next crash ends this round too.
     *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_xyz(0.0, 0.5, 0.0);
-    run_for(&mut app, 1.0);
+    run_for(&mut app, 2.0);
     assert_eq!(
         self::round(&app).phase,
         RoundPhase::Over(Outcome::Crashed(CrashInto::Ground))
@@ -504,4 +509,69 @@ fn hunt_sends_rookies_first_and_veterans_second() {
     let second = skills(&mut app);
     assert!(!second.is_empty());
     assert!(second.iter().all(|s| *s == crate::ai::PilotSkill::VETERAN));
+}
+
+#[test]
+fn difficulty_table_matches_the_design() {
+    let table: Vec<(u32, u32, u32)> = Difficulty::PRESETS
+        .iter()
+        .map(|d| {
+            let p = d.params();
+            (p.missiles, p.enemies, p.flight_size)
+        })
+        .collect();
+    assert_eq!(
+        table,
+        vec![(20, 4, 2), (10, 6, 2), (8, 8, 2), (6, 8, 4), (6, 12, 4)]
+    );
+    for difficulty in Difficulty::PRESETS {
+        let params = difficulty.params();
+        let mission = Mission::hunt(difficulty);
+        assert_eq!(mission.enemy_count(), params.enemies, "{difficulty:?}");
+        assert_eq!(
+            mission.waves.len() as u32,
+            params.enemies / params.flight_size,
+            "{difficulty:?}"
+        );
+    }
+}
+
+#[test]
+fn custom_difficulty_is_clamped_and_splits_uneven_flights() {
+    let custom = Difficulty::Custom(crate::game_state::DifficultyParams {
+        enemies: 7,
+        flight_size: 3,
+        enemy_speed: 9.0,
+        ..default()
+    });
+    let mission = Mission::hunt(custom);
+    let sizes: Vec<u32> = mission.waves.iter().map(|w| w.enemy_count()).collect();
+    assert_eq!(sizes, vec![3, 3, 1]);
+    assert!(mission.waves[0].groups[0].tuning.speed <= 2.0);
+}
+
+#[test]
+fn a_round_starts_with_the_chosen_difficulty() {
+    let (mut app, jet) = app();
+    app.insert_resource(GameSettings {
+        difficulty: Difficulty::Custom(crate::game_state::DifficultyParams {
+            missiles: 20,
+            enemies: 4,
+            flight_size: 2,
+            unlimited_gun: true,
+            ..default()
+        }),
+        ..default()
+    });
+    app.world_mut().write_message(RestartRound);
+    app.update();
+    let mission = app.world().resource::<Mission>().clone();
+    assert_eq!(mission.enemy_count(), 4);
+    assert_eq!(enemies(&mut app).len(), 2, "first flight of two");
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 20);
+    assert_eq!(
+        app.world().get::<Gun>(jet).unwrap().ammo,
+        None,
+        "unlimited gun"
+    );
 }

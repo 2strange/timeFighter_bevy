@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use super::{Mission, Pause, WaveTrigger};
+use super::{GameSettings, Mission, Pause, WaveTrigger};
 use crate::{
     ai::{Enemy, enemy_bundle},
     combat::{
@@ -16,6 +16,7 @@ use crate::{
         FlightConfig, FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft,
     },
     physics::{CrashSweep, EnemyCrashed, PlayerCrashed, ProjectileHit},
+    world::Lighting,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,7 +126,8 @@ impl Plugin for RoundPlugin {
             "Enter / R",
             "fly again after a round",
         );
-        app.init_resource::<Mission>()
+        app.init_resource::<GameSettings>()
+            .init_resource::<Mission>()
             .init_resource::<Round>()
             .add_message::<RestartRound>()
             .configure_sets(Update, CombatSystems::Fire.run_if(weapons_free))
@@ -144,6 +146,7 @@ impl Plugin for RoundPlugin {
                     (restart, drop_stale_messages, start_round)
                         .chain()
                         .in_set(RoundSystems::Start),
+                    apply_lighting_setting,
                     (count_events, spawn_waves, decide, advance_phase)
                         .chain()
                         .in_set(RoundSystems::Track),
@@ -204,7 +207,9 @@ fn restart(
 fn start_round(
     mut commands: Commands,
     mut round: ResMut<Round>,
-    combat: Res<CombatConfig>,
+    settings: Res<GameSettings>,
+    mut mission: ResMut<Mission>,
+    mut combat: ResMut<CombatConfig>,
     flight: Option<Res<FlightConfig>>,
     pause: Option<ResMut<Pause>>,
     leftovers: Query<Entity, Or<(With<Enemy>, With<Munition>, With<Effect>)>>,
@@ -224,6 +229,11 @@ fn start_round(
     if let Some(mut pause) = pause {
         pause.round_over = false;
     }
+    // The player's choices apply from this round on.
+    *mission = Mission::from_settings(&settings);
+    let params = settings.difficulty.params().clamped();
+    combat.player_missiles = params.missiles;
+    combat.player_gun_unlimited = params.unlimited_gun;
     for entity in &leftovers {
         commands.entity(entity).despawn();
     }
@@ -309,7 +319,12 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
         }
         for group in &wave.groups {
             for transform in group.transforms() {
-                commands.spawn(enemy_bundle(group.kind, group.skill, transform));
+                commands.spawn(enemy_bundle(
+                    group.kind,
+                    group.skill,
+                    group.tuning,
+                    transform,
+                ));
             }
         }
         round.spawned += wave.enemy_count();
@@ -343,5 +358,15 @@ fn advance_phase(time: Res<Time>, pause: Option<ResMut<Pause>>, round: ResMut<Ro
             }
         }
         RoundPhase::Starting | RoundPhase::Over(_) => {}
+    }
+}
+
+/// The lighting chosen in the menu replaces the current one when the
+/// choice changes (the L key still toggles in between).
+fn apply_lighting_setting(settings: Res<GameSettings>, lighting: Option<ResMut<Lighting>>) {
+    if let Some(mut lighting) = lighting
+        && settings.is_changed()
+    {
+        lighting.set_if_neq(settings.lighting);
     }
 }

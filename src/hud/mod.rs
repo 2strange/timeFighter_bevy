@@ -397,8 +397,9 @@ fn update_texts(
         let (content, tint) = match kind {
             HudText::Status => (
                 format!(
-                    "{}    ENEMIES {}    {}",
+                    "{} ({})    ENEMIES {}    {}",
                     mission.mode.display_name(),
+                    mission.difficulty.display_name().to_uppercase(),
                     round.enemies_left(&mission),
                     format_time(round.elapsed)
                 ),
@@ -406,11 +407,12 @@ fn update_texts(
             ),
             HudText::Speed => (format!("{:>4.0} km/h", state.speed * 3.6), HUD),
             HudText::Altitude => (format!("{:.0} m", transform.translation.y), HUD),
-            HudText::Gun => match gun.and_then(|g| g.ammo) {
-                Some(ammo) => (
+            HudText::Gun => match gun.map(|g| g.ammo) {
+                Some(Some(ammo)) => (
                     format!("GUN {ammo:>4}"),
                     if ammo == 0 { ALERT } else { HUD },
                 ),
+                Some(None) => ("GUN  INF".into(), HUD),
                 None => (String::new(), HUD),
             },
             HudText::Missiles => match rack {
