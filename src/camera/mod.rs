@@ -2,14 +2,20 @@
 
 use bevy::prelude::*;
 
-use crate::flight::{FlightConfig, FlightState, FlightSystems, PlayerAircraft};
+use crate::{
+    flight::{FlightConfig, FlightState, FlightSystems, PlayerAircraft},
+    world::{Target, WEB_CAMERA_FAR},
+};
+
+/// Native far plane (m): well beyond the fog, nothing is culled early.
+pub const NATIVE_CAMERA_FAR: f32 = 30_000.0;
 
 /// Chase camera tuning, in the jet's local frame (metres, +Z = behind).
 ///
 /// Distance and field of view follow the airspeed: close and narrow at
 /// minimum speed, far and slightly wider at top speed, blended with a
 /// smoothstep so throttle changes never make the camera jump.
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 pub struct ChaseCameraConfig {
     /// Camera position relative to the jet at minimum airspeed.
     pub slow_offset: Vec3,
@@ -25,15 +31,26 @@ pub struct ChaseCameraConfig {
     /// Extra field of view at maximum airspeed (rad). A few degrees make the
     /// ground stream past the screen edges faster; 0 turns it off.
     pub fov_speed_boost: f32,
+    /// Far clipping plane (m). On the web it sits just behind the fog's
+    /// visibility, so frustum culling skips what the fog hides anyway (the
+    /// web build has no per-chunk visibility ranges). The day fog (9 km)
+    /// reaches farther than the evening fog (7 km), so it sets the limit.
+    pub far: f32,
 }
 
 impl Default for ChaseCameraConfig {
+    fn default() -> Self {
+        Self::for_target(Target::CURRENT)
+    }
+}
+
+impl ChaseCameraConfig {
     // Starting values, tuned on test flights. For a 19 m jet the slow camera
     // sits one jet length behind, just above the fins; at top speed it falls
     // back to about two and a half jet lengths, so the jet seems to pull
     // away when accelerating. The look-at point 30 m ahead keeps the nose
     // below the screen centre.
-    fn default() -> Self {
+    pub fn for_target(target: Target) -> Self {
         Self {
             slow_offset: Vec3::new(0.0, 4.5, 21.0),
             fast_offset: Vec3::new(0.0, 7.0, 46.5),
@@ -41,6 +58,10 @@ impl Default for ChaseCameraConfig {
             lag_base: 0.01,
             fov: 60_f32.to_radians(),
             fov_speed_boost: 5_f32.to_radians(),
+            far: match target {
+                Target::Web => WEB_CAMERA_FAR,
+                Target::Native => NATIVE_CAMERA_FAR,
+            },
         }
     }
 }
@@ -93,7 +114,7 @@ fn spawn_camera(mut commands: Commands, cfg: Res<ChaseCameraConfig>) {
         Projection::Perspective(PerspectiveProjection {
             fov: cfg.fov,
             near: 0.5,
-            far: 30_000.0,
+            far: cfg.far,
             ..default()
         }),
         crate::world::sky_fog(),
@@ -141,6 +162,36 @@ mod tests {
 
     use super::*;
     use crate::flight::{FlightInput, FlightPlugin};
+
+    #[test]
+    fn far_plane_per_target() {
+        let web = ChaseCameraConfig::for_target(Target::Web);
+        let native = ChaseCameraConfig::for_target(Target::Native);
+        assert_eq!(web.far, WEB_CAMERA_FAR);
+        assert_eq!(native.far, NATIVE_CAMERA_FAR);
+        // Behind the farthest fog (day, 9 km visibility), so nothing the fog
+        // still shows is clipped; native keeps its long range.
+        assert!(web.far > 9_000.0 && web.far < native.far);
+        // Everything else is the same on both targets.
+        assert_eq!(
+            ChaseCameraConfig { far: 0.0, ..web },
+            ChaseCameraConfig { far: 0.0, ..native }
+        );
+    }
+
+    #[test]
+    fn far_plane_reaches_the_camera() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ChaseCameraConfig::for_target(Target::Web))
+            .add_systems(Startup, spawn_camera);
+        app.update();
+        let mut projections = app.world_mut().query::<&Projection>();
+        let Projection::Perspective(p) = projections.single(app.world()).unwrap() else {
+            panic!("chase camera must be perspective");
+        };
+        assert_eq!(p.far, WEB_CAMERA_FAR);
+    }
 
     #[test]
     fn framing_spans_slow_to_fast_without_jumps() {
