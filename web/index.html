@@ -231,8 +231,12 @@
           store.setItem(MENU_KEY, [...pairs].map(([k, v]) => `${k}=${v}`).join(';'));
           store.setItem('timefighter.autostart', '1');
         } else {
-          const query = `?mode=${mode}&level=${LEVEL_NAMES[level]}`;
-          history.replaceState(null, '', location.pathname + query);
+          // Only mode and level change; other parameters (e.g. ?set=)
+          // stay as they are.
+          const params = new URLSearchParams(location.search);
+          params.set('mode', mode);
+          params.set('level', LEVEL_NAMES[level]);
+          history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`);
         }
       }
 
