@@ -11,11 +11,16 @@
         position: absolute; inset: 0; display: grid; place-items: center;
         font: 16px system-ui, sans-serif; color: #1b2a3a;
       }
+      #nav {
+        position: absolute; right: 12px; bottom: 12px;
+        font: 14px system-ui, sans-serif; color: #fff; opacity: 0.8;
+      }
     </style>
   </head>
   <body>
     <div id="loading">Loading…</div>
     <canvas id="game" tabindex="0"></canvas>
+    <a id="nav" href="showroom.html">Aircraft showroom</a>
     <script type="module">
       import init from './timefighter.js';
       const canvas = document.getElementById('game');

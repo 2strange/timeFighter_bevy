@@ -30,7 +30,7 @@ rm -rf dist
 mkdir -p dist
 wasm-bindgen --target web --no-typescript --out-dir dist \
   "$target_dir/wasm32-unknown-unknown/wasm-release/timefighter.wasm"
-cp web/index.html web/README-local.txt dist/
+cp web/index.html web/showroom.html web/README-local.txt dist/
 cp -r assets dist/assets
 
 if command -v wasm-opt > /dev/null; then

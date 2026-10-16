@@ -16,7 +16,6 @@ A modern jet fighter is pulled through a time vortex over the Bermuda Triangle a
 | Up / Down | throttle |
 | R | reset |
 | P / Esc | pause (also when the window loses focus) |
-| M | aircraft showroom (pauses the game) |
 
 ## Building
 
@@ -39,5 +38,7 @@ The browser build needs `rustup target add wasm32-unknown-unknown` and
 ## Aircraft models
 
 The aircraft in `assets/aircraft/` are third-party models under CC-BY-4.0,
-normalised once by `tools/normalize-aircraft`. Authors and sources are listed
+normalised once by `tools/normalize-aircraft`. The browser build has an
+aircraft showroom page (`showroom.html`, same WebAssembly file) showing all
+models side by side with scale bars; natively run with `--showroom`. Authors and sources are listed
 in [`assets/aircraft/CREDITS.md`](assets/aircraft/CREDITS.md).

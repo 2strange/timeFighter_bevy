@@ -4799,6 +4799,7 @@ dependencies = [
  "bevy",
  "gltf",
  "serde_json",
+ "web-sys",
 ]
 
 [[package]]
