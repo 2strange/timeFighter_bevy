@@ -617,9 +617,10 @@ fn city_stays_within_render_budget() {
     let verts: usize = chunks.values().map(|d| d.positions.len()).sum();
     let quads = meshes::ground_quads(&layout);
     let mut ground = meshes::ground_mesh_data(&quads, 0.0);
+    let depth = layout.config.river.as_ref().unwrap().water_depth;
     ground.extend(meshes::quay_wall_mesh_data(
         &meshes::quay_walls(&layout, &quads),
-        20.0,
+        depth,
     ));
     let per_surface = |s: Surface| chunks.keys().filter(|k| k.1 == s).count();
     let zones = [Zone::Downtown, Zone::Midtown, Zone::Suburb, Zone::Rural]
@@ -758,7 +759,8 @@ fn every_paved_street_across_the_river_has_one_bridge() {
                 assert!(c.y - h.y >= -1e-3);
             }
         }
-        assert!(cfg.clearance() >= 20.0);
+        // Austin: river 25 m down, so at least 25 m to fly under a bridge.
+        assert!(cfg.clearance() >= 25.0);
         // A ramp at each end: flush with the street at the gap edge, up to
         // the deck at the other end; the three pieces span the whole gap.
         let span = layout.gap_range(1 - b.axis, b.gap);
@@ -1123,4 +1125,17 @@ fn ramp_collision_steps_enclose_the_ramp() {
             );
         }
     }
+}
+
+#[test]
+fn the_flight_floor_lies_below_the_water() {
+    // The flight model clamps the jet at `min_altitude`. If that were above
+    // the water, the jet could never reach the river and would hover over
+    // it instead of crashing (Austin hit an invisible floor at 3 m once).
+    let water = -CityConfig::default().river.unwrap().water_depth;
+    let floor = crate::flight::FlightConfig::default().min_altitude;
+    assert!(
+        floor < water,
+        "flight floor {floor} m is not below the water at {water} m"
+    );
 }
