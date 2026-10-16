@@ -24,6 +24,12 @@ use crate::{
 const FRAME: Duration = Duration::from_nanos(16_666_667);
 
 fn app() -> (App, Entity) {
+    app_with_jet_at(FlightConfig::default().spawn_transform())
+}
+
+/// The round app with the player's jet placed at `jet_at` before the first
+/// update (the round start moves it to the spawn point).
+fn app_with_jet_at(jet_at: Transform) -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -58,12 +64,10 @@ fn app() -> (App, Entity) {
             FlightInput::default(),
             FlightState::new(&cfg),
             aircraft_body(Layer::Player),
-            cfg.spawn_transform(),
+            jet_at,
         ))
         .id();
     app.finish();
-    // The first update only starts the clock; the round starts on the second.
-    app.update();
     app.update();
     (app, jet)
 }
@@ -244,9 +248,14 @@ fn restart_resets_round_player_and_enemies() {
     assert!(round(&app).stats.gun_rounds > 0);
 
     // Restart keys only work on the result screen; Enter is one of them.
-    // The reset waits until game time runs again.
+    // The restart happens in a frame where game time still stands (result
+    // screen); the jet must stay where the reset put it.
     press(&mut app, KeyCode::Enter);
-    app.update();
+    let at_restart = app.world().get::<Transform>(jet).unwrap().translation;
+    assert!(
+        at_restart.distance(flight.spawn_position) < 1.0,
+        "reset in the paused frame: {at_restart:?}"
+    );
     app.update();
 
     let round = round(&app);
@@ -354,5 +363,19 @@ fn ramming_a_spitfire_loses_the_round_but_counts_the_kill() {
     assert!(
         app.world().get_entity(enemy).is_err(),
         "rammed enemy removed"
+    );
+}
+
+#[test]
+fn the_round_starts_in_the_very_first_frame() {
+    // The first frame has no time step; the start, which moves the jet to
+    // its spawn point, must still hold.
+    let (app, jet) = app_with_jet_at(Transform::from_xyz(300.0, 900.0, -2_000.0));
+    let flight = app.world().resource::<FlightConfig>().clone();
+    assert_eq!(round(&app).phase, RoundPhase::Running);
+    let position = app.world().get::<Transform>(jet).unwrap().translation;
+    assert!(
+        position.distance(flight.spawn_position) < 1e-3,
+        "{position:?}"
     );
 }

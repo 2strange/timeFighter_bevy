@@ -153,7 +153,6 @@ fn restart(
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn start_round(
     mut commands: Commands,
-    time: Res<Time>,
     mut round: ResMut<Round>,
     combat: Res<CombatConfig>,
     flight: Option<Res<FlightConfig>>,
@@ -174,13 +173,6 @@ fn start_round(
     }
     if let Some(mut pause) = pause {
         pause.round_over = false;
-    }
-    // Wait for a frame in which game time runs: in a frame with zero time
-    // step the physics does not step and writes the jet's old position back
-    // over the reset (on the result screen time stands still, and the very
-    // first frame has no time step either).
-    if time.delta_secs() <= 0.0 {
-        return;
     }
     for entity in &leftovers {
         commands.entity(entity).despawn();
