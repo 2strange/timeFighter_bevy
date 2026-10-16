@@ -16,11 +16,14 @@
 //! (about 70 buildings, milliseconds).
 
 mod buildings;
+pub mod colliders;
 pub mod layout;
 pub mod meshes;
 mod rng;
 pub mod textures;
 
+#[cfg(test)]
+mod collider_tests;
 #[cfg(test)]
 mod tests;
 
@@ -187,7 +190,7 @@ pub struct WorldPlugin;
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         let day = LightingPreset::DAY;
-        app.add_plugins(CityPlugin)
+        app.add_plugins((CityPlugin, colliders::CityCollidersPlugin))
             .init_resource::<WorldRenderConfig>()
             .insert_resource(ClearColor(day.sky))
             .insert_resource(GlobalAmbientLight {
