@@ -61,6 +61,7 @@ pub fn outcome_title(outcome: Outcome) -> String {
     match outcome {
         Outcome::Victory => "MISSION COMPLETE".into(),
         Outcome::ShotDown => "SHOT DOWN".into(),
+        Outcome::CityDestroyed => "THE CITY IS IN RUINS".into(),
         Outcome::Crashed(into) => match into {
             CrashInto::Aircraft(name) => format!("RAMMED BY {}", name.to_uppercase()),
             CrashInto::Building => "CRASHED INTO A BUILDING".into(),

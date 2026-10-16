@@ -11,8 +11,8 @@ use bevy::{
 use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use super::{
-    Difficulty, GameSettings, Mission, Outcome, Pause, PausePlugin, RestartRound, Round,
-    RoundPhase, RoundPlugin,
+    Difficulty, GameMode, GameSettings, Mission, Outcome, Pause, PausePlugin, RestartRound, Round,
+    RoundPhase, RoundPlugin, WaveTrigger,
 };
 use crate::{
     ai::{AiPlugin, Enemy},
@@ -34,6 +34,17 @@ fn app() -> (App, Entity) {
 /// The round app with the player's jet placed at `jet_at` before the first
 /// update (the round start moves it to the spawn point).
 fn app_with_jet_at(jet_at: Transform) -> (App, Entity) {
+    // Hard: two flights of four, the layout most tests below assume.
+    let settings = GameSettings {
+        difficulty: Difficulty::Hard,
+        ..default()
+    };
+    custom_app(jet_at, settings, false)
+}
+
+/// The round app for `settings`, optionally with the generated city and
+/// its damage model (headless, no colliders: the flat ground stays).
+fn custom_app(jet_at: Transform, settings: GameSettings, city: bool) -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -50,11 +61,13 @@ fn app_with_jet_at(jet_at: Transform) -> (App, Entity) {
     .add_message::<WindowFocused>()
     .add_message::<WindowOccluded>()
     .insert_resource(TimeUpdateStrategy::ManualDuration(FRAME));
-    // Hard: two flights of four, the layout most tests below assume.
-    app.insert_resource(GameSettings {
-        difficulty: Difficulty::Hard,
-        ..default()
-    });
+    app.insert_resource(settings);
+    if city {
+        app.add_plugins((
+            crate::world::CityPlugin,
+            crate::world::damage::CityDamagePlugin,
+        ));
+    }
     // Flat ground with its top at y = 0 (the city builds its own).
     app.world_mut().spawn((
         Ground,
@@ -629,4 +642,75 @@ fn easy_levels_lock_faster_and_send_fewer_attackers() {
         .filter(|p| p.attacking)
         .count();
     assert!(attackers <= 1);
+}
+
+#[test]
+fn protect_sends_bomber_flights_by_the_table() {
+    for difficulty in Difficulty::PRESETS {
+        let params = difficulty.params();
+        let mission = Mission::protect(difficulty);
+        assert_eq!(
+            mission.waves.len() as u32,
+            params.bomber_waves,
+            "{difficulty:?}"
+        );
+        assert_eq!(
+            mission.enemy_count(),
+            params.bomber_waves * params.bombers_per_wave,
+            "{difficulty:?}"
+        );
+        assert!(mission.waves.iter().skip(1).all(|w| matches!(
+            w.trigger,
+            WaveTrigger::AfterSecondsOrCleared(t) if t >= 90.0
+        )));
+        assert_eq!(mission.city_loss, Some(params.city_loss));
+    }
+    assert!(GameMode::ALL.contains(&GameMode::Protect));
+}
+
+fn protect(difficulty: Difficulty) -> GameSettings {
+    GameSettings {
+        mode: GameMode::Protect,
+        difficulty,
+        ..default()
+    }
+}
+
+#[test]
+fn protect_is_won_when_every_bomber_is_down() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        protect(Difficulty::SuperEasy),
+        true,
+    );
+    let mission = app.world().resource::<Mission>().clone();
+    assert_eq!(mission.mode, GameMode::Protect);
+    assert_eq!(enemies(&mut app).len(), 4, "one flight of four bombers");
+    shoot_down_all(&mut app);
+    run_for(&mut app, mission.end_delay + 0.5);
+    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
+}
+
+#[test]
+fn protect_is_lost_when_the_centre_falls_and_a_restart_rebuilds_it() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        protect(Difficulty::Normal),
+        true,
+    );
+    // A raid flattens the whole centre at once.
+    app.world_mut()
+        .write_message(crate::world::damage::DamageArea {
+            point: Vec3::ZERO,
+            radius: 3_000.0,
+            strength: 1.0,
+        });
+    run_for(&mut app, 3.0);
+    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::CityDestroyed));
+
+    press(&mut app, KeyCode::Enter);
+    app.update();
+    assert_eq!(round(&app).phase, RoundPhase::Running);
+    let health = app.world().resource::<crate::world::damage::CityHealth>();
+    assert_eq!(health.center_intact_ratio, 1.0, "city rebuilt");
 }

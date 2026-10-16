@@ -7,6 +7,7 @@
 //!
 //! [`AiPlugin`] runs headless; [`EnemyVisualsPlugin`] adds the meshes.
 
+mod bomber;
 mod obstacles;
 mod tactics;
 #[cfg(test)]
@@ -17,6 +18,7 @@ use std::f32::consts::PI;
 
 use bevy::prelude::*;
 
+pub use bomber::{BomberPhase, BomberPilot, bomber_bundle};
 pub use obstacles::ObstacleMap;
 pub use tactics::{AttackSlots, FlightGroup, HOLDING_RADIUS, sees};
 pub use visuals::EnemyVisualsPlugin;
@@ -36,6 +38,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EnemyKind {
     Spitfire,
+    Lancaster,
 }
 
 /// Strength and handling of an enemy type. Metres, seconds, radians.
@@ -88,7 +91,24 @@ impl EnemyKind {
                 turn_rate: 0.75,
                 gun: GunSpec::WWII_GUNS,
             },
+            // A heavy bomber: slow, sluggish, tough (about 12 cannon hits
+            // or 2 missiles); its gun is the turrets'.
+            EnemyKind::Lancaster => EnemyStats {
+                health: 200.0,
+                hitbox_radius: 13.0,
+                min_speed: 95.0,
+                cruise_speed: 110.0,
+                max_speed: 125.0,
+                acceleration: 5.0,
+                turn_rate: 0.25,
+                gun: GunSpec::TURRET,
+            },
         }
+    }
+
+    /// Bombers fly bomb runs at the city; fighters fight.
+    pub fn is_bomber(self) -> bool {
+        matches!(self, EnemyKind::Lancaster)
     }
 
     pub fn display_name(self) -> &'static str {
@@ -100,6 +120,7 @@ impl EnemyKind {
     pub fn model(self) -> AircraftModel {
         match self {
             EnemyKind::Spitfire => AircraftModel::Spitfire,
+            EnemyKind::Lancaster => AircraftModel::Lancaster,
         }
     }
 }
@@ -426,7 +447,7 @@ impl Plugin for AiPlugin {
                 (
                     obstacles::rebuild_obstacles.run_if(resource_exists_and_changed::<CityLayout>),
                     tactics::assign_attack_slots,
-                    fly_enemies,
+                    (fly_enemies, bomber::fly_bombers),
                 )
                     .chain()
                     .in_set(AiSystems),
@@ -577,25 +598,50 @@ fn fly_enemies(
 
         let desired = keep_in_arena(&cfg, position, decision.direction);
         let desired = avoid_terrain(&cfg, &obstacles, position, velocity.0, forward, desired);
-
-        // Turn the nose towards the wish, at most the pilot's turn rate.
-        let turn_rate = stats.turn_rate * pilot.skill.turn_rate;
-        let new_forward = forward.rotate_towards(desired, turn_rate * dt);
-        let yaw_rate = heading_change(forward, new_forward) / dt;
-        let bank_target = (yaw_rate / turn_rate).clamp(-1.0, 1.0) * cfg.max_bank;
-        flight.bank += (bank_target - flight.bank) * (1.0 - (-cfg.bank_response * dt).exp());
-
-        let speed_change = stats.acceleration * dt;
-        flight.speed += (decision.speed.clamp(stats.min_speed, stats.max_speed) - flight.speed)
-            .clamp(-speed_change, speed_change);
-
-        velocity.0 = new_forward * flight.speed;
-        transform.translation += velocity.0 * dt;
-        transform.rotation = Transform::IDENTITY
-            .looking_to(new_forward, Vec3::Y)
-            .rotation
-            * Quat::from_rotation_z(flight.bank);
+        fly(
+            &cfg,
+            &stats,
+            stats.turn_rate * pilot.skill.turn_rate,
+            &mut flight,
+            &mut transform,
+            &mut velocity,
+            desired,
+            decision.speed,
+            dt,
+        );
     }
+}
+
+/// Moves an enemy one step: turns the nose towards `desired` at most at
+/// `turn_rate`, banks with the turn, changes speed towards `speed`.
+#[allow(clippy::too_many_arguments)]
+fn fly(
+    cfg: &AiConfig,
+    stats: &EnemyStats,
+    turn_rate: f32,
+    flight: &mut EnemyFlight,
+    transform: &mut Transform,
+    velocity: &mut AircraftVelocity,
+    desired: Vec3,
+    speed: f32,
+    dt: f32,
+) {
+    let forward = transform.forward().as_vec3();
+    let new_forward = forward.rotate_towards(desired, turn_rate * dt);
+    let yaw_rate = heading_change(forward, new_forward) / dt;
+    let bank_target = (yaw_rate / turn_rate).clamp(-1.0, 1.0) * cfg.max_bank;
+    flight.bank += (bank_target - flight.bank) * (1.0 - (-cfg.bank_response * dt).exp());
+
+    let speed_change = stats.acceleration * dt;
+    flight.speed += (speed.clamp(stats.min_speed, stats.max_speed) - flight.speed)
+        .clamp(-speed_change, speed_change);
+
+    velocity.0 = new_forward * flight.speed;
+    transform.translation += velocity.0 * dt;
+    transform.rotation = Transform::IDENTITY
+        .looking_to(new_forward, Vec3::Y)
+        .rotation
+        * Quat::from_rotation_z(flight.bank);
 }
 
 /// Another aircraft as seen for collision avoidance.

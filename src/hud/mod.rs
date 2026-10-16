@@ -26,6 +26,7 @@ use crate::{
     },
     flight::{FlightState, PlayerAircraft},
     game_state::{Mission, Round, RoundPhase, RoundSystems},
+    world::damage::CityHealth,
 };
 
 const HUD: Color = Color::srgba(0.72, 1.0, 0.78, 0.78);
@@ -380,6 +381,7 @@ fn collect_feedback(
 fn update_texts(
     round: Res<Round>,
     mission: Res<Mission>,
+    city: Option<Res<CityHealth>>,
     feedback: Res<Feedback>,
     player: Query<
         (
@@ -399,16 +401,31 @@ fn update_texts(
     };
     for (kind, mut text, mut color) in &mut texts {
         let (content, tint) = match kind {
-            HudText::Status => (
-                format!(
-                    "{} ({})    ENEMIES {}    {}",
-                    mission.mode.display_name(),
-                    mission.difficulty.display_name().to_uppercase(),
-                    round.enemies_left(&mission),
-                    format_time(round.elapsed)
-                ),
-                HUD,
-            ),
+            HudText::Status => {
+                // Protect: the city's centre as a percentage, red near the limit.
+                let city = mission
+                    .city_loss
+                    .zip(city.as_deref())
+                    .map(|(loss, health)| (health.center_intact_ratio, 1.0 - loss));
+                let city_text = city.map_or(String::new(), |(intact, _)| {
+                    format!("    CITY {:.0} %", intact * 100.0)
+                });
+                let tint = match city {
+                    Some((intact, limit)) if intact < limit + 0.1 => ALERT,
+                    _ => HUD,
+                };
+                (
+                    format!(
+                        "{} ({})    ENEMIES {}{}    {}",
+                        mission.mode.display_name(),
+                        mission.difficulty.display_name().to_uppercase(),
+                        round.enemies_left(&mission),
+                        city_text,
+                        format_time(round.elapsed)
+                    ),
+                    tint,
+                )
+            }
             HudText::Speed => (format!("{:>4.0} km/h", state.speed * 3.6), HUD),
             HudText::Altitude => (format!("{:.0} m", transform.translation.y), HUD),
             HudText::Gun => match gun.map(|g| g.ammo) {

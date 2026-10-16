@@ -111,6 +111,34 @@ const SEEKER_LIMIT: f32 = 100.0 * std::f32::consts::PI / 180.0;
 /// only meant for small corrections.
 const PURSUIT_ANGLE: f32 = 50.0 * std::f32::consts::PI / 180.0;
 
+/// A gun round of `spec` fired by `shooter` from `position` with
+/// `velocity` (muzzle velocity plus the shooter's own).
+pub(super) fn round_bundle(
+    shooter: Entity,
+    team: Team,
+    spec: &GunSpec,
+    position: Vec3,
+    velocity: Vec3,
+) -> impl Bundle {
+    (
+        physics::projectile(
+            Transform::from_translation(position).with_rotation(heading(velocity)),
+            velocity,
+            spec.radius,
+            projectile_layer(team),
+            spec.lifetime,
+        ),
+        Munition {
+            shooter,
+            team,
+            weapon: Weapon::Gun,
+            damage: spec.damage,
+            fuse_radius: 0.0,
+            last_position: position,
+        },
+    )
+}
+
 fn projectile_layer(team: Team) -> Layer {
     match team {
         Team::Player => Layer::PlayerProjectile,
@@ -181,23 +209,12 @@ pub(super) fn fire_guns(
             gun.cooldown += gun.spec.interval();
             let direction = rng.in_cone(forward, gun.spec.spread);
             let position = transform.translation + forward * gun.spec.muzzle_offset;
-            let round_velocity = base_velocity + direction * gun.spec.muzzle_speed;
-            commands.spawn((
-                physics::projectile(
-                    Transform::from_translation(position).with_rotation(heading(round_velocity)),
-                    round_velocity,
-                    gun.spec.radius,
-                    projectile_layer(*team),
-                    gun.spec.lifetime,
-                ),
-                Munition {
-                    shooter,
-                    team: *team,
-                    weapon: Weapon::Gun,
-                    damage: gun.spec.damage,
-                    fuse_radius: 0.0,
-                    last_position: position,
-                },
+            commands.spawn(round_bundle(
+                shooter,
+                *team,
+                &gun.spec,
+                position,
+                base_velocity + direction * gun.spec.muzzle_speed,
             ));
             shots.write(ShotFired {
                 shooter,

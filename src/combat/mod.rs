@@ -10,6 +10,7 @@
 //! everything after that (damage, kills, statistics, sound, HUD feedback)
 //! only reads those two.
 
+mod bombs;
 mod config;
 mod effects;
 pub mod hits;
@@ -17,21 +18,25 @@ mod lock;
 mod rng;
 #[cfg(test)]
 mod tests;
+mod turrets;
 mod visuals;
 mod weapons;
 
 use bevy::prelude::*;
 
+pub use bombs::{Bomb, BombImpact, BombSpec, GRAVITY, bomb_bundle, fall_time};
 pub use config::{CombatConfig, CombatKeys, GunSpec, LockSpec, MissileSpec, key_label};
 pub use effects::{Effect, EffectKind};
 pub use lock::{LockOn, LockState, in_seeker_cone};
 pub use rng::CombatRng;
+pub use turrets::{TurretMount, Turrets};
 pub use visuals::CombatVisualsPlugin;
 pub use weapons::{Gun, Missile, MissileRack, Munition, Trigger, Weapon, gun_lead};
 
 use crate::{
     flight::{FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft},
     physics::{EnemyCrashed, PlayerCrashed, ProjectileHit},
+    world::damage::DamageArea,
 };
 
 /// Side an aircraft or projectile fights on. Projectiles never hit their
@@ -188,6 +193,9 @@ impl Plugin for CombatPlugin {
             .add_message::<ProjectileHit>()
             .add_message::<PlayerCrashed>()
             .add_message::<EnemyCrashed>()
+            .add_message::<BombImpact>()
+            // The city's damage plugin registers it too.
+            .add_message::<DamageArea>()
             .configure_sets(
                 Update,
                 (
@@ -213,11 +221,15 @@ impl Plugin for CombatPlugin {
                     (
                         weapons::player_trigger,
                         lock::next_target,
-                        (weapons::fire_guns, weapons::launch_missiles),
+                        (
+                            weapons::fire_guns,
+                            weapons::launch_missiles,
+                            turrets::fire_turrets,
+                        ),
                     )
                         .chain()
                         .in_set(CombatSystems::Fire),
-                    weapons::guide_missiles.in_set(CombatSystems::Move),
+                    (weapons::guide_missiles, bombs::fall_bombs).in_set(CombatSystems::Move),
                     (
                         hits::projectile_hits,
                         hits::missile_fuses,

@@ -65,6 +65,9 @@ impl Difficulty {
                 enemy_accuracy: 0.5,
                 attackers: 1,
                 lock_time: 0.6,
+                bomber_waves: 1,
+                wave_interval: 150.0,
+                city_loss: 0.4,
                 ..base
             },
             Difficulty::Easy => DifficultyParams {
@@ -76,6 +79,9 @@ impl Difficulty {
                 enemy_accuracy: 0.7,
                 attackers: 1,
                 lock_time: 0.6,
+                bomber_waves: 2,
+                wave_interval: 130.0,
+                city_loss: 0.35,
                 ..base
             },
             Difficulty::Normal => base,
@@ -88,6 +94,8 @@ impl Difficulty {
                 enemy_accuracy: 1.0,
                 attackers: 3,
                 lock_time: 1.0,
+                bomber_waves: 3,
+                wave_interval: 90.0,
                 ..base
             },
             Difficulty::Insane => DifficultyParams {
@@ -99,6 +107,8 @@ impl Difficulty {
                 enemy_accuracy: 1.2,
                 attackers: 4,
                 lock_time: 1.0,
+                bomber_waves: 4,
+                wave_interval: 90.0,
                 ..base
             },
             Difficulty::Custom(params) => params,
@@ -139,6 +149,14 @@ pub struct DifficultyParams {
     pub attackers: u32,
     /// Seconds a target must stay in the seeker cone to be locked.
     pub lock_time: f32,
+    /// Protect mode: bomber flights in the round ...
+    pub bomber_waves: u32,
+    /// ... of this many bombers ...
+    pub bombers_per_wave: u32,
+    /// ... arriving this many seconds apart (or as soon as the sky is clear).
+    pub wave_interval: f32,
+    /// The round is lost once this share of the city centre is destroyed.
+    pub city_loss: f32,
 }
 
 impl Default for DifficultyParams {
@@ -154,6 +172,10 @@ impl Default for DifficultyParams {
             unlimited_gun: false,
             attackers: 2,
             lock_time: 0.8,
+            bomber_waves: 3,
+            bombers_per_wave: 4,
+            wave_interval: 110.0,
+            city_loss: 0.3,
         }
     }
 }
@@ -171,6 +193,18 @@ impl DifficultyParams {
             enemy_speed: factor(self.enemy_speed, 0.3, 2.0),
             enemy_accuracy: factor(self.enemy_accuracy, 0.1, 3.0),
             attackers: self.attackers.clamp(1, 12),
+            bomber_waves: self.bomber_waves.clamp(1, 12),
+            bombers_per_wave: self.bombers_per_wave.clamp(1, 8),
+            wave_interval: if self.wave_interval.is_finite() {
+                self.wave_interval.clamp(30.0, 600.0)
+            } else {
+                110.0
+            },
+            city_loss: if self.city_loss.is_finite() {
+                self.city_loss.clamp(0.05, 0.95)
+            } else {
+                0.3
+            },
             lock_time: if self.lock_time.is_finite() {
                 self.lock_time.clamp(0.2, 3.0)
             } else {

@@ -47,6 +47,18 @@ impl GunSpec {
         radius: 0.4,
     };
 
+    /// A bomber's gun turret: slow, scattered, weak, short-ranged (about
+    /// 700 m). Its gunners still make a careless approach costly.
+    pub const TURRET: GunSpec = GunSpec {
+        rate: 6.0,
+        muzzle_speed: 700.0,
+        spread: 2.2_f32 * (std::f32::consts::PI / 180.0),
+        damage: 2.0,
+        lifetime: 1.0,
+        muzzle_offset: 0.0,
+        radius: 0.4,
+    };
+
     pub fn interval(&self) -> f32 {
         1.0 / self.rate
     }

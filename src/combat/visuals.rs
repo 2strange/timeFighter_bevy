@@ -10,14 +10,14 @@ use std::f32::consts::FRAC_PI_2;
 use bevy::{light::NotShadowCaster, prelude::*};
 use bevy_rapier3d::prelude::Velocity;
 
-use super::{Effect, EffectKind, Missile, Munition, Team, Weapon, weapons::heading};
+use super::{Bomb, Effect, EffectKind, Missile, Munition, Team, Weapon, weapons::heading};
 
 pub struct CombatVisualsPlugin;
 
 impl Plugin for CombatVisualsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (load_visuals, load_effect_visuals))
-            .add_systems(PostUpdate, (dress_projectiles, dress_effects))
+            .add_systems(PostUpdate, (dress_projectiles, dress_effects, dress_bombs))
             .add_systems(Update, (point_missiles, animate_effects));
     }
 }
@@ -263,5 +263,41 @@ fn animate_effects(
                 }
             }
         }
+    }
+}
+
+/// Bombs: a dark, slim body, built along +Y and turned to −Z.
+fn dress_bombs(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut shared: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
+    added: Query<Entity, Added<Bomb>>,
+) {
+    if added.is_empty() {
+        return;
+    }
+    let (mesh, material) = shared
+        .get_or_insert_with(|| {
+            (
+                meshes.add(Capsule3d::new(0.3, 1.6)),
+                materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.15, 0.16, 0.14),
+                    perceptual_roughness: 0.7,
+                    ..default()
+                }),
+            )
+        })
+        .clone();
+    for entity in &added {
+        commands
+            .entity(entity)
+            .insert(Visibility::default())
+            .with_child((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
+                NotShadowCaster,
+            ));
     }
 }

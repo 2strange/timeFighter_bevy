@@ -1,8 +1,8 @@
 //! What a round consists of: the game mode and its enemy waves, as data.
 //!
 //! Modes in build order: Hunt (fighters only), Protect (bombers attack the
-//! city), Battle (bombers with fighter escort). Hunt is built; the others
-//! add enemy kinds, roles and their own victory rule on the same model.
+//! city), Battle (bombers with fighter escort). Hunt and Protect are
+//! built; Battle combines both on the same model.
 
 use bevy::prelude::*;
 
@@ -14,15 +14,19 @@ pub enum GameMode {
     /// Shoot down every fighter.
     #[default]
     Hunt,
+    /// Bomber flights attack the city centre; shoot them all down before
+    /// too much of it is destroyed.
+    Protect,
 }
 
 impl GameMode {
     /// The modes that can be played (for menus).
-    pub const ALL: [GameMode; 1] = [GameMode::Hunt];
+    pub const ALL: [GameMode; 2] = [GameMode::Hunt, GameMode::Protect];
 
     pub fn display_name(self) -> &'static str {
         match self {
             GameMode::Hunt => "HUNT",
+            GameMode::Protect => "PROTECT",
         }
     }
 }
@@ -36,6 +40,8 @@ pub enum WaveTrigger {
     AfterSeconds(f32),
     /// As soon as no more than this many enemies are left.
     WhenEnemiesAtMost(u32),
+    /// This many seconds into the round, or earlier once no enemy is left.
+    AfterSecondsOrCleared(f32),
 }
 
 /// How a group's aircraft are placed around its lead.
@@ -110,6 +116,9 @@ pub struct Mission {
     /// Seconds between the deciding moment (last kill, own crash) and the
     /// result screen, so the end can be seen.
     pub end_delay: f32,
+    /// Protect: the round is lost once this share of the city centre is
+    /// destroyed. `None` when the city does not count.
+    pub city_loss: Option<f32>,
 }
 
 impl Default for Mission {
@@ -122,18 +131,34 @@ impl Default for Mission {
 /// starts at z = +800 m flying along −Z, so the first comes head-on from
 /// the city, the next ones from the flanks and from deep behind it.
 const ENTRY_POINTS: [(Vec3, Vec3); 6] = [
-    (Vec3::new(0.0, 700.0, -2_800.0), Vec3::Z),
-    (Vec3::new(-3_200.0, 900.0, -600.0), Vec3::X),
-    (Vec3::new(3_200.0, 800.0, -1_500.0), Vec3::NEG_X),
-    (Vec3::new(0.0, 1_100.0, -4_200.0), Vec3::Z),
+    (Vec3::new(0.0, 700.0, -1_500.0), Vec3::Z),
+    (Vec3::new(-3_500.0, 900.0, 1_500.0), Vec3::X),
+    (Vec3::new(3_500.0, 800.0, 500.0), Vec3::NEG_X),
+    (Vec3::new(0.0, 1_100.0, -3_500.0), Vec3::Z),
     (
-        Vec3::new(-2_400.0, 750.0, -3_200.0),
+        Vec3::new(-2_500.0, 750.0, -2_000.0),
         Vec3::new(0.6, 0.0, 0.8),
     ),
     (
-        Vec3::new(2_400.0, 1_000.0, -3_400.0),
+        Vec3::new(2_500.0, 1_000.0, -2_500.0),
         Vec3::new(-0.6, 0.0, 0.8),
     ),
+];
+
+/// Where bomber flights enter: far out, on a straight line to the city
+/// centre, from the north and the flanks (the player starts 4 km south).
+const BOMBER_ENTRY_POINTS: [(Vec3, Vec3); 5] = [
+    (Vec3::new(0.0, 900.0, -7_000.0), Vec3::Z),
+    (
+        Vec3::new(-6_000.0, 950.0, -3_000.0),
+        Vec3::new(0.9, 0.0, 0.45),
+    ),
+    (
+        Vec3::new(6_000.0, 850.0, -3_500.0),
+        Vec3::new(-0.86, 0.0, 0.5),
+    ),
+    (Vec3::new(-7_000.0, 1_000.0, 0.0), Vec3::X),
+    (Vec3::new(7_000.0, 900.0, 0.0), Vec3::NEG_X),
 ];
 
 impl Mission {
@@ -186,6 +211,7 @@ impl Mission {
             difficulty,
             waves,
             end_delay: 1.5,
+            city_loss: None,
         }
     }
 
@@ -193,6 +219,46 @@ impl Mission {
     pub fn from_settings(settings: &GameSettings) -> Self {
         match settings.mode {
             GameMode::Hunt => Self::hunt(settings.difficulty),
+            GameMode::Protect => Self::protect(settings.difficulty),
+        }
+    }
+
+    /// Mode 2, Protect: flights of four bombers, one after another (a fixed
+    /// interval apart, or as soon as the sky is clear), each flying at the
+    /// city centre from a different side and bombing it until shot down.
+    pub fn protect(difficulty: Difficulty) -> Self {
+        let params = difficulty.params().clamped();
+        let tuning = EnemyTuning {
+            speed: params.enemy_speed,
+            accuracy: params.enemy_accuracy,
+        };
+        let waves = (0..params.bomber_waves)
+            .map(|i| {
+                let (lead, heading) = BOMBER_ENTRY_POINTS[i as usize % BOMBER_ENTRY_POINTS.len()];
+                WaveSpec {
+                    trigger: if i == 0 {
+                        WaveTrigger::AtStart
+                    } else {
+                        WaveTrigger::AfterSecondsOrCleared(i as f32 * params.wave_interval)
+                    },
+                    groups: vec![SpawnGroup {
+                        kind: EnemyKind::Lancaster,
+                        count: params.bombers_per_wave,
+                        lead,
+                        heading,
+                        formation: Formation::Vic { spacing: 60.0 },
+                        skill: PilotSkill::VETERAN,
+                        tuning,
+                    }],
+                }
+            })
+            .collect();
+        Self {
+            mode: GameMode::Protect,
+            difficulty,
+            waves,
+            end_delay: 2.0,
+            city_loss: Some(params.city_loss),
         }
     }
 

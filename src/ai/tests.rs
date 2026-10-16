@@ -845,3 +845,145 @@ fn the_player_can_hang_behind_a_waiting_enemy_for_ten_seconds() {
         assert!(attacking(&mut app).len() <= 1, "more attackers");
     }
 }
+
+/// A flight of four bombers entering from the north, unopposed.
+fn spawn_bomber_flight(app: &mut App, flight: u32) -> Vec<Entity> {
+    let lead = Vec3::new(0.0, 900.0, -7_000.0);
+    let frame = Transform::from_translation(lead).looking_to(Vec3::Z, Vec3::Y);
+    (0..4u32)
+        .map(|slot| {
+            let rank = slot.div_ceil(2) as f32;
+            let side = if slot % 2 == 1 { -1.0 } else { 1.0 };
+            let offset = Vec3::new(side * rank * 60.0, 0.0, rank * 60.0);
+            let transform = Transform::from_translation(frame.transform_point(offset))
+                .with_rotation(frame.rotation);
+            app.world_mut()
+                .spawn((
+                    super::bomber_bundle(
+                        EnemyKind::Lancaster,
+                        EnemyTuning::default(),
+                        transform,
+                        flight,
+                    ),
+                    super::FlightGroup {
+                        id: flight,
+                        slot,
+                        offset,
+                        holding: Vec3::ZERO,
+                    },
+                ))
+                .id()
+        })
+        .collect()
+}
+
+#[test]
+fn bombers_bomb_the_city_centre_run_after_run() {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        PhysicsPlugin,
+        FlightPlugin,
+        CombatPlugin,
+        AiPlugin,
+        CityPlugin,
+        CityCollidersPlugin,
+        crate::world::damage::CityDamagePlugin,
+    ))
+    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        1.0 / 30.0,
+    )));
+    app.finish();
+    app.update();
+    let bombers = spawn_bomber_flight(&mut app, 0);
+
+    let mut impacts = Vec::new();
+    let mut health_after = Vec::new();
+    let mut crashed = 0;
+    for second in 1..=180 {
+        for _ in 0..30 {
+            app.update();
+            let world = app.world();
+            impacts.extend(
+                world
+                    .resource::<Messages<crate::combat::BombImpact>>()
+                    .iter_current_update_messages()
+                    .map(|i| i.point),
+            );
+            crashed += world
+                .resource::<Messages<Destroyed>>()
+                .iter_current_update_messages()
+                .count();
+        }
+        if second % 60 == 0 {
+            let health = app.world().resource::<crate::world::damage::CityHealth>();
+            health_after.push(health.center_intact_ratio);
+        }
+    }
+    eprintln!(
+        "{} bombs; centre intact after each minute: {:?}",
+        impacts.len(),
+        health_after
+    );
+    assert_eq!(crashed, 0, "a bomber went down by itself");
+    assert!(bombers.iter().all(|b| app.world().get_entity(*b).is_ok()));
+    // Several runs with full sticks from all four.
+    assert!(
+        impacts.len() >= 2 * 4 * super::bomber::BOMBS_PER_RUN as usize,
+        "{} bombs",
+        impacts.len()
+    );
+    let reach = super::bomber::TARGET_SPREAD + 400.0;
+    let stray = impacts.iter().filter(|p| p.xz().length() > reach).count();
+    assert!(
+        stray * 10 <= impacts.len(),
+        "{stray} of {} bombs far off the centre",
+        impacts.len()
+    );
+    // One unopposed flight wears the centre down, but not at once.
+    assert!(
+        health_after[0] > 0.85,
+        "first minute already {:?}",
+        health_after[0]
+    );
+    assert!(
+        *health_after.last().unwrap() < 0.98,
+        "three minutes: {:?}",
+        health_after
+    );
+}
+
+#[test]
+fn bomber_gunners_hit_a_close_pursuer_but_not_a_distant_one() {
+    let hits_on_player_at = |distance: f32| {
+        let mut app = app(60.0, false);
+        // Plenty, but finite: f32::MAX minus a hit is still f32::MAX.
+        app.world_mut().resource_mut::<CombatConfig>().player_health = 10_000.0;
+        app.update();
+        // Bomber flying north; the player follows at `distance` behind it.
+        let bomber = app
+            .world_mut()
+            .spawn(super::bomber_bundle(
+                EnemyKind::Lancaster,
+                EnemyTuning::default(),
+                Transform::from_xyz(0.0, 900.0, 0.0),
+                0,
+            ))
+            .id();
+        let _ = bomber;
+        let jet = spawn_player(
+            &mut app,
+            Transform::from_xyz(0.0, 900.0, distance),
+            110.0,
+            FlightInput::default(),
+        );
+        for _ in 0..(8 * 60) {
+            app.update();
+        }
+        let health = app.world().get::<Health>(jet).unwrap();
+        health.current < health.max
+    };
+    assert!(hits_on_player_at(300.0), "rear gunner never hit at 300 m");
+    assert!(!hits_on_player_at(1_500.0), "hit from 1.5 km");
+}
