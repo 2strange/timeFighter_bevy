@@ -9,8 +9,8 @@ use super::{Mission, Pause, WaveTrigger};
 use crate::{
     ai::{Enemy, enemy_bundle},
     combat::{
-        CombatConfig, CombatSystems, DestroyCause, Destroyed, Hit, Munition, ShotFired, Team,
-        Weapon, player_loadout,
+        CombatConfig, CombatSystems, CrashInto, DestroyCause, Destroyed, Effect, Hit, Munition,
+        ShotFired, Team, Weapon, player_loadout,
     },
     flight::{
         FlightConfig, FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft,
@@ -22,7 +22,8 @@ use crate::{
 pub enum Outcome {
     Victory,
     ShotDown,
-    Crashed,
+    /// Flew into something, or was rammed.
+    Crashed(CrashInto),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -206,7 +207,7 @@ fn start_round(
     combat: Res<CombatConfig>,
     flight: Option<Res<FlightConfig>>,
     pause: Option<ResMut<Pause>>,
-    leftovers: Query<Entity, Or<(With<Enemy>, With<Munition>)>>,
+    leftovers: Query<Entity, Or<(With<Enemy>, With<Munition>, With<Effect>)>>,
     mut player: Query<
         (
             Entity,
@@ -279,10 +280,9 @@ fn count_events(
                 }
             }
             Team::Player if round.is_running() => {
-                let outcome = if event.cause == DestroyCause::Crash {
-                    Outcome::Crashed
-                } else {
-                    Outcome::ShotDown
+                let outcome = match event.cause {
+                    DestroyCause::Crash(into) => Outcome::Crashed(into),
+                    DestroyCause::Gun | DestroyCause::Missile => Outcome::ShotDown,
                 };
                 round.phase = RoundPhase::Ending {
                     outcome,

@@ -1,8 +1,13 @@
 //! Head-up display: flight data, weapons, enemies left, target markers
-//! with lock state, gun reticle, hit feedback and the result screen.
+//! with lock state, gun cross, pitch ladder, lead pipper, hit feedback and
+//! the result screen.
 //!
-//! Kept calm: one colour for normal information, amber while the seeker
-//! tracks, red for a lock or damage. Everything else stays out of view.
+//! Fighter-jet style, kept calm: thin lines, one colour for normal
+//! information, amber while the seeker tracks, red for a lock or damage.
+//! The gun cross sits on the nose line; the pitch ladder is conformal (its
+//! rungs lie on the real horizon and elevation lines), so it shows pitch
+//! and bank at a glance and rolls with the view. Only the rungs near the
+//! current pitch are shown.
 
 mod layout;
 #[cfg(test)]
@@ -10,17 +15,17 @@ mod tests;
 
 use bevy::{platform::collections::HashSet, prelude::*};
 
-pub use layout::{edge_point, format_time, gun_target};
+pub use layout::{edge_point, format_time, gun_target, outcome_title};
 
 use crate::{
     ai::Enemy,
     camera::{CameraSystems, ChaseCamera},
     combat::{
-        AircraftVelocity, CombatConfig, Destroyed, Gun, Health, Hit, LockOn, LockState,
-        MissileRack, Team, gun_lead, in_seeker_cone,
+        AircraftVelocity, CombatConfig, CombatKeys, Destroyed, Gun, Health, Hit, LockOn, LockState,
+        MissileRack, Team, gun_lead, in_seeker_cone, key_labels,
     },
     flight::{FlightState, PlayerAircraft},
-    game_state::{Mission, Outcome, Round, RoundPhase, RoundSystems},
+    game_state::{Mission, Round, RoundPhase, RoundSystems},
 };
 
 const HUD: Color = Color::srgba(0.72, 1.0, 0.78, 0.92);
@@ -34,7 +39,17 @@ const RETICLE_RANGE: f32 = 800.0;
 /// Inset of off-screen target indicators from the screen edge (px).
 const EDGE_MARGIN: f32 = 28.0;
 const MARKER_SIZE: f32 = 30.0;
-const RETICLE_SIZE: f32 = 26.0;
+/// Gun cross: overall size and the open gap in its centre (px).
+const CROSS_SIZE: f32 = 40.0;
+const CROSS_GAP: f32 = 12.0;
+const LINE: f32 = 2.0;
+/// Pitch ladder: rung spacing, how far from the current pitch rungs show
+/// (degrees), rung length (px) and the distance its points are placed at.
+const LADDER_STEP: i32 = 10;
+const LADDER_SHOWN: f32 = 25.0;
+const RUNG_WIDTH: f32 = 240.0;
+const RUNG_GAP: f32 = 70.0;
+const LADDER_RANGE: f32 = 1_000.0;
 const PIPPER_SIZE: f32 = 12.0;
 /// The lead pipper considers targets up to this far off the nose (rad).
 const PIPPER_CONE: f32 = 30.0 * std::f32::consts::PI / 180.0;
@@ -54,6 +69,7 @@ impl Plugin for HudPlugin {
                     update_texts,
                     sync_markers,
                     place_reticle_and_markers,
+                    place_ladder,
                     place_pipper,
                     update_result_screen,
                 )
@@ -90,8 +106,19 @@ enum HudText {
     Splash,
 }
 
+/// The gun cross on the nose line (where the gun points).
 #[derive(Component)]
 struct Reticle;
+
+/// One of the gun cross's lines; flashes on a hit.
+#[derive(Component)]
+struct CrossLine;
+
+/// A pitch ladder rung at `pitch` degrees (0 = horizon).
+#[derive(Component)]
+struct Rung {
+    pitch: i32,
+}
 
 /// Lead pipper: where to put the gun reticle so the rounds meet the target.
 #[derive(Component)]
@@ -126,7 +153,8 @@ fn text(content: &str, size: f32, color: Color) -> impl Bundle {
     )
 }
 
-fn spawn_hud(mut commands: Commands) {
+fn spawn_hud(mut commands: Commands, keys: Res<CombatKeys>) {
+    let hint = |keys: &[KeyCode]| format!("[{}]", key_labels(keys));
     commands
         .spawn((
             HudRoot,
@@ -186,8 +214,24 @@ fn spawn_hud(mut commands: Commands) {
                 ..default()
             })
             .with_children(|panel| {
-                panel.spawn((HudText::Gun, text("", 20.0, HUD)));
-                panel.spawn((HudText::Missiles, text("", 20.0, HUD)));
+                // Each weapon with its key, so nobody has to look it up.
+                let row = Node {
+                    column_gap: px(10),
+                    align_items: AlignItems::Center,
+                    ..default()
+                };
+                panel.spawn(row.clone()).with_children(|row| {
+                    row.spawn((HudText::Gun, text("", 20.0, HUD)));
+                    row.spawn(text(&hint(&keys.gun), 15.0, HUD_DIM));
+                });
+                panel.spawn(row.clone()).with_children(|row| {
+                    row.spawn((HudText::Missiles, text("", 20.0, HUD)));
+                    row.spawn(text(&hint(&keys.missile), 15.0, HUD_DIM));
+                });
+                panel.spawn(row).with_children(|row| {
+                    row.spawn(text("next target", 15.0, HUD_DIM));
+                    row.spawn(text(&hint(&keys.next_target), 15.0, HUD_DIM));
+                });
             });
 
             // Bottom right: hull.
@@ -199,35 +243,51 @@ fn spawn_hud(mut commands: Commands) {
             })
             .with_child((HudText::Hull, text("", 20.0, HUD)));
 
-            // Gun reticle with lock state and kill call below it.
+            // Pitch ladder, behind everything else.
+            for pitch in (-90..=90).step_by(LADDER_STEP as usize) {
+                spawn_rung(hud, pitch);
+            }
+
+            // Gun cross: four lines around an open centre and a dot, with
+            // lock state and kill call below it.
             hud.spawn((
                 Reticle,
                 Node {
                     position_type: PositionType::Absolute,
-                    width: px(RETICLE_SIZE),
-                    height: px(RETICLE_SIZE),
-                    border: UiRect::all(px(2)),
-                    border_radius: BorderRadius::MAX,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
+                    width: px(CROSS_SIZE),
+                    height: px(CROSS_SIZE),
                     ..default()
                 },
-                BorderColor::all(HUD),
                 Visibility::Hidden,
             ))
             .with_children(|reticle| {
-                reticle.spawn((
-                    Node {
-                        width: px(2),
-                        height: px(2),
-                        ..default()
-                    },
-                    BackgroundColor(HUD),
-                ));
+                let arm = (CROSS_SIZE - CROSS_GAP) / 2.0;
+                let mid = (CROSS_SIZE - LINE) / 2.0;
+                for (left, top, width, height) in [
+                    (0.0, mid, arm, LINE),
+                    (CROSS_SIZE - arm, mid, arm, LINE),
+                    (mid, 0.0, LINE, arm),
+                    (mid, CROSS_SIZE - arm, LINE, arm),
+                    (mid, mid, LINE, LINE),
+                ] {
+                    reticle.spawn((
+                        CrossLine,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(left),
+                            top: px(top),
+                            width: px(width),
+                            height: px(height),
+                            ..default()
+                        },
+                        BackgroundColor(HUD),
+                    ));
+                }
                 reticle
                     .spawn(Node {
                         position_type: PositionType::Absolute,
-                        top: px(RETICLE_SIZE + 6.0),
+                        top: px(CROSS_SIZE + 6.0),
+                        left: px(CROSS_SIZE / 2.0 - 100.0),
                         width: px(200),
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
@@ -272,7 +332,11 @@ fn spawn_hud(mut commands: Commands) {
                 Visibility::Hidden,
             ))
             .with_children(|screen| {
-                screen.spawn((ResultTitle, text("", 52.0, Color::WHITE)));
+                screen.spawn((
+                    ResultTitle,
+                    text("", 52.0, Color::WHITE),
+                    TextLayout::justify(Justify::Center),
+                ));
                 screen.spawn((
                     ResultBody,
                     text("", 22.0, Color::srgb(0.9, 0.9, 0.9)),
@@ -449,10 +513,8 @@ fn place_reticle_and_markers(
     camera: Query<(&Camera, &Transform), With<ChaseCamera>>,
     player: Query<(&Transform, Option<&LockOn>), With<PlayerAircraft>>,
     enemies: Query<&Transform, With<Enemy>>,
-    mut reticle: Query<
-        (&mut Node, &mut Visibility, &mut BorderColor),
-        (With<Reticle>, Without<TargetMarker>),
-    >,
+    mut reticle: Query<(&mut Node, &mut Visibility), (With<Reticle>, Without<TargetMarker>)>,
+    mut cross_lines: Query<&mut BackgroundColor, With<CrossLine>>,
     mut markers: Query<
         (
             &TargetMarker,
@@ -476,19 +538,21 @@ fn place_reticle_and_markers(
     };
     let playing = round.outcome().is_none();
 
-    if let Ok((mut node, mut visibility, mut border)) = reticle.single_mut() {
+    if let Ok((mut node, mut visibility)) = reticle.single_mut() {
         let aim = jet.translation + jet.forward() * RETICLE_RANGE;
         match camera.world_to_viewport(&camera_gt, aim) {
             Ok(p) if playing => {
-                node.left = px(p.x - RETICLE_SIZE / 2.0);
-                node.top = px(p.y - RETICLE_SIZE / 2.0);
+                node.left = px(p.x - CROSS_SIZE / 2.0);
+                node.top = px(p.y - CROSS_SIZE / 2.0);
                 visibility.set_if_neq(Visibility::Visible);
                 let tint = if feedback.hit > 0.0 {
                     Color::WHITE
                 } else {
                     HUD
                 };
-                border.set_if_neq(BorderColor::all(tint));
+                for mut line in &mut cross_lines {
+                    line.set_if_neq(BackgroundColor(tint));
+                }
             }
             _ => {
                 visibility.set_if_neq(Visibility::Hidden);
@@ -559,6 +623,149 @@ fn place_reticle_and_markers(
             }
         }
     }
+}
+
+fn spawn_rung(hud: &mut ChildSpawnerCommands, pitch: i32) {
+    let horizon = pitch == 0;
+    let width = if horizon {
+        RUNG_WIDTH * 1.5
+    } else {
+        RUNG_WIDTH
+    };
+    let half = (width - RUNG_GAP) / 2.0;
+    hud.spawn((
+        Rung { pitch },
+        Node {
+            position_type: PositionType::Absolute,
+            width: px(width),
+            height: px(LINE),
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        },
+        UiTransform::default(),
+        Visibility::Hidden,
+    ))
+    .with_children(|rung| {
+        for side in [-1.0, 1.0] {
+            // Above the horizon solid lines, below dashed (as in real HUDs).
+            rung.spawn(Node {
+                width: px(half),
+                height: px(LINE),
+                justify_content: JustifyContent::SpaceBetween,
+                ..default()
+            })
+            .with_children(|segment| {
+                let dashes = if pitch < 0 { 3 } else { 1 };
+                let dash = if pitch < 0 { half / 5.0 } else { half };
+                for _ in 0..dashes {
+                    segment.spawn((
+                        Node {
+                            width: px(dash),
+                            height: px(LINE),
+                            ..default()
+                        },
+                        BackgroundColor(HUD_DIM),
+                    ));
+                }
+            });
+            if !horizon {
+                // Pitch number at the outer end.
+                let mut label = Node {
+                    position_type: PositionType::Absolute,
+                    top: px(-9.0),
+                    ..default()
+                };
+                if side < 0.0 {
+                    label.right = px(width + 6.0);
+                } else {
+                    label.left = px(width + 6.0);
+                }
+                rung.spawn((label, text(&pitch.abs().to_string(), 13.0, HUD_DIM)));
+            }
+        }
+    });
+}
+
+/// Places the ladder rungs near the current pitch on their real elevation
+/// lines, rotated with the horizon as the camera sees it.
+#[allow(clippy::type_complexity)]
+fn place_ladder(
+    round: Res<Round>,
+    camera: Query<(&Camera, &Transform), With<ChaseCamera>>,
+    player: Query<&Transform, With<PlayerAircraft>>,
+    mut rungs: Query<(&Rung, &mut Node, &mut UiTransform, &mut Visibility)>,
+) {
+    let view = (|| {
+        if round.outcome().is_some() {
+            return None;
+        }
+        let (camera, camera_tf) = camera.single().ok()?;
+        let jet = player.single().ok()?;
+        let forward = jet.forward().as_vec3();
+        // Straight up or down the heading is undefined: no ladder.
+        let heading = Vec3::new(forward.x, 0.0, forward.z).try_normalize()?;
+        let pitch = forward.y.clamp(-1.0, 1.0).asin().to_degrees();
+        Some((
+            camera,
+            GlobalTransform::from(*camera_tf),
+            jet.translation,
+            heading,
+            pitch,
+        ))
+    })();
+    for (rung, mut node, mut transform, mut visibility) in &mut rungs {
+        let placed = view.and_then(|(camera, camera_gt, origin, heading, pitch)| {
+            if (rung.pitch as f32 - pitch).abs() > LADDER_SHOWN {
+                return None;
+            }
+            let (centre, angle) = rung_on_screen(
+                camera,
+                &camera_gt,
+                origin,
+                heading,
+                (rung.pitch as f32).to_radians(),
+            )?;
+            let viewport = camera.logical_viewport_size()?;
+            (centre.cmpge(Vec2::ZERO).all() && centre.cmple(viewport).all())
+                .then_some((centre, angle))
+        });
+        match placed {
+            Some((centre, angle)) => {
+                let width = if rung.pitch == 0 {
+                    RUNG_WIDTH * 1.5
+                } else {
+                    RUNG_WIDTH
+                };
+                node.left = px(centre.x - width / 2.0);
+                node.top = px(centre.y - LINE / 2.0);
+                transform.rotation = Rot2::radians(angle);
+                visibility.set_if_neq(Visibility::Visible);
+            }
+            None => {
+                visibility.set_if_neq(Visibility::Hidden);
+            }
+        }
+    }
+}
+
+/// Screen centre and clockwise screen angle (rad) of the line at
+/// `elevation` (rad) above the horizon, straight ahead along `heading`.
+fn rung_on_screen(
+    camera: &Camera,
+    camera_gt: &GlobalTransform,
+    origin: Vec3,
+    heading: Vec3,
+    elevation: f32,
+) -> Option<(Vec2, f32)> {
+    let direction = heading * elevation.cos() + Vec3::Y * elevation.sin();
+    let centre = origin + direction * LADDER_RANGE;
+    let right = heading.cross(Vec3::Y);
+    let a = camera.world_to_viewport(camera_gt, centre).ok()?;
+    let b = camera
+        .world_to_viewport(camera_gt, centre + right * 50.0)
+        .ok()?;
+    let d = b - a;
+    Some((a, d.y.atan2(d.x)))
 }
 
 /// Shows where to aim the gun: for the locked target, or else the enemy
@@ -654,12 +861,7 @@ fn update_result_screen(
     let percent =
         |rate: Option<f32>| rate.map_or("-".to_string(), |r| format!("{:.0} %", r * 100.0));
     if let Ok(mut title) = title.single_mut() {
-        title.0 = match outcome {
-            Outcome::Victory => "MISSION COMPLETE",
-            Outcome::ShotDown => "SHOT DOWN",
-            Outcome::Crashed => "CRASHED",
-        }
-        .into();
+        title.0 = outcome_title(outcome);
     }
     if let Ok(mut body) = body.single_mut() {
         body.0 = format!(

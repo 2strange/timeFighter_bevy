@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use super::{TargetMarker, edge_point, format_time, gun_target};
+use super::{Rung, TargetMarker, edge_point, format_time, gun_target, outcome_title};
 use crate::{GamePlugin, ai::Enemy, test_support::headless_app};
 
 #[test]
@@ -70,4 +70,47 @@ fn pipper_target_prefers_the_lock_then_the_nose() {
     assert_eq!(pick(None), Some(b), "closest to the nose");
     assert_eq!(pick(Some(a)), Some(a), "the lock wins");
     assert_eq!(pick(Some(c)), Some(b), "a lock behind does not count");
+}
+
+#[test]
+fn result_titles_name_the_cause() {
+    use crate::{combat::CrashInto, game_state::Outcome};
+    assert_eq!(outcome_title(Outcome::Victory), "MISSION COMPLETE");
+    assert_eq!(outcome_title(Outcome::ShotDown), "SHOT DOWN");
+    assert_eq!(
+        outcome_title(Outcome::Crashed(CrashInto::Aircraft("Spitfire"))),
+        "RAMMED BY SPITFIRE"
+    );
+    assert_eq!(
+        outcome_title(Outcome::Crashed(CrashInto::Building)),
+        "CRASHED INTO A BUILDING"
+    );
+    assert_eq!(
+        outcome_title(Outcome::Crashed(CrashInto::Water)),
+        "CRASHED INTO THE RIVER"
+    );
+}
+
+#[test]
+fn key_labels_read_like_the_keyboard() {
+    use crate::combat::{CombatKeys, key_label, key_labels};
+    assert_eq!(key_label(KeyCode::ShiftRight), "R-Shift");
+    assert_eq!(key_label(KeyCode::KeyR), "R");
+    let keys = CombatKeys::default();
+    assert_eq!(key_labels(&keys.gun), "Space");
+    assert_eq!(key_labels(&keys.next_target), "Tab / R-Alt");
+}
+
+#[test]
+fn the_ladder_has_a_rung_every_ten_degrees() {
+    let mut app = headless_app(GamePlugin);
+    app.update();
+    let mut pitches: Vec<i32> = app
+        .world_mut()
+        .query::<&Rung>()
+        .iter(app.world())
+        .map(|r| r.pitch)
+        .collect();
+    pitches.sort();
+    assert_eq!(pitches, (-90..=90).step_by(10).collect::<Vec<_>>());
 }

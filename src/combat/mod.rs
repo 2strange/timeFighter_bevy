@@ -1,7 +1,7 @@
 //! Combat: health, weapons (gun, guided missiles), lock-on and hits.
 //!
 //! [`CombatPlugin`] is pure simulation and runs headless (`MinimalPlugins`).
-//! [`CombatVisualsPlugin`] adds meshes for tracers and missiles.
+//! [`CombatVisualsPlugin`] adds meshes for tracers, missiles and explosions.
 //!
 //! Hit detection sits behind a narrow interface: [`hits`] translates the
 //! physics layer's [`crate::physics::ProjectileHit`] and
@@ -11,6 +11,7 @@
 //! only reads those two.
 
 mod config;
+mod effects;
 pub mod hits;
 mod lock;
 mod rng;
@@ -21,7 +22,8 @@ mod weapons;
 
 use bevy::prelude::*;
 
-pub use config::{CombatConfig, CombatKeys, GunSpec, LockSpec, MissileSpec};
+pub use config::{CombatConfig, CombatKeys, GunSpec, LockSpec, MissileSpec, key_label};
+pub use effects::{Effect, EffectKind};
 pub use lock::{LockOn, LockState, in_seeker_cone};
 pub use rng::CombatRng;
 pub use visuals::CombatVisualsPlugin;
@@ -92,9 +94,26 @@ pub struct Hit {
 pub enum DestroyCause {
     Gun,
     Missile,
-    /// Flew into the ground or a building.
-    Crash,
+    /// Flew into something.
+    Crash(CrashInto),
 }
+
+/// What an aircraft crashed into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CrashInto {
+    Ground,
+    Water,
+    Building,
+    Bridge,
+    /// Another aircraft (ramming), by its type name.
+    Aircraft(&'static str),
+    /// A world collider of no known kind.
+    Obstacle,
+}
+
+/// Type name of an aircraft ("Spitfire"), for messages such as "rammed by".
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AircraftType(pub &'static str);
 
 /// An aircraft was destroyed. Enemies are despawned in the same frame;
 /// the player's entity stays (camera and HUD hang on it).
@@ -142,12 +161,22 @@ pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_key_help(KeyHelpSection::Weapons, "Space / left mouse", "machine gun")
-            .add_key_help(
-                KeyHelpSection::Weapons,
-                "Right Shift / right Alt (Option) / right mouse",
-                "missile (homes on a locked target)",
-            );
+        let keys = app.world_mut().get_resource_or_init::<CombatKeys>().clone();
+        app.add_key_help(
+            KeyHelpSection::Weapons,
+            &format!("{} / left mouse", key_labels(&keys.gun)),
+            "machine gun",
+        )
+        .add_key_help(
+            KeyHelpSection::Weapons,
+            &format!("{} / right mouse", key_labels(&keys.missile)),
+            "missile (homes on a locked target)",
+        )
+        .add_key_help(
+            KeyHelpSection::Weapons,
+            &key_labels(&keys.next_target),
+            "next target (also automatic after a missile launch)",
+        );
         app.init_resource::<CombatConfig>()
             .init_resource::<CombatKeys>()
             .init_resource::<CombatRng>()
@@ -179,10 +208,11 @@ impl Plugin for CombatPlugin {
                         .chain()
                         .in_set(CombatSystems::Input),
                     lock::update_lock.in_set(CombatSystems::Aim),
-                    // The player's fire buttons are read only when weapons
-                    // may fire, so nothing fired while paused fires later.
+                    // The player's buttons are read only when weapons may
+                    // fire, so nothing pressed while paused acts later.
                     (
                         weapons::player_trigger,
+                        lock::next_target,
                         (weapons::fire_guns, weapons::launch_missiles),
                     )
                         .chain()
@@ -198,6 +228,9 @@ impl Plugin for CombatPlugin {
                         .chain()
                         .in_set(CombatSystems::DetectHits),
                     hits::apply_hits.in_set(CombatSystems::Resolve),
+                    (effects::spawn_effects, effects::age_effects)
+                        .chain()
+                        .after(CombatSystems::Resolve),
                 ),
             );
     }
@@ -213,6 +246,7 @@ pub fn player_loadout(cfg: &CombatConfig) -> impl Bundle {
             radius: cfg.player_hitbox_radius,
         },
         AircraftVelocity::default(),
+        AircraftType("jet"),
         Gun::new(cfg.player_gun, Some(cfg.player_gun_ammo)),
         MissileRack::new(cfg.missile, cfg.player_missiles),
         LockOn::default(),
@@ -237,4 +271,12 @@ fn sync_player_velocity(
     for (state, mut velocity) in &mut player {
         velocity.0 = state.velocity;
     }
+}
+
+/// "Space / Tab"-style labels of a key list, for help texts and the HUD.
+pub fn key_labels(keys: &[KeyCode]) -> String {
+    keys.iter()
+        .map(|k| key_label(*k))
+        .collect::<Vec<_>>()
+        .join(" / ")
 }

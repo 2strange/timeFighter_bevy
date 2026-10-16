@@ -7,13 +7,46 @@
 //! proximity fuses, and applies damage in [`apply_hits`].
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::{ColliderDisabled, RigidBodyDisabled};
+use bevy_rapier3d::prelude::{Collider, ColliderDisabled, RigidBodyDisabled};
 
-use super::{DestroyCause, Destroyed, Health, Hit, Hitbox, Munition, Team, Weapon};
+use super::{
+    AircraftType, CrashInto, DestroyCause, Destroyed, Health, Hit, Hitbox, Munition, Team, Weapon,
+};
 use crate::{
     flight::PlayerAircraft,
-    physics::{EnemyCrashed, PlayerCrashed, ProjectileHit, ProjectileSpent},
+    physics::{EnemyCrashed, Ground, PlayerCrashed, ProjectileHit, ProjectileSpent},
+    world::colliders::{CityBridge, CityBuilding},
 };
+
+/// What a crash obstacle is, from its components.
+pub type ObstacleParts<'a> = (
+    Has<CityBuilding>,
+    Has<CityBridge>,
+    Has<Ground>,
+    Option<&'a Collider>,
+    Option<&'a AircraftType>,
+);
+
+/// Classifies the collider an aircraft crashed into. The river's water is
+/// the one ground collider that is a half-space.
+pub fn crash_into(obstacles: &Query<ObstacleParts>, obstacle: Entity) -> CrashInto {
+    let Ok((building, bridge, ground, collider, aircraft)) = obstacles.get(obstacle) else {
+        return CrashInto::Obstacle;
+    };
+    if let Some(aircraft) = aircraft {
+        CrashInto::Aircraft(aircraft.0)
+    } else if building {
+        CrashInto::Building
+    } else if bridge {
+        CrashInto::Bridge
+    } else if ground && collider.is_some_and(|c| c.as_halfspace().is_some()) {
+        CrashInto::Water
+    } else if ground {
+        CrashInto::Ground
+    } else {
+        CrashInto::Obstacle
+    }
+}
 
 /// Point of the segment `a..b` closest to `p`.
 pub fn closest_point_on_segment(a: Vec3, b: Vec3, p: Vec3) -> Vec3 {
@@ -104,6 +137,7 @@ pub fn missile_fuses(
 /// enemy (ramming).
 pub fn player_crashes(
     mut crashes: MessageReader<PlayerCrashed>,
+    obstacles: Query<ObstacleParts>,
     mut player: Query<&mut Health, With<PlayerAircraft>>,
     mut destroyed: MessageWriter<Destroyed>,
 ) {
@@ -119,7 +153,7 @@ pub fn player_crashes(
             entity: crash.player,
             team: Team::Player,
             position: crash.point,
-            cause: DestroyCause::Crash,
+            cause: DestroyCause::Crash(crash_into(&obstacles, crash.obstacle)),
         });
     }
 }
@@ -129,6 +163,7 @@ pub fn player_crashes(
 pub fn enemy_crashes(
     mut commands: Commands,
     mut crashes: MessageReader<EnemyCrashed>,
+    obstacles: Query<ObstacleParts>,
     mut enemies: Query<(&Team, &mut Health), Without<PlayerAircraft>>,
     mut destroyed: MessageWriter<Destroyed>,
 ) {
@@ -144,7 +179,7 @@ pub fn enemy_crashes(
             entity: crash.enemy,
             team: *team,
             position: crash.point,
-            cause: DestroyCause::Crash,
+            cause: DestroyCause::Crash(crash_into(&obstacles, crash.obstacle)),
         });
         commands.entity(crash.enemy).despawn();
     }

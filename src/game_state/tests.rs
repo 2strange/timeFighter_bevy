@@ -15,10 +15,11 @@ use crate::{
     ai::{AiPlugin, Enemy},
     audio::{Sound, SoundCue, SoundHooksPlugin},
     combat::{
-        CombatConfig, CombatPlugin, Gun, Health, Hit, MissileRack, Munition, Team, Trigger, Weapon,
+        CombatConfig, CombatPlugin, CrashInto, Gun, Health, Hit, MissileRack, Munition, Team,
+        Trigger, Weapon,
     },
     flight::{FlightConfig, FlightInput, FlightPlugin, FlightState, PlayerAircraft},
-    physics::{Layer, PhysicsPlugin, PlayerCrashed, ProjectileHit, aircraft_body},
+    physics::{Ground, Layer, PhysicsPlugin, PlayerCrashed, ProjectileHit, aircraft_body},
 };
 
 const FRAME: Duration = Duration::from_nanos(16_666_667);
@@ -51,6 +52,7 @@ fn app_with_jet_at(jet_at: Transform) -> (App, Entity) {
     app.insert_resource(mission);
     // Flat ground with its top at y = 0 (the city builds its own).
     app.world_mut().spawn((
+        Ground,
         RigidBody::Fixed,
         Collider::cuboid(20_000.0, 50.0, 20_000.0),
         Layer::World.groups(),
@@ -183,7 +185,10 @@ fn crashing_into_the_ground_loses_the_round() {
     *app.world_mut().get_mut::<Transform>(jet).unwrap() =
         Transform::from_xyz(0.0, 20.0, 0.0).with_rotation(Quat::from_rotation_x(-0.8));
     run_for(&mut app, 2.0);
-    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Crashed));
+    assert_eq!(
+        round(&app).phase,
+        RoundPhase::Over(Outcome::Crashed(CrashInto::Ground))
+    );
 }
 
 #[test]
@@ -244,7 +249,10 @@ fn restart_resets_round_player_and_enemies() {
     app.world_mut().get_mut::<Health>(jet).unwrap().current = 40.0;
     *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_xyz(0.0, 0.5, 0.0);
     run_for(&mut app, 1.0);
-    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Crashed));
+    assert_eq!(
+        round(&app).phase,
+        RoundPhase::Over(Outcome::Crashed(CrashInto::Ground))
+    );
     assert!(round(&app).stats.gun_rounds > 0);
 
     // Restart keys only work on the result screen; Enter is one of them.
@@ -300,7 +308,10 @@ fn restart_resets_round_player_and_enemies() {
     // Crash detection is armed again: the next crash ends this round too.
     *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_xyz(0.0, 0.5, 0.0);
     run_for(&mut app, 1.0);
-    assert_eq!(self::round(&app).phase, RoundPhase::Over(Outcome::Crashed));
+    assert_eq!(
+        self::round(&app).phase,
+        RoundPhase::Over(Outcome::Crashed(CrashInto::Ground))
+    );
 }
 
 #[test]
@@ -358,7 +369,10 @@ fn ramming_a_spitfire_loses_the_round_but_counts_the_kill() {
     run_for(&mut app, mission.end_delay + 0.5);
 
     let round = round(&app);
-    assert_eq!(round.phase, RoundPhase::Over(Outcome::Crashed));
+    assert_eq!(
+        round.phase,
+        RoundPhase::Over(Outcome::Crashed(CrashInto::Aircraft("Spitfire")))
+    );
     assert_eq!(round.stats.kills, 1);
     assert!(
         app.world().get_entity(enemy).is_err(),
