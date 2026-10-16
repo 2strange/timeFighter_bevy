@@ -41,6 +41,13 @@ bevy = { version = "=0.20.0", default-features = false, features = [
   "ktx2",
   "zstd_rust",
 ] }
+# Collision detection only (no gravity, no debug rendering by default).
+# Pinned exactly like Bevy; 0.37 is the release for Bevy 0.20.
+bevy_rapier3d = { version = "=0.37.0", default-features = false, features = ["dim3"] }
+
+[features]
+# Draws all colliders (native debugging only).
+physics-debug = ["bevy_rapier3d/debug-render-3d"]
 
 [dev-dependencies]
 # Same version and features as Bevy's glTF loader uses, so nothing extra builds.

@@ -6,6 +6,7 @@ pub mod aircraft;
 pub mod camera;
 pub mod flight;
 pub mod game_state;
+pub mod physics;
 pub mod world;
 
 #[cfg(test)]
@@ -23,6 +24,7 @@ impl Plugin for GamePlugin {
             flight::PlayerFlightPlugin,
             camera::ChaseCameraPlugin,
             game_state::PausePlugin,
+            physics::PhysicsPlugin,
             world::WorldPlugin,
         ));
     }
