@@ -3,11 +3,12 @@
 use bevy::{math::Rect, prelude::*};
 
 use super::{
-    CityPlugin, Target, WEB_CAMERA_FAR, WorldRenderConfig,
+    CityPlugin, Lighting, Target, WEB_CAMERA_FAR, WorldRenderConfig,
     layout::{
         Bridge, BuildingKind, CityConfig, CityLayout, MAX_LINES_PER_SIDE, RiverConfig, Roof,
         StreetClass, Zone, street_lines,
     },
+    max_fog_visibility,
     meshes::{self, Surface},
     rng::Rng,
 };
@@ -592,8 +593,19 @@ fn web_config_has_no_visibility_range_and_one_cascade() {
         .validate_for(Target::Web)
         .is_err()
     );
-    // Suggested far plane sits just behind the day fog's visibility.
+    // Suggested far plane sits just behind the farthest fog visibility.
     assert!((9_000.0..10_000.0).contains(&WEB_CAMERA_FAR));
+}
+
+#[test]
+fn max_fog_visibility_covers_every_lighting_preset() {
+    let max = max_fog_visibility();
+    for look in Lighting::ALL {
+        assert!(look.fog_visibility() <= max, "{look:?}");
+    }
+    assert!(Lighting::ALL.iter().any(|l| l.fog_visibility() == max));
+    assert_eq!(max, 9_000.0);
+    assert!(WEB_CAMERA_FAR > max);
 }
 
 #[test]

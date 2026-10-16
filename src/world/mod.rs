@@ -60,10 +60,22 @@ impl Target {
     };
 }
 
+/// Largest fog visibility (m) of all lighting presets: beyond this distance
+/// every look renders pure fog colour.
+pub const fn max_fog_visibility() -> f32 {
+    let mut max = 0.0_f32;
+    let mut i = 0;
+    while i < Lighting::ALL.len() {
+        max = max.max(LightingPreset::get(Lighting::ALL[i]).fog_visibility);
+        i += 1;
+    }
+    max
+}
+
 /// Suggested camera far plane (m) for the web build, where chunks have no
-/// visibility range: just past the day fog's 9 km visibility, so frustum
+/// visibility range: 500 m past the farthest fog visibility, so frustum
 /// culling drops what the fog has already hidden.
-pub const WEB_CAMERA_FAR: f32 = 9_500.0;
+pub const WEB_CAMERA_FAR: f32 = max_fog_visibility() + 500.0;
 
 /// Render-cost knobs of the world, tuned on Austin's frame-rate measurements.
 #[derive(Resource, Clone, Debug, PartialEq)]
@@ -217,6 +229,15 @@ pub enum Lighting {
     Evening,
 }
 
+impl Lighting {
+    pub const ALL: [Lighting; 2] = [Lighting::Day, Lighting::Evening];
+
+    /// Fog visibility (m) of this look.
+    pub fn fog_visibility(self) -> f32 {
+        LightingPreset::get(self).fog_visibility
+    }
+}
+
 struct LightingPreset {
     sky: Color,
     fog_sun: Color,
@@ -258,7 +279,7 @@ impl LightingPreset {
         window_glow: 6.0,
     };
 
-    fn get(lighting: Lighting) -> &'static Self {
+    const fn get(lighting: Lighting) -> &'static Self {
         match lighting {
             Lighting::Day => &Self::DAY,
             Lighting::Evening => &Self::EVENING,
