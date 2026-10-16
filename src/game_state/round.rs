@@ -137,8 +137,12 @@ impl Plugin for RoundPlugin {
         )
         // The city's damage plugin registers it too.
         .add_message::<RepairCity>();
+        // `?set=second` in the page URL (or `--set=second`) switches the
+        // enemy aircraft, unless a configuration was set up before.
+        if !app.world().contains_resource::<MissionConfig>() {
+            app.insert_resource(MissionConfig::detect());
+        }
         app.init_resource::<GameSettings>()
-            .init_resource::<MissionConfig>()
             .init_resource::<Mission>()
             .init_resource::<Round>()
             .add_message::<RestartRound>()
@@ -385,14 +389,12 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
                     offset: group.formation.slot(slot as u32),
                     holding,
                 };
-                if group.kind.is_bomber() {
-                    commands.spawn((
-                        bomber_bundle(group.kind, group.tuning, transform, id),
-                        flight,
-                    ));
+                let kind = group.members[slot];
+                if kind.is_bomber() {
+                    commands.spawn((bomber_bundle(kind, group.tuning, transform, id), flight));
                 } else {
                     commands.spawn((
-                        enemy_bundle(group.kind, group.skill, group.tuning, transform),
+                        enemy_bundle(kind, group.skill, group.tuning, transform),
                         flight,
                     ));
                 }
