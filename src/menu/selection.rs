@@ -38,7 +38,7 @@ impl MenuMode {
         match self {
             MenuMode::Hunt => Some(GameMode::Hunt),
             MenuMode::Protect => Some(GameMode::Protect),
-            MenuMode::Battle => None,
+            MenuMode::Battle => Some(GameMode::Battle),
         }
     }
 }
@@ -124,7 +124,8 @@ impl CustomField {
     /// Values offered, within the ranges the round accepts.
     fn steps(self) -> &'static [f32] {
         match self {
-            CustomField::Missiles => &[0., 2., 4., 6., 8., 10., 15., 20., 30., 40.],
+            // Includes every level's count in every mode (e.g. 14, 16, 24).
+            CustomField::Missiles => &[0., 2., 4., 6., 8., 10., 12., 14., 16., 20., 24., 30., 40.],
             CustomField::Enemies => &[1., 2., 4., 6., 8., 10., 12., 16., 20., 24.],
             CustomField::FlightSize => &[1., 2., 3., 4., 5., 6.],
             CustomField::EnemySpeed => &[0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
@@ -489,19 +490,57 @@ mod tests {
     #[test]
     fn modes_follow_what_the_game_offers() {
         let mut selection = MenuSelection::default();
-        // Protect is in GameMode::ALL, Battle is not (yet).
+        // All three are in GameMode::ALL now.
         assert!(selection.select(RowId::Mode, 1));
         assert_eq!(selection.settings().mode, GameMode::Protect);
-        assert!(!selection.select(RowId::Mode, 2));
-        assert_eq!(selection.mode, MenuMode::Protect);
+        assert!(selection.select(RowId::Mode, 2));
+        assert_eq!(selection.settings().mode, GameMode::Battle);
         let rows = selection.rows();
-        assert!(rows[0].choices[1].enabled && !rows[0].choices[2].enabled);
-        assert!(rows[0].choices[2].label.contains("coming soon"));
+        assert!(rows[0].choices.iter().all(|c| c.enabled));
+        assert!(
+            !rows[0]
+                .choices
+                .iter()
+                .any(|c| c.label.contains("coming soon"))
+        );
         for mode in GameMode::ALL {
             assert!(
                 MenuMode::ALL.iter().any(|m| m.game_mode() == Some(mode)),
                 "{mode:?} missing in the menu"
             );
+        }
+    }
+
+    #[test]
+    fn battle_shows_bomber_and_fighter_values_and_its_own_missiles() {
+        let mut selection = MenuSelection::default();
+        selection.select(RowId::Mode, 2);
+        selection.select(RowId::Difficulty, CUSTOM_LEVEL);
+        let has = |s: &MenuSelection, f| s.rows().iter().any(|r| r.id == RowId::Custom(f));
+        assert!(has(&selection, CustomField::BomberWaves));
+        assert!(has(&selection, CustomField::FlightSize));
+        // Custom starts from Normal's values for Battle.
+        assert_eq!(
+            selection.custom.missiles,
+            Difficulty::Normal.params_for(GameMode::Battle).missiles
+        );
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+    }
+
+    #[test]
+    fn every_level_value_is_an_offered_step() {
+        // Otherwise Custom would start from a rounded value.
+        for mode in GameMode::ALL {
+            for level in Difficulty::PRESETS {
+                let params = level.params_for(mode);
+                for field in CustomField::ALL {
+                    let value = field.get(&params);
+                    assert!(
+                        field.steps().iter().any(|s| (s - value).abs() < 1e-4),
+                        "{mode:?} {level:?} {field:?} = {value} not offered"
+                    );
+                }
+            }
         }
     }
 
@@ -620,7 +659,7 @@ mod tests {
     fn damaged_or_foreign_lines_fall_back_to_defaults() {
         assert_eq!(MenuSelection::from_line(""), MenuSelection::default());
         assert_eq!(
-            MenuSelection::from_line("garbage;;=;level=99;mode=battle;light=purple"),
+            MenuSelection::from_line("garbage;;=;level=99;mode=dogfight;light=purple"),
             MenuSelection::default()
         );
         // Values between steps snap to the nearest step.
