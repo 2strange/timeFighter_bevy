@@ -1,59 +1,158 @@
-//! Spike world: a large patterned ground plane, scattered pylons for parallax,
-//! sun, sky and fog. To be replaced by the procedural city.
+//! The world: a procedural city on a flat ground plane, sun, sky and fog.
+//!
+//! The city is generated as plain data first ([`CityLayout`], seeded and
+//! deterministic) and then rendered from it: the ground is one flat mesh
+//! with streets painted in as vertex colours, buildings are merged per
+//! 800 m chunk and facade material, so the whole city takes a few dozen draw
+//! calls and is frustum-culled chunk by chunk. Each building also carries
+//! its collision boxes for the physics phase.
+
+pub mod layout;
+pub mod meshes;
+pub mod textures;
+
+#[cfg(test)]
+mod tests;
 
 use bevy::{
-    asset::RenderAssetUsages,
-    image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
-    light::CascadeShadowConfigBuilder,
-    math::Affine2,
+    light::{CascadeShadowConfigBuilder, NotShadowCaster},
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 
-/// Edge length of the ground plane (m).
-const GROUND_SIZE: f32 = 40_000.0;
-/// Ground covered by one repetition of the ground texture (m).
-const GROUND_TILE: f32 = 1_000.0;
-/// Pixels per edge of the ground texture.
-const GROUND_TEXTURE_PX: u32 = 512;
-/// Checker squares per texture repetition (100 m each).
-const GROUND_CHECKERS: u32 = 10;
+pub use layout::{Building, CityConfig, CityLayout, Zone};
+use meshes::Surface;
 
-const SKY: Color = Color::srgb(0.62, 0.74, 0.86);
+/// Generates the [`CityLayout`] resource from [`CityConfig`]. Data only, no
+/// rendering; works headless with `MinimalPlugins`.
+pub struct CityPlugin;
 
+impl Plugin for CityPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<CityConfig>()
+            .add_systems(PreStartup, generate_city);
+    }
+}
+
+/// City rendering, light, sky and fog on top of [`CityPlugin`].
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ClearColor(SKY))
+        let day = LightingPreset::DAY;
+        app.add_plugins(CityPlugin)
+            .insert_resource(ClearColor(day.sky))
             .insert_resource(GlobalAmbientLight {
-                color: Color::srgb(0.75, 0.82, 1.0),
-                brightness: 600.0,
+                color: day.ambient_color,
+                brightness: day.ambient_brightness,
                 ..default()
             })
-            .add_systems(Startup, (spawn_ground, spawn_pylons, spawn_sun));
+            .init_resource::<Lighting>()
+            .add_systems(Startup, (spawn_ground, spawn_buildings, spawn_sun))
+            .add_systems(
+                Update,
+                (
+                    toggle_lighting,
+                    apply_lighting.run_if(resource_changed::<Lighting>),
+                )
+                    .chain(),
+            );
+    }
+}
+
+fn generate_city(mut commands: Commands, config: Res<CityConfig>) {
+    commands.insert_resource(CityLayout::generate(&config));
+}
+
+/// Light and sky look. `L` toggles between them so Austin can compare on a
+/// test flight; daylight is the default until the look is decided.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Lighting {
+    #[default]
+    Day,
+    Evening,
+}
+
+struct LightingPreset {
+    sky: Color,
+    fog_sun: Color,
+    fog_visibility: f32,
+    ambient_color: Color,
+    ambient_brightness: f32,
+    sun_color: Color,
+    sun_lux: f32,
+    /// Direction the sunlight travels.
+    sun_direction: Vec3,
+    /// Emissive strength of lit windows.
+    window_glow: f32,
+}
+
+impl LightingPreset {
+    const DAY: Self = Self {
+        sky: Color::srgb(0.62, 0.74, 0.86),
+        fog_sun: Color::srgba(1.0, 0.92, 0.75, 0.5),
+        fog_visibility: 9_000.0,
+        ambient_color: Color::srgb(0.75, 0.82, 1.0),
+        ambient_brightness: 600.0,
+        sun_color: Color::WHITE,
+        sun_lux: light_consts::lux::AMBIENT_DAYLIGHT,
+        sun_direction: Vec3::new(-0.4, -0.7, -0.6),
+        window_glow: 0.0,
+    };
+
+    /// Proposal for the target mood: low sun ahead of the spawn heading,
+    /// warm haze, lit windows.
+    const EVENING: Self = Self {
+        sky: Color::srgb(0.86, 0.60, 0.45),
+        fog_sun: Color::srgba(1.0, 0.70, 0.40, 0.8),
+        fog_visibility: 7_000.0,
+        ambient_color: Color::srgb(0.55, 0.60, 0.85),
+        ambient_brightness: 350.0,
+        sun_color: Color::srgb(1.0, 0.72, 0.48),
+        sun_lux: 4_000.0,
+        sun_direction: Vec3::new(0.25, -0.22, 0.94),
+        window_glow: 6.0,
+    };
+
+    fn get(lighting: Lighting) -> &'static Self {
+        match lighting {
+            Lighting::Day => &Self::DAY,
+            Lighting::Evening => &Self::EVENING,
+        }
+    }
+
+    fn fog(&self) -> DistanceFog {
+        DistanceFog {
+            color: self.sky,
+            directional_light_color: self.fog_sun,
+            directional_light_exponent: 24.0,
+            falloff: FogFalloff::from_visibility_squared(self.fog_visibility),
+        }
     }
 }
 
 /// Distance fog matching the sky colour; attached to the camera.
 pub fn sky_fog() -> DistanceFog {
-    DistanceFog {
-        color: SKY,
-        directional_light_color: Color::srgba(1.0, 0.92, 0.75, 0.5),
-        directional_light_exponent: 24.0,
-        falloff: FogFalloff::from_visibility_squared(9_000.0),
-    }
+    LightingPreset::DAY.fog()
 }
 
+#[derive(Component)]
+struct Sun;
+
+/// Facade materials, kept to switch the window glow.
+#[derive(Resource)]
+struct FacadeMaterials(Vec<Handle<StandardMaterial>>);
+
 fn spawn_sun(mut commands: Commands) {
+    let day = &LightingPreset::DAY;
     commands.spawn((
         Name::new("Sun"),
+        Sun,
         DirectionalLight {
-            illuminance: light_consts::lux::AMBIENT_DAYLIGHT,
+            illuminance: day.sun_lux,
             shadow_maps_enabled: true,
             ..default()
         },
-        Transform::from_xyz(0.0, 0.0, 0.0).looking_to(Vec3::new(-0.4, -0.7, -0.6), Vec3::Y),
+        Transform::default().looking_to(day.sun_direction, Vec3::Y),
         CascadeShadowConfigBuilder {
             num_cascades: 3,
             first_cascade_far_bound: 150.0,
@@ -66,136 +165,99 @@ fn spawn_sun(mut commands: Commands) {
 
 fn spawn_ground(
     mut commands: Commands,
+    layout: Res<CityLayout>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let quads = meshes::ground_quads(&layout);
+    commands.spawn((
+        Name::new("Ground"),
+        Mesh3d(meshes.add(meshes::ground_mesh_data(&quads).into_mesh())),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            perceptual_roughness: 0.95,
+            ..default()
+        })),
+        // Flat ground never shadows anything.
+        NotShadowCaster,
+    ));
+}
+
+fn spawn_buildings(
+    mut commands: Commands,
+    layout: Res<CityLayout>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    let texture = images.add(ground_texture());
-    commands.spawn((
-        Name::new("Ground"),
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color_texture: Some(texture),
-            perceptual_roughness: 0.95,
-            uv_transform: Affine2::from_scale(Vec2::splat(GROUND_SIZE / GROUND_TILE)),
-            ..default()
-        })),
-    ));
-}
-
-/// Two-tone green checkerboard with a darker line along the tile border,
-/// stored with a full mip chain so it does not shimmer in the distance.
-fn ground_texture() -> Image {
-    let cell = GROUND_TEXTURE_PX / GROUND_CHECKERS;
-    let mut base = Vec::with_capacity((GROUND_TEXTURE_PX * GROUND_TEXTURE_PX) as usize);
-    for y in 0..GROUND_TEXTURE_PX {
-        for x in 0..GROUND_TEXTURE_PX {
-            let rgb = if x < 3 || y < 3 {
-                [0.20, 0.30, 0.16]
-            } else if (x / cell + y / cell).is_multiple_of(2) {
-                [0.36, 0.52, 0.26]
+    let mut facade = |surface: Surface| {
+        let (base, glow) = textures::facade_textures(surface);
+        materials.add(StandardMaterial {
+            base_color_texture: Some(images.add(base)),
+            emissive_texture: Some(images.add(glow)),
+            emissive: LinearRgba::BLACK,
+            perceptual_roughness: if surface == Surface::Office {
+                0.35
             } else {
-                [0.44, 0.58, 0.30]
-            };
-            base.push(rgb);
-        }
-    }
-
-    // Box-filter the mip chain in linear space, then store everything as sRGB.
-    let mut data = Vec::new();
-    let mut level = base;
-    let mut size = GROUND_TEXTURE_PX;
-    let mut mip_levels = 0;
-    loop {
-        for rgb in &level {
-            let c = Color::linear_rgb(rgb[0], rgb[1], rgb[2]).to_srgba();
-            data.extend_from_slice(&[
-                (c.red * 255.0).round() as u8,
-                (c.green * 255.0).round() as u8,
-                (c.blue * 255.0).round() as u8,
-                255,
-            ]);
-        }
-        mip_levels += 1;
-        if size == 1 {
-            break;
-        }
-        let half = size / 2;
-        let at = |x: u32, y: u32| level[(y * size + x) as usize];
-        let mut next = Vec::with_capacity((half * half) as usize);
-        for y in 0..half {
-            for x in 0..half {
-                let px = [
-                    at(2 * x, 2 * y),
-                    at(2 * x + 1, 2 * y),
-                    at(2 * x, 2 * y + 1),
-                    at(2 * x + 1, 2 * y + 1),
-                ];
-                next.push(std::array::from_fn(|i| {
-                    px.iter().map(|p| p[i]).sum::<f32>() / 4.0
-                }));
-            }
-        }
-        level = next;
-        size = half;
-    }
-
-    let mut image = Image::new_uninit(
-        Extent3d {
-            width: GROUND_TEXTURE_PX,
-            height: GROUND_TEXTURE_PX,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.data = Some(data);
-    image.texture_descriptor.mip_level_count = mip_levels;
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        mag_filter: ImageFilterMode::Linear,
-        min_filter: ImageFilterMode::Linear,
-        mipmap_filter: ImageFilterMode::Linear,
-        anisotropy_clamp: 16,
+                0.85
+            },
+            ..default()
+        })
+    };
+    let office = facade(Surface::Office);
+    let residential = facade(Surface::Residential);
+    let plain = materials.add(StandardMaterial {
+        perceptual_roughness: 0.9,
         ..default()
     });
-    image
+    commands.insert_resource(FacadeMaterials(vec![office.clone(), residential.clone()]));
+
+    for ((chunk, surface), data) in meshes::building_meshes(&layout) {
+        let material = match surface {
+            Surface::Office => office.clone(),
+            Surface::Residential => residential.clone(),
+            Surface::Plain => plain.clone(),
+        };
+        commands.spawn((
+            Name::new(format!("City chunk {chunk:?} {surface:?}")),
+            Mesh3d(meshes.add(data.into_mesh())),
+            MeshMaterial3d(material),
+        ));
+    }
 }
 
-/// A few hundred simple towers spread around the spawn area, so speed and
-/// altitude are readable. One shared mesh and material, so they batch.
-fn spawn_pylons(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
+fn toggle_lighting(keys: Res<ButtonInput<KeyCode>>, mut lighting: ResMut<Lighting>) {
+    if keys.just_pressed(KeyCode::KeyL) {
+        *lighting = match *lighting {
+            Lighting::Day => Lighting::Evening,
+            Lighting::Evening => Lighting::Day,
+        };
+    }
+}
+
+fn apply_lighting(
+    lighting: Res<Lighting>,
+    mut clear: ResMut<ClearColor>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    mut sun: Query<(&mut DirectionalLight, &mut Transform), With<Sun>>,
+    mut fog: Query<&mut DistanceFog>,
+    facades: Option<Res<FacadeMaterials>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0).mesh());
-    let materials = [
-        materials.add(Color::srgb(0.78, 0.74, 0.68)),
-        materials.add(Color::srgb(0.62, 0.60, 0.58)),
-        materials.add(Color::srgb(0.70, 0.52, 0.42)),
-    ];
-
-    // Small deterministic LCG; no extra dependency needed for a spike.
-    let mut seed: u32 = 0x5eed_1234;
-    let mut rand = move || {
-        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (seed >> 8) as f32 / (1u32 << 24) as f32
-    };
-
-    for i in 0..400 {
-        let x = (rand() - 0.5) * 12_000.0;
-        let z = (rand() - 0.5) * 12_000.0;
-        let width = 15.0 + rand() * 35.0;
-        let depth = 15.0 + rand() * 35.0;
-        let height = 20.0 + rand() * rand() * 180.0;
-        commands.spawn((
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(materials[i % materials.len()].clone()),
-            // Unit cube sized per instance; this is level geometry, not a model.
-            Transform::from_xyz(x, height / 2.0, z).with_scale(Vec3::new(width, height, depth)),
-        ));
+    let preset = LightingPreset::get(*lighting);
+    clear.0 = preset.sky;
+    ambient.color = preset.ambient_color;
+    ambient.brightness = preset.ambient_brightness;
+    for (mut light, mut transform) in &mut sun {
+        light.color = preset.sun_color;
+        light.illuminance = preset.sun_lux;
+        *transform = Transform::default().looking_to(preset.sun_direction, Vec3::Y);
+    }
+    for mut f in &mut fog {
+        *f = preset.fog();
+    }
+    for handle in facades.iter().flat_map(|f| f.0.iter()) {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.emissive = LinearRgba::WHITE * preset.window_glow;
+        }
     }
 }
