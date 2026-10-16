@@ -609,3 +609,24 @@ fn non_finite_custom_values_count_as_normal() {
     let tuning = mission.waves[0].groups[0].tuning;
     assert_eq!((tuning.speed, tuning.accuracy), (1.0, 1.0));
 }
+
+#[test]
+fn easy_levels_lock_faster_and_send_fewer_attackers() {
+    let (mut app, _) = app();
+    app.insert_resource(GameSettings {
+        difficulty: Difficulty::SuperEasy,
+        ..default()
+    });
+    app.world_mut().write_message(RestartRound);
+    app.update();
+    let lock = app.world().resource::<CombatConfig>().lock.time;
+    let slots = app.world().resource::<crate::ai::AttackSlots>().max;
+    assert_eq!((lock, slots), (0.6, 1));
+    let attackers = app
+        .world_mut()
+        .query::<&crate::ai::EnemyPilot>()
+        .iter(app.world())
+        .filter(|p| p.attacking)
+        .count();
+    assert!(attackers <= 1);
+}

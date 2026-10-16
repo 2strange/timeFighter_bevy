@@ -63,6 +63,8 @@ impl Difficulty {
                 pilots: PilotMix::Rookies,
                 enemy_speed: 0.8,
                 enemy_accuracy: 0.5,
+                attackers: 1,
+                lock_time: 0.6,
                 ..base
             },
             Difficulty::Easy => DifficultyParams {
@@ -72,6 +74,8 @@ impl Difficulty {
                 pilots: PilotMix::Rookies,
                 enemy_speed: 0.9,
                 enemy_accuracy: 0.7,
+                attackers: 1,
+                lock_time: 0.6,
                 ..base
             },
             Difficulty::Normal => base,
@@ -82,6 +86,8 @@ impl Difficulty {
                 pilots: PilotMix::RookiesThenVeterans,
                 enemy_speed: 1.0,
                 enemy_accuracy: 1.0,
+                attackers: 3,
+                lock_time: 1.0,
                 ..base
             },
             Difficulty::Insane => DifficultyParams {
@@ -91,6 +97,8 @@ impl Difficulty {
                 pilots: PilotMix::Veterans,
                 enemy_speed: 1.0,
                 enemy_accuracy: 1.2,
+                attackers: 4,
+                lock_time: 1.0,
                 ..base
             },
             Difficulty::Custom(params) => params,
@@ -127,6 +135,10 @@ pub struct DifficultyParams {
     pub enemy_accuracy: f32,
     /// The player's gun never runs dry.
     pub unlimited_gun: bool,
+    /// At most this many enemies attack at once; the others wait.
+    pub attackers: u32,
+    /// Seconds a target must stay in the seeker cone to be locked.
+    pub lock_time: f32,
 }
 
 impl Default for DifficultyParams {
@@ -140,6 +152,8 @@ impl Default for DifficultyParams {
             enemy_speed: 1.0,
             enemy_accuracy: 0.85,
             unlimited_gun: false,
+            attackers: 2,
+            lock_time: 0.8,
         }
     }
 }
@@ -156,6 +170,12 @@ impl DifficultyParams {
             flight_size: self.flight_size.clamp(1, 8),
             enemy_speed: factor(self.enemy_speed, 0.3, 2.0),
             enemy_accuracy: factor(self.enemy_accuracy, 0.1, 3.0),
+            attackers: self.attackers.clamp(1, 12),
+            lock_time: if self.lock_time.is_finite() {
+                self.lock_time.clamp(0.2, 3.0)
+            } else {
+                1.0
+            },
             ..self
         }
     }

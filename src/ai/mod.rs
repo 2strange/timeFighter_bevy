@@ -1,11 +1,14 @@
 //! Enemy pilots: their own simple arcade flight (not the player's flight
 //! model) and a small state machine: pursue the player and shoot, break
 //! when the player sits on their tail or a missile comes, extend after a
-//! head-on pass. Terrain look-ahead keeps them above roofs and ground.
+//! head-on pass. Only a few attack at once ([`AttackSlots`]); the rest
+//! circle with their flights. Pilots only see ahead. Terrain look-ahead
+//! keeps them above roofs and ground.
 //!
 //! [`AiPlugin`] runs headless; [`EnemyVisualsPlugin`] adds the meshes.
 
 mod obstacles;
+mod tactics;
 #[cfg(test)]
 mod tests;
 mod visuals;
@@ -15,13 +18,14 @@ use std::f32::consts::PI;
 use bevy::prelude::*;
 
 pub use obstacles::ObstacleMap;
+pub use tactics::{AttackSlots, FlightGroup, HOLDING_RADIUS, sees};
 pub use visuals::EnemyVisualsPlugin;
 
 use crate::{
     aircraft::AircraftModel,
     combat::{
-        AircraftType, AircraftVelocity, CombatRng, CombatSystems, Gun, GunSpec, Health, Hitbox,
-        Missile, Team, Trigger,
+        AircraftType, AircraftVelocity, CombatRng, CombatSystems, Gun, GunSpec, Health, Hit,
+        Hitbox, Missile, Team, Trigger,
     },
     flight::{FlightSystems, PlayerAircraft},
     physics::Layer,
@@ -133,6 +137,14 @@ pub struct AiConfig {
     pub player_aim_cone: f32,
     /// A missile homing on the enemy is noticed within this distance (m).
     pub missile_warning: f32,
+    /// Pilots see the player within this half-angle around the nose (rad)
+    /// and distance (m); they cannot look back.
+    pub sight_half_angle: f32,
+    pub sight_range: f32,
+    /// How long a pilot keeps the player in mind after seeing it (s).
+    pub awareness: f32,
+    /// How long being hit gives priority for an attack slot (s).
+    pub provoked_time: f32,
     /// Collision avoidance looks this far ahead (s).
     pub collision_horizon: f32,
     /// Closest pass (m) enemies keep between each other.
@@ -169,6 +181,10 @@ impl Default for AiConfig {
             tail_cone: 40_f32.to_radians(),
             player_aim_cone: 12_f32.to_radians(),
             missile_warning: 1_800.0,
+            sight_half_angle: 70_f32.to_radians(),
+            sight_range: 2_500.0,
+            awareness: 5.0,
+            provoked_time: 8.0,
             collision_horizon: 3.0,
             formation_min_pass: 30.0,
             avoid_time: 1.2,
@@ -265,6 +281,15 @@ pub struct EnemyPilot {
     pub burst_pause: f32,
     /// Collision avoidance under way.
     pub avoiding: Option<Avoidance>,
+    /// Holds one of the attack slots: goes for the player. Otherwise it
+    /// waits with its flight.
+    pub attacking: bool,
+    /// Seconds the pilot still knows where the player is (saw it ahead,
+    /// was hit, saw a missile). Only an aware pilot breaks away.
+    pub aware: f32,
+    /// Seconds since being hit count down from here; a provoked pilot gets
+    /// the next free attack slot first.
+    pub provoked: f32,
 }
 
 /// One collision avoidance manoeuvre, held until it is done.
@@ -387,6 +412,7 @@ pub struct AiPlugin;
 impl Plugin for AiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AiConfig>()
+            .init_resource::<AttackSlots>()
             .init_resource::<ObstacleMap>()
             .configure_sets(
                 Update,
@@ -399,6 +425,7 @@ impl Plugin for AiPlugin {
                 Update,
                 (
                     obstacles::rebuild_obstacles.run_if(resource_exists_and_changed::<CityLayout>),
+                    tactics::assign_attack_slots,
                     fly_enemies,
                 )
                     .chain()
@@ -426,10 +453,12 @@ fn fly_enemies(
         (With<PlayerAircraft>, Without<Enemy>),
     >,
     missiles: Query<(&Missile, &Transform), Without<Enemy>>,
+    mut hits: MessageReader<Hit>,
     mut enemies: Query<(
         Entity,
         &Enemy,
         Option<&EnemyTuning>,
+        Option<&FlightGroup>,
         &mut EnemyPilot,
         &mut EnemyFlight,
         &mut Transform,
@@ -463,7 +492,7 @@ fn fly_enemies(
         .chain(
             enemies
                 .iter()
-                .map(|(entity, _, _, _, _, tf, velocity, _)| Traffic {
+                .map(|(entity, _, _, _, _, _, tf, velocity, _)| Traffic {
                     entity: Some(entity),
                     position: tf.translation,
                     velocity: velocity.0,
@@ -471,8 +500,22 @@ fn fly_enemies(
         )
         .collect();
 
-    for (entity, enemy, tuning, mut pilot, mut flight, mut transform, mut velocity, mut trigger) in
-        &mut enemies
+    let leaders = tactics::flight_leaders(enemies.iter().map(
+        |(_, _, _, group, pilot, _, tf, velocity, _)| (group, pilot.attacking, tf, velocity.0),
+    ));
+    let hit: Vec<Entity> = hits.read().map(|h| h.target).collect();
+
+    for (
+        entity,
+        enemy,
+        tuning,
+        group,
+        mut pilot,
+        mut flight,
+        mut transform,
+        mut velocity,
+        mut trigger,
+    ) in &mut enemies
     {
         let stats = enemy
             .kind
@@ -486,9 +529,42 @@ fn fly_enemies(
             .map(|(_, tf)| tf.translation)
             .find(|m| m.distance(position) < cfg.missile_warning);
 
+        // What the pilot knows: the player ahead, a hit, a missile.
+        pilot.aware -= dt;
+        pilot.provoked -= dt;
+        let seen = player.is_some_and(|p| {
+            sees(
+                forward,
+                p.position - position,
+                cfg.sight_half_angle,
+                cfg.sight_range,
+            )
+        });
+        if hit.contains(&entity) {
+            pilot.provoked = cfg.provoked_time;
+        }
+        if seen || incoming.is_some() || hit.contains(&entity) {
+            pilot.aware = cfg.awareness;
+        }
+
         let mut decision = think(
             &cfg, &stats, &mut pilot, &mut rng, position, forward, player, incoming, dt,
         );
+        // Without an attack slot: wait with the flight (still breaking
+        // when threatened, see `think`).
+        if !pilot.attacking && pilot.mode == PilotMode::Pursue {
+            let (direction, speed) = tactics::holding_direction(
+                group,
+                group.and_then(|g| leaders.get(&g.id)),
+                position,
+                stats.cruise_speed,
+            );
+            decision = Decision {
+                direction,
+                speed,
+                fire: false,
+            };
+        }
         // Nobody rams on purpose: a collision course beats everything but
         // the ground.
         let found = collision_escape(&cfg, &pilot.skill, entity, position, velocity.0, &traffic);
@@ -627,7 +703,9 @@ fn think(
 
     match pilot.mode {
         PilotMode::Pursue => {
-            let on_my_tail = distance < cfg.tail_range
+            // Only a pilot who knows about the player checks its tail.
+            let on_my_tail = pilot.aware > 0.0
+                && distance < cfg.tail_range
                 && (-forward).angle_between(to_player) < cfg.tail_cone
                 && player.forward.angle_between(-to_player) < cfg.player_aim_cone;
             pilot.threat_time = if on_my_tail || incoming.is_some() {

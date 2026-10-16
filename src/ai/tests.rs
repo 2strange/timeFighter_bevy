@@ -213,7 +213,8 @@ fn enemy_behind_the_player_closes_in_and_shoots() {
 #[test]
 fn enemy_breaks_when_the_player_sits_on_its_tail() {
     let mut app = app(60.0, false);
-    // Enemy 400 m ahead of the player, both flying along −Z.
+    // Enemy 400 m ahead of the player, both flying along −Z. It knows the
+    // player is there (it cannot see behind itself otherwise).
     spawn_player(
         &mut app,
         Transform::from_xyz(0.0, 800.0, 0.0),
@@ -221,6 +222,7 @@ fn enemy_breaks_when_the_player_sits_on_its_tail() {
         FlightInput::default(),
     );
     let enemy = spawn_enemy(&mut app, Transform::from_xyz(0.0, 800.0, -400.0));
+    app.world_mut().get_mut::<EnemyPilot>(enemy).unwrap().aware = 10.0;
     app.update();
     let pilot = app.world().get::<EnemyPilot>(enemy).unwrap();
     assert!(
@@ -362,6 +364,7 @@ fn rookies_take_longer_than_veterans_to_break() {
                 Transform::from_xyz(0.0, 800.0, -400.0),
             ))
             .id();
+        app.world_mut().get_mut::<EnemyPilot>(enemy).unwrap().aware = 10.0;
         for frame in 0..120 {
             app.update();
             let pilot = app.world().get::<EnemyPilot>(enemy).unwrap();
@@ -673,4 +676,172 @@ fn forty_eight_enemies_at_once_stay_stable() {
     assert_eq!(run.rammings, 0, "rammings");
     assert_eq!(run.enemy_crashes, 0, "crashes");
     assert!(run.closest > 10.0, "closest pass {:.0} m", run.closest);
+}
+
+#[test]
+fn an_enemy_that_never_saw_the_player_does_not_break() {
+    let mut app = app(60.0, false);
+    spawn_player(
+        &mut app,
+        Transform::from_xyz(0.0, 800.0, 0.0),
+        170.0,
+        FlightInput::default(),
+    );
+    let enemy = spawn_enemy(&mut app, Transform::from_xyz(0.0, 800.0, -400.0));
+    for _ in 0..120 {
+        app.update();
+        let pilot = app.world().get::<EnemyPilot>(enemy).unwrap();
+        assert!(
+            !matches!(pilot.mode, PilotMode::Break { .. }),
+            "broke without seeing"
+        );
+    }
+}
+
+/// Enemies in flights of four on a ring around the origin, facing in.
+/// The player in these tests circles west of the origin within ~700 m.
+fn spawn_flights(app: &mut App, flights: u32) -> Vec<Entity> {
+    let mut all = Vec::new();
+    for f in 0..flights {
+        // North and south of the origin, clear of the player's circle.
+        let angle = std::f32::consts::FRAC_PI_2 + f as f32 * std::f32::consts::TAU / flights as f32;
+        let lead = Vec3::new(angle.cos() * 2_000.0, 900.0, angle.sin() * 2_000.0);
+        let heading =
+            Transform::from_translation(lead).looking_at(Vec3::new(0.0, 900.0, 0.0), Vec3::Y);
+        for slot in 0..4u32 {
+            let rank = slot.div_ceil(2) as f32;
+            let side = if slot % 2 == 1 { -1.0 } else { 1.0 };
+            let offset = Vec3::new(side * rank * 45.0, 0.0, rank * 45.0);
+            let transform = Transform::from_translation(heading.transform_point(offset))
+                .with_rotation(heading.rotation);
+            let entity = app
+                .world_mut()
+                .spawn((
+                    enemy_bundle(
+                        EnemyKind::Spitfire,
+                        PilotSkill::VETERAN,
+                        EnemyTuning::default(),
+                        transform,
+                    ),
+                    super::FlightGroup {
+                        id: f,
+                        slot,
+                        offset,
+                        holding: super::FlightGroup::holding_point(lead, 2_200.0),
+                    },
+                ))
+                .id();
+            all.push(entity);
+        }
+    }
+    all
+}
+
+fn attacking(app: &mut App) -> Vec<Entity> {
+    app.world_mut()
+        .query::<(Entity, &EnemyPilot)>()
+        .iter(app.world())
+        .filter(|(_, p)| p.attacking)
+        .map(|(e, _)| e)
+        .collect()
+}
+
+#[test]
+fn only_the_allowed_number_attack_and_the_rest_keep_away() {
+    let mut app = app(30.0, false);
+    app.world_mut().resource_mut::<CombatConfig>().player_health = f32::MAX;
+    app.insert_resource(super::AttackSlots { max: 2 });
+    let jet = spawn_player(
+        &mut app,
+        Transform::from_xyz(0.0, 800.0, 0.0),
+        250.0,
+        FlightInput {
+            yaw: 0.3,
+            ..default()
+        },
+    );
+    spawn_flights(&mut app, 2);
+    let mut most = 0;
+    let mut closest_waiting = f32::INFINITY;
+    for frame in 0..(60 * 30) {
+        app.update();
+        let attackers = attacking(&mut app);
+        most = most.max(attackers.len());
+        if frame < 30 * 20 {
+            // Give the waiting ones 20 s to reach their holding circles.
+            continue;
+        }
+        let player = app.world().get::<Transform>(jet).unwrap().translation;
+        let mut pilots = app.world_mut().query::<(Entity, &EnemyPilot, &Transform)>();
+        for (entity, pilot, tf) in pilots.iter(app.world()) {
+            if !pilot.attacking && !attackers.contains(&entity) {
+                closest_waiting = closest_waiting.min(tf.translation.distance(player));
+            }
+        }
+    }
+    assert_eq!(most, 2, "attackers at once");
+    assert!(
+        closest_waiting > 400.0,
+        "a waiting enemy came within {closest_waiting:.0} m"
+    );
+}
+
+/// Keeps the player 250 m behind `target`, on its course, like a pilot
+/// hanging on its tail.
+#[derive(Resource)]
+struct Follow(Entity);
+
+fn follow_target(
+    follow: Res<Follow>,
+    enemies: Query<(&Transform, &crate::combat::AircraftVelocity), Without<PlayerAircraft>>,
+    mut player: Query<(&mut Transform, &mut FlightState), With<PlayerAircraft>>,
+) {
+    let (Ok((target, velocity)), Ok((mut jet, mut state))) =
+        (enemies.get(follow.0), player.single_mut())
+    else {
+        return;
+    };
+    jet.translation = target.translation - target.forward() * 250.0;
+    jet.rotation = target.rotation;
+    state.velocity = velocity.0;
+    state.speed = velocity.0.length();
+}
+
+#[test]
+fn the_player_can_hang_behind_a_waiting_enemy_for_ten_seconds() {
+    let mut app = app(60.0, false);
+    app.world_mut().resource_mut::<CombatConfig>().player_health = f32::MAX;
+    app.insert_resource(super::AttackSlots { max: 1 });
+    spawn_ghost_player(
+        &mut app,
+        Transform::from_xyz(0.0, 800.0, 3_000.0),
+        170.0,
+        FlightInput::default(),
+    );
+    let enemies = spawn_flights(&mut app, 1);
+    // Let the slot be taken and the others start holding.
+    for _ in 0..(5 * 60) {
+        app.update();
+    }
+    let attackers = attacking(&mut app);
+    let target = *enemies
+        .iter()
+        .find(|e| !attackers.contains(e))
+        .expect("a waiting enemy");
+    app.insert_resource(Follow(target)).add_systems(
+        Update,
+        follow_target
+            .after(crate::flight::FlightSystems::Simulate)
+            .before(super::AiSystems),
+    );
+    for _ in 0..(10 * 60) {
+        app.update();
+        let pilot = app.world().get::<EnemyPilot>(target).unwrap();
+        assert!(
+            !matches!(pilot.mode, PilotMode::Break { .. }),
+            "target broke away"
+        );
+        assert!(!pilot.attacking, "target turned on the player");
+        assert!(attacking(&mut app).len() <= 1, "more attackers");
+    }
 }
