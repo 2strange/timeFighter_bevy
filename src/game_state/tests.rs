@@ -575,3 +575,23 @@ fn a_round_starts_with_the_chosen_difficulty() {
         "unlimited gun"
     );
 }
+
+#[test]
+fn restart_keys_wait_while_something_else_holds_the_game() {
+    let (mut app, jet) = app();
+    *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_xyz(0.0, 0.5, 0.0);
+    run_for(&mut app, 2.0);
+    assert!(matches!(round(&app).phase, RoundPhase::Over(_)));
+
+    // Paused by the player (a menu would hold the game the same way).
+    app.world_mut().resource_mut::<Pause>().player = true;
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        matches!(round(&app).phase, RoundPhase::Over(_)),
+        "restarted while held"
+    );
+
+    app.world_mut().resource_mut::<Pause>().player = false;
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(round(&app).phase, RoundPhase::Running);
+}

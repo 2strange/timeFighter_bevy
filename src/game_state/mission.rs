@@ -17,6 +17,9 @@ pub enum GameMode {
 }
 
 impl GameMode {
+    /// The modes that can be played (for menus).
+    pub const ALL: [GameMode; 1] = [GameMode::Hunt];
+
     pub fn display_name(self) -> &'static str {
         match self {
             GameMode::Hunt => "HUNT",
