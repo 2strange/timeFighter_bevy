@@ -1,8 +1,44 @@
 {
   "aircraft": [
-    { "name": "f14_tomcat", "source": "modern/f14_tomcat", "length": 19.1, "forward": "-Z", "up": "+Y", "pose": "last" },
-    { "name": "mig_29", "source": "modern/mig_29", "length": 17.3, "forward": "-Z", "up": "+Y", "pose": "last" },
-    { "name": "tupolev_tu_2", "source": "historic/tupolev_tu_2", "length": 13.8, "forward": "+Z", "up": "+Y", "pose": "rest" },
-    { "name": "f4u_corsair", "source": "historic/f4u_corsair", "length": 10.2, "forward": "+X", "up": "+Y", "pose": "rest" }
+    {
+      "name": "f14_tomcat",
+      "source": "modern/f14_tomcat",
+      "length": 19.1,
+      "forward": "-Z",
+      "up": "+Y",
+      "pose": "last"
+    },
+    {
+      "name": "mig_29",
+      "source": "modern/mig_29",
+      "length": 17.3,
+      "forward": "-Z",
+      "up": "+Y",
+      "pose": "last"
+    },
+    {
+      "name": "tupolev_tu_2",
+      "source": "historic/tupolev_tu_2",
+      "length": 13.8,
+      "forward": "+Z",
+      "up": "+Y",
+      "pose": "rest"
+    },
+    {
+      "name": "f4u_corsair",
+      "source": "historic/f4u_corsair",
+      "length": 10.2,
+      "forward": "+X",
+      "up": "+Y",
+      "pose": "rest"
+    },
+    {
+      "name": "spitfire",
+      "source": "historic/spitfire",
+      "length": 9.12,
+      "forward": "-X",
+      "up": "+Y",
+      "pose": "rest"
+    }
   ]
 }

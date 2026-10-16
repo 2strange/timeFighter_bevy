@@ -39,7 +39,7 @@ impl Default for ShowroomView {
         Self {
             yaw: 0.5,
             pitch: 0.35,
-            distance: 110.0,
+            distance: 140.0,
         }
     }
 }
@@ -167,7 +167,7 @@ fn spawn_showroom(
 
     // Floor.
     part(
-        Cuboid::new(140.0, 0.2, 60.0).mesh().build(),
+        Cuboid::new(180.0, 0.2, 60.0).mesh().build(),
         Color::srgb(0.32, 0.34, 0.36),
         Vec3::new(0.0, FLOOR_Y - 0.1, 0.0),
     );
@@ -186,12 +186,12 @@ fn spawn_showroom(
         part(
             Cuboid::new(0.25, 0.25, 1.0).mesh().build(),
             color,
-            Vec3::new(-62.0, FLOOR_Y + 0.125, step),
+            Vec3::new(-80.0, FLOOR_Y + 0.125, step),
         );
     }
 
     // Axis cross at the right end: +X red, +Y green, +Z blue, 6 m each.
-    let axes = Vec3::new(62.0, FLOOR_Y, 0.0);
+    let axes = Vec3::new(80.0, FLOOR_Y, 0.0);
     part(
         Cuboid::new(6.0, 0.3, 0.3).mesh().build(),
         Color::srgb(0.9, 0.1, 0.1),
@@ -400,7 +400,12 @@ mod tests {
         let mut app = headless_app(AppModePlugin(AppMode::Game));
         app.update();
         crate::test_support::tap(&mut app, KeyCode::KeyM);
-        assert!(model_roots(&mut app).is_empty());
+        // Only the player's own jet carries a model in the game.
+        let showroom_models: Vec<_> = model_roots(&mut app)
+            .into_iter()
+            .filter(|(_, name)| AircraftModel::ALL.iter().any(|m| m.display_name() == name))
+            .collect();
+        assert!(showroom_models.is_empty(), "{showroom_models:?}");
         assert!(app.world().get_resource::<ShowroomView>().is_none());
     }
 }
