@@ -1,0 +1,61 @@
+[package]
+name = "timefighter"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "MIT OR Apache-2.0"
+description = "A small arcade flight-combat game built with Bevy."
+publish = false
+
+[dependencies]
+# Pinned exactly: Bevy changes APIs between minor releases.
+# Default features are off so native builds need no system audio/udev libraries
+# (no gamepad, no audio yet) and the WASM bundle stays small.
+bevy = { version = "=0.20.0", default-features = false, features = [
+  "std",
+  "async_executor",
+  "multi_threaded",
+  "bevy_asset",
+  "bevy_log",
+  "bevy_state",
+  "bevy_winit",
+  "x11",
+  "webgl2",
+  "bevy_window",
+  "bevy_render",
+  "bevy_core_pipeline",
+  "bevy_pbr",
+  "bevy_light",
+  "bevy_camera",
+  "bevy_color",
+  "bevy_mesh",
+  "bevy_ui",
+  "bevy_ui_render",
+  "bevy_text",
+  "default_font",
+  "tonemapping_luts",
+  "ktx2",
+  "zstd_rust",
+] }
+
+# Reasonable debug performance without slowing down our own crate's rebuilds.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+# Size-optimised profile for the browser build.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+strip = "debuginfo"
+panic = "abort"
+
+# Browser platform glue (timers, panic hook) only for the WASM target.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { version = "=0.20.0", default-features = false, features = ["web"] }
