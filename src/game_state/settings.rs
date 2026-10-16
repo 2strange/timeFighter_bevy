@@ -68,6 +68,24 @@ impl Difficulty {
         }
     }
 
+    /// The level's numbers for `mode`: the same table, with the mode's own
+    /// missile count. Protect fights bombers that take two missiles each;
+    /// Super Easy leaves a reserve, Easy has just enough, Normal and up
+    /// leave about four bombers for the gun. A custom level keeps its own
+    /// single missile count in every mode.
+    pub fn params_for(&self, mode: GameMode) -> DifficultyParams {
+        let params = self.params();
+        let missiles = match (mode, self) {
+            (_, Difficulty::Custom(_)) | (GameMode::Hunt, _) => params.missiles,
+            (GameMode::Protect, Difficulty::SuperEasy) => 20,
+            (GameMode::Protect, Difficulty::Easy) => 16,
+            (GameMode::Protect, Difficulty::Normal) => 16,
+            (GameMode::Protect, Difficulty::Hard) => 12,
+            (GameMode::Protect, Difficulty::Insane) => 12,
+        };
+        DifficultyParams { missiles, ..params }
+    }
+
     /// The numbers behind the level. Change these to tune.
     pub fn params(&self) -> DifficultyParams {
         let base = DifficultyParams::default();

@@ -66,7 +66,10 @@ fn spawn_target(app: &mut App, position: Vec3) -> Entity {
         .spawn((
             Team::Enemy,
             Health::full(50.0),
-            Hitbox { radius: 5.5 },
+            Hitbox {
+                radius: 5.5,
+                gun_radius: 0.0,
+            },
             AircraftVelocity::default(),
             AircraftModel::Spitfire.body(Layer::Enemy),
             Transform::from_translation(position),
@@ -217,7 +220,10 @@ fn gun_rounds_destroy_a_target_ahead_and_never_hit_their_own_side() {
         .spawn((
             Team::Player,
             Health::full(50.0),
-            Hitbox { radius: 5.5 },
+            Hitbox {
+                radius: 5.5,
+                gun_radius: 0.0,
+            },
             aircraft_body(Layer::Player),
             Transform::from_xyz(0.0, 1_000.0, -200.0),
         ))
@@ -872,4 +878,97 @@ fn bombs_burst_on_the_ruin_not_on_the_old_roof() {
         "burst at {:.0} m (roof was {roof:.0} m)",
         impact.y
     );
+}
+
+/// Fires one player round from 300 m behind `kind`, passing `offset` from
+/// its centre (in its frame), and tells whether it hit.
+fn round_hits(kind: crate::ai::EnemyKind, gun_radius: f32, offset: Vec3) -> bool {
+    let mut app = app();
+    let target = app
+        .world_mut()
+        .spawn((
+            Team::Enemy,
+            Health::full(1_000.0),
+            Hitbox {
+                radius: 5.0,
+                gun_radius,
+            },
+            AircraftVelocity::default(),
+            kind.model().body(Layer::Enemy),
+            Transform::from_xyz(0.0, 1_000.0, -300.0),
+        ))
+        .id();
+    app.update();
+    let start = Vec3::new(0.0, 1_000.0, 0.0) + offset;
+    let shooter = app.world_mut().spawn_empty().id();
+    app.world_mut().spawn(super::weapons::round_bundle(
+        shooter,
+        Team::Player,
+        &super::GunSpec::JET_CANNON,
+        start,
+        Vec3::NEG_Z * super::GunSpec::JET_CANNON.muzzle_speed,
+    ));
+    for _ in 0..30 {
+        app.update();
+    }
+    app.world().get::<Health>(target).unwrap().current < 1_000.0
+}
+
+#[test]
+fn gun_rounds_count_on_the_whole_silhouette_wings_included() {
+    use crate::ai::EnemyKind;
+    let spitfire = EnemyKind::Spitfire.gun_radius();
+    let lancaster = EnemyKind::Lancaster.gun_radius();
+    // Out on the wing, inside the model's silhouette (its box reaches
+    // 1.64 m up) but above the collider's thin wing plate.
+    let wing = Vec3::new(4.0, 1.2, 0.0);
+    assert!(
+        !round_hits(EnemyKind::Spitfire, 0.0, wing),
+        "the collider alone takes it"
+    );
+    assert!(
+        round_hits(EnemyKind::Spitfire, spitfire, wing),
+        "wing hit not counted"
+    );
+    assert!(
+        round_hits(EnemyKind::Spitfire, spitfire, Vec3::ZERO),
+        "centre hit"
+    );
+    // Clearly outside the span: no hit.
+    assert!(!round_hits(
+        EnemyKind::Spitfire,
+        spitfire,
+        Vec3::new(spitfire + 1.5, 0.0, 0.0)
+    ));
+    // A bomber's outer wing.
+    assert!(round_hits(
+        EnemyKind::Lancaster,
+        lancaster,
+        Vec3::new(12.0, 0.8, 0.0)
+    ));
+    assert!(
+        (spitfire - 5.09).abs() < 0.01 && (lancaster - 15.24).abs() < 0.05,
+        "{spitfire} {lancaster}"
+    );
+}
+
+#[test]
+fn enemy_rounds_still_need_the_jets_collider() {
+    let mut app = app();
+    let jet = spawn_player(&mut app, high_up());
+    let enemy = app.world_mut().spawn_empty().id();
+    // Passes 5 m above the jet: inside a 6 m sphere, outside its body.
+    let start = high_up().translation + Vec3::new(0.0, 5.0, -300.0);
+    app.world_mut().spawn(super::weapons::round_bundle(
+        enemy,
+        Team::Enemy,
+        &super::GunSpec::WWII_GUNS,
+        start,
+        Vec3::Z * super::GunSpec::WWII_GUNS.muzzle_speed,
+    ));
+    for _ in 0..40 {
+        app.update();
+    }
+    let health = app.world().get::<Health>(jet).unwrap();
+    assert_eq!(health.current, health.max);
 }

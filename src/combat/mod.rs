@@ -68,12 +68,17 @@ impl Health {
     }
 }
 
-/// Rough size of an aircraft: a sphere around its origin (m). Missile
-/// proximity fuses go off within this plus their fuse radius. Direct hits
-/// come from the physics colliders.
+/// Spheres around an aircraft's origin (m) for hits the physics colliders
+/// would judge too strictly.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct Hitbox {
+    /// Missile proximity fuses go off within this plus their fuse radius.
     pub radius: f32,
+    /// Gun rounds passing within this count as hits (0 = only the physics
+    /// collider counts). For enemies about half the span: the colliders'
+    /// wings are thin plates, so a round through the visible silhouette,
+    /// wings included, often missed them.
+    pub gun_radius: f32,
 }
 
 /// World-space velocity (m/s) of an aircraft. Weapons inherit it, missiles
@@ -232,7 +237,7 @@ impl Plugin for CombatPlugin {
                     (weapons::guide_missiles, bombs::fall_bombs).in_set(CombatSystems::Move),
                     (
                         hits::projectile_hits,
-                        hits::missile_fuses,
+                        hits::proximity_hits,
                         hits::player_crashes,
                         hits::enemy_crashes,
                         hits::remember_positions,
@@ -254,8 +259,10 @@ pub fn player_loadout(cfg: &CombatConfig) -> impl Bundle {
     (
         Team::Player,
         Health::full(cfg.player_health),
+        // Enemy rounds hit the jet's own collider only.
         Hitbox {
             radius: cfg.player_hitbox_radius,
+            gun_radius: 0.0,
         },
         AircraftVelocity::default(),
         AircraftType("jet"),
