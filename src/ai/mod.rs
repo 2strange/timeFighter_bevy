@@ -40,6 +40,14 @@ pub enum EnemyKind {
     Spitfire,
     Lancaster,
     B17,
+    // Second set, registered for trying out; provisional Spitfire/Lancaster
+    // stats with the hitbox from the model's span.
+    Bf109K4,
+    Me309,
+    He177,
+    Me264,
+    Ju390,
+    Ju287,
 }
 
 /// Strength and handling of an enemy type. Metres, seconds, radians.
@@ -94,6 +102,16 @@ impl EnemyKind {
             },
             // A heavy bomber: slow, sluggish, tough (about 12 cannon hits
             // or 2 missiles); its gun is the turrets'.
+            EnemyKind::Bf109K4 | EnemyKind::Me309 => EnemyStats {
+                hitbox_radius: self.model().size().span() * 0.5,
+                ..EnemyKind::Spitfire.stats()
+            },
+            EnemyKind::He177 | EnemyKind::Me264 | EnemyKind::Ju390 | EnemyKind::Ju287 => {
+                EnemyStats {
+                    hitbox_radius: self.model().size().span() * 0.43,
+                    ..EnemyKind::Lancaster.stats()
+                }
+            }
             EnemyKind::Lancaster | EnemyKind::B17 => EnemyStats {
                 health: 200.0,
                 hitbox_radius: 13.0,
@@ -109,7 +127,15 @@ impl EnemyKind {
 
     /// Bombers fly bomb runs at the city; fighters fight.
     pub fn is_bomber(self) -> bool {
-        matches!(self, EnemyKind::Lancaster | EnemyKind::B17)
+        matches!(
+            self,
+            EnemyKind::Lancaster
+                | EnemyKind::B17
+                | EnemyKind::He177
+                | EnemyKind::Me264
+                | EnemyKind::Ju390
+                | EnemyKind::Ju287
+        )
     }
 
     pub fn display_name(self) -> &'static str {
@@ -123,6 +149,12 @@ impl EnemyKind {
             EnemyKind::Spitfire => AircraftModel::Spitfire,
             EnemyKind::Lancaster => AircraftModel::Lancaster,
             EnemyKind::B17 => AircraftModel::B17,
+            EnemyKind::Bf109K4 => AircraftModel::Bf109K4,
+            EnemyKind::Me309 => AircraftModel::Me309,
+            EnemyKind::He177 => AircraftModel::He177,
+            EnemyKind::Me264 => AircraftModel::Me264,
+            EnemyKind::Ju390 => AircraftModel::Ju390,
+            EnemyKind::Ju287 => AircraftModel::Ju287,
         }
     }
 }
