@@ -567,20 +567,16 @@ pub fn facade_tile(surface: Surface) -> Vec2 {
 pub type ChunkMeshes = BTreeMap<((i32, i32), Surface), MeshData>;
 
 pub fn building_meshes(layout: &CityLayout) -> ChunkMeshes {
+    building_meshes_with(layout, &[])
+}
+
+/// Like [`building_meshes`], with destroyed buildings (`destroyed[i]`) drawn
+/// as their ruin. A shorter slice counts as "nothing destroyed" beyond it.
+pub fn building_meshes_with(layout: &CityLayout, destroyed: &[bool]) -> ChunkMeshes {
     let mut chunks: BTreeMap<(i32, i32), [MeshData; 3]> = BTreeMap::new();
-    let structures = layout
-        .buildings
-        .iter()
-        .map(|b| &b.parts)
-        .chain(layout.bridges.iter().map(|b| &b.parts));
-    for parts in structures {
-        let (lo, hi) = parts.iter().fold(
-            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
-            |(lo, hi), p| (lo.min(p.min()), hi.max(p.max())),
-        );
-        let chunk = ((lo.xz() + hi.xz()) / 2.0 / layout.config.chunk_size).floor();
-        let meshes = chunks.entry((chunk.x as i32, chunk.y as i32)).or_default();
-        for part in parts {
+    for parts in structures(layout, destroyed) {
+        let meshes = chunks.entry(chunk_of(layout, &parts)).or_default();
+        for part in parts.iter() {
             add_part(part, meshes);
         }
     }
@@ -595,7 +591,50 @@ pub fn building_meshes(layout: &CityLayout) -> ChunkMeshes {
     out
 }
 
-const SURFACES: [Surface; 3] = [Surface::Office, Surface::Residential, Surface::Plain];
+/// The meshes of one chunk only, per surface (indexed like `SURFACES`),
+/// for rebuilding it after damage.
+pub fn chunk_meshes(layout: &CityLayout, destroyed: &[bool], chunk: (i32, i32)) -> [MeshData; 3] {
+    let mut meshes: [MeshData; 3] = Default::default();
+    for parts in structures(layout, destroyed) {
+        if chunk_of(layout, &parts) == chunk {
+            for part in parts.iter() {
+                add_part(part, &mut meshes);
+            }
+        }
+    }
+    meshes
+}
+
+/// Chunk a building (by its original parts) or bridge belongs to. A ruin
+/// stands on its building's base, so it stays in the same chunk.
+pub fn chunk_of(layout: &CityLayout, parts: &[Part]) -> (i32, i32) {
+    // The base part decides: ruins keep it, so damage never moves a building
+    // into another chunk.
+    let base = parts[0];
+    let c = (base.center.xz() / layout.config.chunk_size).floor();
+    (c.x as i32, c.y as i32)
+}
+
+/// Parts to draw per building and bridge, ruins for destroyed buildings.
+fn structures<'a>(
+    layout: &'a CityLayout,
+    destroyed: &'a [bool],
+) -> impl Iterator<Item = std::borrow::Cow<'a, [Part]>> + 'a {
+    let buildings = layout.buildings.iter().enumerate().map(|(i, b)| {
+        if destroyed.get(i).copied().unwrap_or(false) {
+            std::borrow::Cow::Owned(vec![super::damage::ruin_part(b)])
+        } else {
+            std::borrow::Cow::Borrowed(b.parts.as_slice())
+        }
+    });
+    let bridges = layout
+        .bridges
+        .iter()
+        .map(|b| std::borrow::Cow::Borrowed(b.parts.as_slice()));
+    buildings.chain(bridges)
+}
+
+pub const SURFACES: [Surface; 3] = [Surface::Office, Surface::Residential, Surface::Plain];
 
 /// Walls, gable ends and roof of one part, into the mesh per surface
 /// (indexed like `SURFACES`). No floor: a part stands on the ground or on

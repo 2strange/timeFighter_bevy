@@ -40,7 +40,9 @@ impl Plugin for CityCollidersPlugin {
 }
 
 /// A fixed body at the centre of `boxes` with one cuboid or a compound.
-fn static_body(boxes: &[(Vec3, Vec3)]) -> (RigidBody, Collider, Transform, CollisionGroups) {
+pub(crate) fn static_body(
+    boxes: &[(Vec3, Vec3)],
+) -> (RigidBody, Collider, Transform, CollisionGroups) {
     let (lo, hi) = boxes.iter().fold(
         (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
         |(lo, hi), (c, h)| (lo.min(*c - *h), hi.max(*c + *h)),

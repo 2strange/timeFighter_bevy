@@ -17,6 +17,8 @@
 
 mod buildings;
 pub mod colliders;
+pub mod damage;
+mod damage_fx;
 pub mod layout;
 pub mod meshes;
 mod rng;
@@ -24,6 +26,8 @@ pub mod textures;
 
 #[cfg(test)]
 mod collider_tests;
+#[cfg(test)]
+mod damage_tests;
 #[cfg(test)]
 mod tests;
 
@@ -190,26 +194,31 @@ pub struct WorldPlugin;
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         let day = LightingPreset::DAY;
-        app.add_plugins((CityPlugin, colliders::CityCollidersPlugin))
-            .init_resource::<WorldRenderConfig>()
-            .insert_resource(ClearColor(day.sky))
-            .insert_resource(GlobalAmbientLight {
-                color: day.ambient_color,
-                brightness: day.ambient_brightness,
-                ..default()
-            })
-            .init_resource::<Lighting>()
-            .add_systems(Startup, (spawn_ground, spawn_buildings, spawn_sun))
-            .add_systems(
-                Update,
-                (
-                    toggle_lighting,
-                    apply_lighting.run_if(resource_changed::<Lighting>),
-                    light_new_arrivals,
-                )
-                    .chain()
-                    .in_set(LightingSystems),
-            );
+        app.add_plugins((
+            CityPlugin,
+            colliders::CityCollidersPlugin,
+            damage::CityDamagePlugin,
+            damage_fx::DamageFxPlugin,
+        ))
+        .init_resource::<WorldRenderConfig>()
+        .insert_resource(ClearColor(day.sky))
+        .insert_resource(GlobalAmbientLight {
+            color: day.ambient_color,
+            brightness: day.ambient_brightness,
+            ..default()
+        })
+        .init_resource::<Lighting>()
+        .add_systems(Startup, (spawn_ground, spawn_buildings, spawn_sun))
+        .add_systems(
+            Update,
+            (
+                toggle_lighting,
+                apply_lighting.run_if(resource_changed::<Lighting>),
+                light_new_arrivals,
+            )
+                .chain()
+                .in_set(LightingSystems),
+        );
     }
 }
 
@@ -444,6 +453,7 @@ fn spawn_buildings(
         };
         let mut entity = commands.spawn((
             Name::new(format!("City chunk {chunk:?} {surface:?}")),
+            damage_fx::CityChunk { chunk, surface },
             Mesh3d(meshes.add(data.into_mesh())),
             MeshMaterial3d(material),
         ));
