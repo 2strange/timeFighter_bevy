@@ -1139,3 +1139,97 @@ fn the_flight_floor_lies_below_the_water() {
         "flight floor {floor} m is not below the water at {water} m"
     );
 }
+
+mod lighting {
+    use bevy::{input::ButtonState, prelude::*};
+
+    use crate::{
+        test_support::{headless_app, key},
+        world::{Lighting, WorldPlugin, sky_fog},
+    };
+
+    fn sun(app: &mut App) -> DirectionalLight {
+        let world = app.world_mut();
+        *world.query::<&DirectionalLight>().single(world).unwrap()
+    }
+
+    fn sky(app: &App) -> Color {
+        app.world().resource::<ClearColor>().0
+    }
+
+    #[test]
+    fn labels_and_cycling_cover_every_look() {
+        assert_eq!(Lighting::default(), Lighting::Day);
+        for look in Lighting::ALL {
+            assert!(!look.label().is_empty());
+            assert_ne!(look.next(), look);
+        }
+        assert_eq!(Lighting::Day.next(), Lighting::Evening);
+        assert_eq!(Lighting::Evening.next(), Lighting::Day);
+    }
+
+    #[test]
+    fn setting_the_resource_relights_the_world() {
+        let mut app = headless_app(WorldPlugin);
+        app.update();
+        let day_sky = sky(&app);
+        let day_lux = sun(&mut app).illuminance;
+
+        *app.world_mut().resource_mut::<Lighting>() = Lighting::Evening;
+        app.update();
+        assert_ne!(sky(&app), day_sky);
+        assert!(sun(&mut app).illuminance < day_lux);
+
+        // Lit windows in the evening, none by day.
+        let glow = |app: &App| {
+            app.world()
+                .resource::<Assets<StandardMaterial>>()
+                .iter()
+                .any(|(_, m)| m.emissive != LinearRgba::BLACK)
+        };
+        assert!(glow(&app));
+        *app.world_mut().resource_mut::<Lighting>() = Lighting::Day;
+        app.update();
+        assert!(!glow(&app));
+        assert_eq!(sky(&app), day_sky);
+    }
+
+    #[test]
+    fn a_look_chosen_before_start_applies_from_the_first_frame() {
+        let mut evening = headless_app(WorldPlugin);
+        evening.insert_resource(Lighting::Evening);
+        evening.update();
+        let mut day = headless_app(WorldPlugin);
+        day.update();
+        assert_ne!(sky(&evening), sky(&day));
+        assert!(sun(&mut evening).illuminance < sun(&mut day).illuminance);
+    }
+
+    #[test]
+    fn cameras_spawned_later_get_the_current_fog() {
+        let mut app = headless_app(WorldPlugin);
+        app.insert_resource(Lighting::Evening);
+        app.update();
+        app.update();
+        // A camera spawned with the default (daylight) fog, e.g. by a menu.
+        let camera = app.world_mut().spawn(sky_fog()).id();
+        app.update();
+        let fog = app.world().get::<DistanceFog>(camera).unwrap();
+        assert_eq!(fog.color, sky(&app));
+        assert_ne!(fog.color, sky_fog().color);
+    }
+
+    #[test]
+    fn l_still_toggles_in_the_game() {
+        let mut app = headless_app(WorldPlugin);
+        app.update();
+        key(&mut app, KeyCode::KeyL, ButtonState::Pressed);
+        app.update();
+        assert_eq!(*app.world().resource::<Lighting>(), Lighting::Evening);
+        key(&mut app, KeyCode::KeyL, ButtonState::Released);
+        app.update();
+        key(&mut app, KeyCode::KeyL, ButtonState::Pressed);
+        app.update();
+        assert_eq!(*app.world().resource::<Lighting>(), Lighting::Day);
+    }
+}

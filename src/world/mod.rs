@@ -205,8 +205,10 @@ impl Plugin for WorldPlugin {
                 (
                     toggle_lighting,
                     apply_lighting.run_if(resource_changed::<Lighting>),
+                    light_new_arrivals,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(LightingSystems),
             );
     }
 }
@@ -223,17 +225,42 @@ fn generate_city(mut commands: Commands, config: Res<CityConfig>) {
     commands.insert_resource(layout);
 }
 
-/// Light and sky look. `L` toggles between them so Austin can compare on a
-/// test flight; daylight is the default until the look is decided.
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The look of the world: sky, sun, ambient light, fog and lit windows.
+///
+/// This resource is the API: read it with `Res<Lighting>`, change it with
+/// `ResMut<Lighting>` (or `insert_resource` before startup, e.g. from a
+/// menu). Every change applies in the same frame's [`LightingSystems`] set,
+/// and cameras with `DistanceFog` or a sun spawned later pick up the current
+/// look on arrival. `L` in the game cycles through [`Lighting::ALL`].
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Lighting {
     #[default]
     Day,
+    /// Low sun ahead of the spawn heading, warm haze, lit windows.
     Evening,
 }
 
+/// Where lighting changes are applied (in `Update`). Systems that set
+/// [`Lighting`] and want the result visible in the same frame run before it.
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LightingSystems;
+
 impl Lighting {
     pub const ALL: [Lighting; 2] = [Lighting::Day, Lighting::Evening];
+
+    /// Short English name for menus.
+    pub fn label(self) -> &'static str {
+        match self {
+            Lighting::Day => "Day",
+            Lighting::Evening => "Evening",
+        }
+    }
+
+    /// The next look in [`Lighting::ALL`], wrapping around.
+    pub fn next(self) -> Lighting {
+        let i = Self::ALL.iter().position(|&l| l == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
 
     /// Fog visibility (m) of this look.
     pub fn fog_visibility(self) -> f32 {
@@ -289,6 +316,12 @@ impl LightingPreset {
         }
     }
 
+    fn light_sun(&self, light: &mut DirectionalLight, transform: &mut Transform) {
+        light.color = self.sun_color;
+        light.illuminance = self.sun_lux;
+        *transform = Transform::default().looking_to(self.sun_direction, Vec3::Y);
+    }
+
     fn fog(&self) -> DistanceFog {
         DistanceFog {
             color: self.sky,
@@ -315,6 +348,7 @@ fn spawn_sun(mut commands: Commands, render: Res<WorldRenderConfig>) {
     render
         .validate()
         .unwrap_or_else(|e| panic!("invalid WorldRenderConfig: {e}"));
+    // Spawned in daylight; `light_new_arrivals` switches it to the current look.
     let day = &LightingPreset::DAY;
     commands.spawn((
         Name::new("Sun"),
@@ -421,10 +455,22 @@ fn spawn_buildings(
 
 fn toggle_lighting(keys: Res<ButtonInput<KeyCode>>, mut lighting: ResMut<Lighting>) {
     if keys.just_pressed(KeyCode::KeyL) {
-        *lighting = match *lighting {
-            Lighting::Day => Lighting::Evening,
-            Lighting::Evening => Lighting::Day,
-        };
+        *lighting = lighting.next();
+    }
+}
+
+/// Gives cameras and suns spawned after the last change the current look.
+fn light_new_arrivals(
+    lighting: Res<Lighting>,
+    mut sun: Query<(&mut DirectionalLight, &mut Transform), Added<Sun>>,
+    mut fog: Query<&mut DistanceFog, Added<DistanceFog>>,
+) {
+    let preset = LightingPreset::get(*lighting);
+    for (mut light, mut transform) in &mut sun {
+        preset.light_sun(&mut light, &mut transform);
+    }
+    for mut f in &mut fog {
+        *f = preset.fog();
     }
 }
 
@@ -442,16 +488,15 @@ fn apply_lighting(
     ambient.color = preset.ambient_color;
     ambient.brightness = preset.ambient_brightness;
     for (mut light, mut transform) in &mut sun {
-        light.color = preset.sun_color;
-        light.illuminance = preset.sun_lux;
-        *transform = Transform::default().looking_to(preset.sun_direction, Vec3::Y);
+        preset.light_sun(&mut light, &mut transform);
     }
     for mut f in &mut fog {
         *f = preset.fog();
     }
     for handle in facades.iter().flat_map(|f| f.0.iter()) {
         if let Some(mut material) = materials.get_mut(handle) {
-            material.emissive = LinearRgba::WHITE * preset.window_glow;
+            let g = preset.window_glow;
+            material.emissive = LinearRgba::rgb(g, g, g);
         }
     }
 }
