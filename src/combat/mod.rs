@@ -121,12 +121,12 @@ pub struct ShotFired {
 /// enemies' new positions.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CombatSystems {
-    /// Player trigger input, velocity sync.
+    /// Arming the player, velocity sync.
     Input,
     /// Lock-on.
     Aim,
-    /// Guns and missile launches. Gated by the round (no firing on the
-    /// result screen).
+    /// Fire buttons, guns and missile launches. Gated by the round (no
+    /// firing while paused or after the round is decided).
     Fire,
     /// Missile guidance (the physics moves all projectiles).
     Move,
@@ -169,15 +169,18 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 (
-                    (
-                        arm_new_player,
-                        sync_player_velocity,
-                        weapons::player_trigger,
-                    )
+                    (arm_new_player, sync_player_velocity)
                         .chain()
                         .in_set(CombatSystems::Input),
                     lock::update_lock.in_set(CombatSystems::Aim),
-                    (weapons::fire_guns, weapons::launch_missiles).in_set(CombatSystems::Fire),
+                    // The player's fire buttons are read only when weapons
+                    // may fire, so nothing fired while paused fires later.
+                    (
+                        weapons::player_trigger,
+                        (weapons::fire_guns, weapons::launch_missiles),
+                    )
+                        .chain()
+                        .in_set(CombatSystems::Fire),
                     weapons::guide_missiles.in_set(CombatSystems::Move),
                     (
                         hits::projectile_hits,

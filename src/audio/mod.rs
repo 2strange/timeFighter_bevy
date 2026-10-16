@@ -43,7 +43,7 @@ impl Plugin for SoundHooksPlugin {
             Update,
             (
                 combat_cues.after(CombatSystems::Resolve),
-                round_cues.after(RoundSystems),
+                round_cues.after(RoundSystems::Track),
             ),
         );
     }

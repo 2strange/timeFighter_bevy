@@ -90,7 +90,8 @@ pub struct AiConfig {
     pub clearance: f32,
     /// How far ahead the terrain is checked along the flight path (s) ...
     pub lookahead: f32,
-    /// ... in steps of this (s); short enough not to skip a tower.
+    /// ... in steps of this (s); short enough not to skip a tower. Clamped
+    /// to at least 0.05 s and 100 steps.
     pub lookahead_step: f32,
     /// Steepest climb and dive the AI flies (rad).
     pub max_climb: f32,
@@ -460,6 +461,11 @@ fn keep_in_arena(cfg: &AiConfig, position: Vec3, desired: Vec3) -> Vec3 {
     desired.normalize_or(Vec3::NEG_Z)
 }
 
+/// Shortest look-ahead step (s) and most steps per check: a zero or tiny
+/// configured step must not turn the check into an endless loop.
+const MIN_LOOKAHEAD_STEP: f32 = 0.05;
+const MAX_LOOKAHEAD_STEPS: u32 = 100;
+
 /// Limits the wished direction so the path stays `clearance` above the
 /// obstacles below and ahead: climbs harder the deeper the path would cut
 /// into that margin, and never dives steeper than allowed.
@@ -471,10 +477,11 @@ fn avoid_terrain(
     forward: Vec3,
     desired: Vec3,
 ) -> Vec3 {
-    let steps = (cfg.lookahead / cfg.lookahead_step).ceil() as u32;
+    let step = cfg.lookahead_step.max(MIN_LOOKAHEAD_STEP);
+    let steps = ((cfg.lookahead.max(0.0) / step).ceil() as u32).min(MAX_LOOKAHEAD_STEPS);
     let deficit = (0..=steps)
         .map(|i| {
-            let p = position + velocity * (i as f32 * cfg.lookahead_step);
+            let p = position + velocity * (i as f32 * step);
             obstacles.height_at(p.x, p.z) + cfg.clearance - p.y
         })
         .fold(f32::NEG_INFINITY, f32::max);

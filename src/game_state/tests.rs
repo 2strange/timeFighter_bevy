@@ -18,7 +18,7 @@ use crate::{
         CombatConfig, CombatPlugin, Gun, Health, Hit, MissileRack, Munition, Team, Trigger, Weapon,
     },
     flight::{FlightConfig, FlightInput, FlightPlugin, FlightState, PlayerAircraft},
-    physics::{Layer, PhysicsPlugin, aircraft_body},
+    physics::{Layer, PhysicsPlugin, PlayerCrashed, ProjectileHit, aircraft_body},
 };
 
 const FRAME: Duration = Duration::from_nanos(16_666_667);
@@ -377,5 +377,95 @@ fn the_round_starts_in_the_very_first_frame() {
     assert!(
         position.distance(flight.spawn_position) < 1e-3,
         "{position:?}"
+    );
+}
+
+#[test]
+fn a_restart_ignores_hits_and_crashes_still_queued_from_the_old_round() {
+    let (mut app, jet) = app();
+    let old_enemy = enemies(&mut app)[0];
+    // Fire, so old rounds are in the air.
+    hold(&mut app, KeyCode::Space);
+    run_for(&mut app, 0.3);
+    release(&mut app, KeyCode::Space);
+    let old_round = app
+        .world_mut()
+        .query_filtered::<Entity, With<Munition>>()
+        .iter(app.world())
+        .next()
+        .expect("rounds in flight");
+
+    // What the old round's last physics step left behind, then a restart.
+    app.world_mut().write_message(ProjectileHit {
+        projectile: old_round,
+        target: old_enemy,
+        point: Vec3::ZERO,
+    });
+    app.world_mut().write_message(Hit {
+        projectile: old_round,
+        target: old_enemy,
+        point: Vec3::ZERO,
+        team: Team::Player,
+        weapon: Weapon::Gun,
+        damage: 1_000.0,
+    });
+    app.world_mut().write_message(PlayerCrashed {
+        player: jet,
+        obstacle: old_enemy,
+        point: Vec3::ZERO,
+    });
+    app.world_mut().write_message(RestartRound);
+    run_for(&mut app, 0.5);
+
+    let round = round(&app);
+    let mission = app.world().resource::<Mission>().clone();
+    assert_eq!(round.phase, RoundPhase::Running);
+    assert_eq!(round.stats.kills, 0);
+    assert_eq!(round.stats.gun_hits, 0);
+    assert_eq!(round.stats.gun_rounds, 0);
+    assert_eq!(round.enemies_left(&mission), mission.enemy_count());
+    assert!(!app.world().get::<Health>(jet).unwrap().is_dead());
+    assert_eq!(
+        enemies(&mut app).len(),
+        mission.waves[0].enemy_count() as usize
+    );
+}
+
+#[test]
+fn paused_weapons_neither_fire_nor_fire_later() {
+    let (mut app, jet) = app();
+    let combat = app.world().resource::<CombatConfig>().clone();
+    press(&mut app, KeyCode::KeyP);
+    assert!(app.world().resource::<Pause>().is_paused());
+
+    // Gun held and a missile pressed while paused.
+    hold(&mut app, KeyCode::Space);
+    press(&mut app, KeyCode::ShiftRight);
+    run_for(&mut app, 0.5);
+    let world = app.world();
+    assert_eq!(
+        world.get::<Gun>(jet).unwrap().ammo,
+        Some(combat.player_gun_ammo)
+    );
+    assert_eq!(
+        world.get::<MissileRack>(jet).unwrap().count,
+        combat.player_missiles
+    );
+    let in_flight = app
+        .world_mut()
+        .query::<&Munition>()
+        .iter(app.world())
+        .count();
+    assert_eq!(in_flight, 0);
+
+    // Resumed: the held gun fires, the missile pressed during the pause
+    // does not launch on its own.
+    press(&mut app, KeyCode::KeyP);
+    run_for(&mut app, 0.5);
+    let world = app.world();
+    assert!(world.get::<Gun>(jet).unwrap().ammo.unwrap() < combat.player_gun_ammo);
+    assert_eq!(
+        world.get::<MissileRack>(jet).unwrap().count,
+        combat.player_missiles
     );
 }

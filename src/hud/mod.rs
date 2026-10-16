@@ -8,7 +8,7 @@ mod layout;
 #[cfg(test)]
 mod tests;
 
-use bevy::prelude::*;
+use bevy::{platform::collections::HashSet, prelude::*};
 
 pub use layout::{edge_point, format_time};
 
@@ -53,7 +53,7 @@ impl Plugin for HudPlugin {
                 )
                     .chain()
                     .after(CameraSystems)
-                    .after(RoundSystems),
+                    .after(RoundSystems::Track),
             );
     }
 }
@@ -381,8 +381,9 @@ fn sync_markers(
             commands.entity(marker).despawn();
         }
     }
+    let marked: HashSet<Entity> = markers.iter().map(|(_, m)| m.enemy).collect();
     for enemy in &enemies {
-        if markers.iter().any(|(_, m)| m.enemy == enemy) {
+        if marked.contains(&enemy) {
             continue;
         }
         commands.entity(root).with_children(|hud| {

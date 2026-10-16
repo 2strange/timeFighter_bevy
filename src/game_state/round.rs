@@ -12,8 +12,8 @@ use crate::{
         CombatConfig, CombatSystems, DestroyCause, Destroyed, Hit, Munition, ShotFired, Team,
         Weapon, player_loadout,
     },
-    flight::{FlightConfig, FlightState, PlayerAircraft},
-    physics::CrashSweep,
+    flight::{FlightConfig, FlightState, FlightSystems, PlayerAircraft},
+    physics::{CrashSweep, EnemyCrashed, PlayerCrashed, ProjectileHit},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +103,13 @@ pub struct RestartRound;
 pub const RESTART_KEYS: [KeyCode; 3] = [KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::KeyR];
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RoundSystems;
+pub enum RoundSystems {
+    /// Restart and reset, first thing in the frame: nothing of the old
+    /// round is simulated or counted after it.
+    Start,
+    /// Counting, waves, victory and defeat, after combat resolved the frame.
+    Track,
+}
 
 /// Headless round flow. Needs [`crate::combat::CombatPlugin`] and
 /// [`crate::ai::AiPlugin`].
@@ -115,26 +121,62 @@ impl Plugin for RoundPlugin {
             .init_resource::<Round>()
             .add_message::<RestartRound>()
             .configure_sets(Update, CombatSystems::Fire.run_if(weapons_free))
-            .configure_sets(Update, RoundSystems.after(CombatSystems::Resolve))
+            .configure_sets(
+                Update,
+                (
+                    RoundSystems::Start
+                        .before(FlightSystems::Input)
+                        .before(CombatSystems::Input),
+                    RoundSystems::Track.after(CombatSystems::Resolve),
+                ),
+            )
             .add_systems(
                 Update,
                 (
-                    restart,
-                    start_round,
-                    count_events,
-                    spawn_waves,
-                    decide,
-                    advance_phase,
-                )
-                    .chain()
-                    .in_set(RoundSystems),
+                    (restart, drop_stale_messages, start_round)
+                        .chain()
+                        .in_set(RoundSystems::Start),
+                    (count_events, spawn_waves, decide, advance_phase)
+                        .chain()
+                        .in_set(RoundSystems::Track),
+                ),
             );
     }
 }
 
-/// Weapons fire only while the round runs.
-pub fn weapons_free(round: Option<Res<Round>>) -> bool {
-    round.is_some_and(|r| r.is_running())
+/// Weapons fire only while the round runs and the game is not paused.
+pub fn weapons_free(round: Option<Res<Round>>, pause: Option<Res<Pause>>) -> bool {
+    round.is_some_and(|r| r.is_running()) && !pause.is_some_and(|p| p.is_paused())
+}
+
+/// On a restart, drops hits, crashes and shots still queued from the old
+/// round (for example from its last physics step), so none of them reach
+/// the new round's statistics, damage or victory count.
+#[allow(clippy::too_many_arguments)]
+fn drop_stale_messages(
+    round: Res<Round>,
+    projectile_hits: Option<ResMut<Messages<ProjectileHit>>>,
+    player_crashes: Option<ResMut<Messages<PlayerCrashed>>>,
+    enemy_crashes: Option<ResMut<Messages<EnemyCrashed>>>,
+    hits: Option<ResMut<Messages<Hit>>>,
+    destroyed: Option<ResMut<Messages<Destroyed>>>,
+    shots: Option<ResMut<Messages<ShotFired>>>,
+) {
+    if round.phase != RoundPhase::Starting {
+        return;
+    }
+    clear(projectile_hits);
+    clear(player_crashes);
+    clear(enemy_crashes);
+    clear(hits);
+    clear(destroyed);
+    clear(shots);
+}
+
+fn clear<M: Message>(messages: Option<ResMut<Messages<M>>>) {
+    if let Some(mut messages) = messages {
+        messages.clear();
+    }
 }
 
 fn restart(

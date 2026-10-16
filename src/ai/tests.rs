@@ -317,3 +317,20 @@ fn enemy_flying_into_a_building_crashes() {
     assert_eq!(crash.cause, DestroyCause::Crash);
     assert!(app.world().get_entity(enemy).is_err(), "wreck removed");
 }
+
+#[test]
+fn a_zero_lookahead_step_is_clamped_and_still_avoids_the_ground() {
+    let mut app = app(60.0, false);
+    app.world_mut().resource_mut::<AiConfig>().lookahead_step = 0.0;
+    // Diving towards flat ground from 120 m.
+    let enemy = spawn_enemy(
+        &mut app,
+        Transform::from_xyz(0.0, 120.0, 0.0).looking_to(Vec3::new(0.0, -0.5, -1.0), Vec3::Y),
+    );
+    let mut lowest = f32::INFINITY;
+    for _ in 0..(5 * 60) {
+        app.update();
+        lowest = lowest.min(app.world().get::<Transform>(enemy).unwrap().translation.y);
+    }
+    assert!(lowest > 20.0, "dipped to {lowest:.0} m");
+}
