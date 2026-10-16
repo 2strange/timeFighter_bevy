@@ -41,6 +41,27 @@ fn transform(app: &App, jet: Entity) -> Transform {
 }
 
 #[test]
+fn aircraft_axes_and_spawn_pitch_follow_the_world_convention() {
+    // Check the world-space convention directly, without relying on Transform::forward().
+    assert_eq!(Quat::IDENTITY * Vec3::NEG_Z, Vec3::NEG_Z);
+    assert_eq!(Quat::IDENTITY * Vec3::Y, Vec3::Y);
+
+    let cfg = FlightConfig::default();
+    assert_eq!(cfg.spawn_pitch, (-15.0_f32).to_radians());
+
+    let spawn_nose = cfg.spawn_transform().rotation * Vec3::NEG_Z;
+    let expected_nose = Vec3::new(0.0, cfg.spawn_pitch.sin(), -cfg.spawn_pitch.cos());
+    assert!(
+        spawn_nose.distance(expected_nose) < 1e-6,
+        "spawn nose {spawn_nose:?}, expected {expected_nose:?}"
+    );
+    assert!(
+        spawn_nose.y < 0.0,
+        "negative spawn pitch must point the nose slightly down: {spawn_nose:?}"
+    );
+}
+
+#[test]
 fn throttle_accelerates_at_configured_rate_up_to_max_speed() {
     let mut app = app(60);
     let cfg = app.world().resource::<FlightConfig>().clone();
@@ -163,6 +184,139 @@ fn result_does_not_depend_on_frame_rate() {
     let (ta, tb) = (transform(&slow, jet_slow), transform(&fast, jet_fast));
     assert!(ta.rotation.angle_between(tb.rotation) < 0.1);
     assert!(ta.translation.distance(tb.translation) < 10.0);
+}
+
+#[test]
+fn driven_flight_is_consistent_at_30_60_and_144_fps() {
+    let input = FlightInput {
+        roll: 1.0,
+        pitch: 0.5,
+        throttle: 1.0,
+        ..default()
+    };
+    let mut results = Vec::new();
+
+    for fps in [30, 60, 144] {
+        let mut app = app(fps);
+        let jet = spawn_jet(&mut app, input);
+        run_for(&mut app, 2.0);
+        results.push((fps, state(&app, jet), transform(&app, jet)));
+    }
+
+    for first in 0..results.len() {
+        for second in first + 1..results.len() {
+            let (fps_a, state_a, transform_a) = results[first];
+            let (fps_b, state_b, transform_b) = results[second];
+            let comparison = format!("{fps_a} fps vs {fps_b} fps");
+
+            assert!(
+                (state_a.roll_rate - state_b.roll_rate).abs() < 1e-4,
+                "{comparison}: {state_a:?} vs {state_b:?}"
+            );
+            assert!(
+                (state_a.pitch_rate - state_b.pitch_rate).abs() < 1e-4,
+                "{comparison}: {state_a:?} vs {state_b:?}"
+            );
+            assert!(
+                (state_a.speed - state_b.speed).abs() < 0.01,
+                "{comparison}: {state_a:?} vs {state_b:?}"
+            );
+            assert!(
+                transform_a.rotation.angle_between(transform_b.rotation) < 0.075,
+                "{comparison}: rotations diverged"
+            );
+            assert!(
+                transform_a.translation.distance(transform_b.translation) < 8.0,
+                "{comparison}: positions diverged"
+            );
+        }
+    }
+}
+
+#[test]
+fn neutral_damping_is_consistent_at_30_60_and_144_fps() {
+    let cfg = FlightConfig::default();
+    let initial = FlightState {
+        roll_rate: 0.5 * cfg.max_roll_rate,
+        pitch_rate: 0.5 * cfg.max_pitch_rate,
+        yaw_rate: -0.5 * cfg.max_yaw_rate,
+        speed: cfg.speed_initial,
+        velocity: Vec3::ZERO,
+    };
+
+    for fps in [30, 60, 144] {
+        let mut app = app(fps);
+        let jet = spawn_jet(&mut app, FlightInput::default());
+        app.world_mut().entity_mut(jet).insert(initial);
+        run_for(&mut app, 1.0);
+
+        let damped = state(&app, jet);
+        let expected_roll =
+            initial.roll_rate * (-cfg.roll_response).exp() * cfg.idle_damping_per_second;
+        let expected_pitch =
+            initial.pitch_rate * (-cfg.pitch_response).exp() * cfg.idle_damping_per_second;
+        let expected_yaw =
+            initial.yaw_rate * (-cfg.yaw_response).exp() * cfg.idle_damping_per_second;
+
+        assert!(
+            (damped.roll_rate - expected_roll).abs() < 2e-5,
+            "{fps} fps: roll {} vs {expected_roll}",
+            damped.roll_rate
+        );
+        assert!(
+            (damped.pitch_rate - expected_pitch).abs() < 2e-5,
+            "{fps} fps: pitch {} vs {expected_pitch}",
+            damped.pitch_rate
+        );
+        assert!(
+            (damped.yaw_rate - expected_yaw).abs() < 2e-5,
+            "{fps} fps: yaw {} vs {expected_yaw}",
+            damped.yaw_rate
+        );
+    }
+}
+
+#[test]
+fn half_second_frame_is_clamped_to_one_tenth_second_of_simulation() {
+    let input = FlightInput {
+        pitch: 0.5,
+        throttle: 1.0,
+        ..default()
+    };
+    let mut stalled = app(2);
+    let mut reference = app(10);
+    let cfg = stalled.world().resource::<FlightConfig>().clone();
+    assert_eq!(cfg.max_dt, 0.1, "the stall guard is intentionally 100 ms");
+
+    let stalled_jet = spawn_jet(&mut stalled, input);
+    let reference_jet = spawn_jet(&mut reference, input);
+    stalled.update();
+    reference.update();
+
+    let stalled_state = state(&stalled, stalled_jet);
+    let reference_state = state(&reference, reference_jet);
+    let simulated_dt = (stalled_state.speed - cfg.speed_initial) / cfg.throttle_rate;
+    assert!(
+        simulated_dt <= 0.1 + 1e-6,
+        "500 ms frame advanced {simulated_dt} s of simulation"
+    );
+    assert!((stalled_state.speed - reference_state.speed).abs() < 1e-5);
+    assert!((stalled_state.pitch_rate - reference_state.pitch_rate).abs() < 1e-6);
+
+    let stalled_transform = transform(&stalled, stalled_jet);
+    let reference_transform = transform(&reference, reference_jet);
+    assert!(
+        stalled_transform
+            .rotation
+            .angle_between(reference_transform.rotation)
+            < 1e-6
+    );
+    assert!(
+        stalled_transform
+            .translation
+            .distance(reference_transform.translation)
+            < 1e-5
+    );
 }
 
 #[test]
