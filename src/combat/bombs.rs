@@ -1,14 +1,21 @@
 //! Bombs: fall under gravity from where they were dropped and damage the
-//! city where they land. Simple ballistic bodies, no physics engine: the
-//! city's coarse obstacle heights stop them, so a bomb bursts on a roof.
+//! city where they land. Simple ballistic bodies, not physics bodies; each
+//! step is ray-cast against the world's colliders, so a bomb bursts on a
+//! roof, or on the ruin that is left of it.
 
 use bevy::prelude::*;
 
 use super::{Effect, EffectKind, weapons::frame_dt};
-use crate::{ai::ObstacleMap, world::damage::DamageArea};
+use bevy_rapier3d::prelude::{CollisionGroups, QueryFilter, ReadRapierContext};
+
+use crate::{ai::ObstacleMap, physics::Layer, world::damage::DamageArea};
 
 /// Gravity for bombs (m/s²).
 pub const GRAVITY: f32 = 9.81;
+
+/// Below this height (m) a bomb bursts even without a collider (the
+/// river's water lies at about −25 m).
+const LOWEST_GROUND: f32 = -40.0;
 
 /// What one bomb does.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,6 +65,7 @@ pub fn bomb_bundle(spec: BombSpec, position: Vec3, velocity: Vec3) -> impl Bundl
 pub(super) fn fall_bombs(
     mut commands: Commands,
     time: Res<Time>,
+    rapier: ReadRapierContext,
     obstacles: Option<Res<ObstacleMap>>,
     mut bombs: Query<(Entity, &mut Bomb, &mut Transform)>,
     mut damage: MessageWriter<DamageArea>,
@@ -67,16 +75,39 @@ pub(super) fn fall_bombs(
     if dt <= 0.0 {
         return;
     }
+    let context = rapier.single().ok();
+    // Rays as a bomb would see the world: everything on the world layer
+    // (buildings and ruins as they are now, bridges, land, water).
+    let world = QueryFilter::new().groups(CollisionGroups::new(
+        Layer::EnemyProjectile.group(),
+        Layer::World.group(),
+    ));
     for (entity, mut bomb, mut transform) in &mut bombs {
+        let from = transform.translation;
         bomb.velocity.y -= GRAVITY * dt;
-        transform.translation += bomb.velocity * dt;
+        let step = bomb.velocity * dt;
+        let to = from + step;
+        transform.translation = to;
         transform.rotation = super::weapons::heading(bomb.velocity);
-        let p = transform.translation;
-        let ground = obstacles.as_ref().map_or(0.0, |o| o.height_at(p.x, p.z));
-        if p.y > ground {
+        let hit = match &context {
+            // The path of this step against the real colliders; below the
+            // lowest ground (the river's water) as a safety net.
+            Some(context) => {
+                let length = step.length().max(1e-3);
+                context
+                    .cast_ray(from, step / length, length, true, world)
+                    .map(|(_, toi)| from + step / length * toi)
+                    .or_else(|| (to.y <= LOWEST_GROUND).then_some(to))
+            }
+            // Without physics: the coarse obstacle heights.
+            None => {
+                let ground = obstacles.as_ref().map_or(0.0, |o| o.height_at(to.x, to.z));
+                (to.y <= ground).then_some(Vec3::new(to.x, ground, to.z))
+            }
+        };
+        let Some(point) = hit else {
             continue;
-        }
-        let point = Vec3::new(p.x, ground, p.z);
+        };
         damage.write(DamageArea {
             point,
             radius: bomb.spec.radius,

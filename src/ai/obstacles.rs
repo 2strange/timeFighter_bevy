@@ -5,7 +5,10 @@
 
 use bevy::prelude::*;
 
-use crate::world::CityLayout;
+use crate::world::{
+    CityLayout,
+    damage::{BuildingDestroyed, CityDamage, RepairCity, ruin_part},
+};
 
 /// Highest obstacle per grid cell (m above the ground plane). Outside the
 /// grid, and without a city, the ground is flat at 0.
@@ -58,7 +61,20 @@ impl ObstacleMap {
 
     /// Buildings and bridges of the city.
     pub fn from_layout(layout: &CityLayout) -> Self {
-        let buildings = layout.buildings.iter().map(|b| b.bounds());
+        Self::from_city(layout, None)
+    }
+
+    /// The city as it stands: destroyed buildings count with their ruin.
+    pub fn from_city(layout: &CityLayout, damage: Option<&CityDamage>) -> Self {
+        let buildings = layout.buildings.iter().enumerate().map(|(i, b)| {
+            let destroyed = damage.is_some_and(|d| d.destroyed.get(i).copied().unwrap_or(false));
+            if destroyed {
+                let ruin = ruin_part(b);
+                (ruin.min(), ruin.max())
+            } else {
+                b.bounds()
+            }
+        });
         let bridges = layout
             .bridges
             .iter()
@@ -95,6 +111,20 @@ impl ObstacleMap {
     }
 }
 
-pub(super) fn rebuild_obstacles(mut commands: Commands, layout: Res<CityLayout>) {
-    commands.insert_resource(ObstacleMap::from_layout(&layout));
+/// Rebuilds the map when the city changes: a new layout, a destroyed
+/// building, a repair. (Milliseconds for the whole city.)
+pub(super) fn rebuild_obstacles(
+    mut commands: Commands,
+    layout: Option<Res<CityLayout>>,
+    damage: Option<Res<CityDamage>>,
+    mut destroyed: MessageReader<BuildingDestroyed>,
+    mut repaired: MessageReader<RepairCity>,
+) {
+    let changed = destroyed.read().count() > 0
+        || repaired.read().count() > 0
+        || layout.as_ref().is_some_and(|l| l.is_changed())
+        || damage.as_ref().is_some_and(|d| d.is_changed());
+    if let (true, Some(layout)) = (changed, layout) {
+        commands.insert_resource(ObstacleMap::from_city(&layout, damage.as_deref()));
+    }
 }

@@ -31,7 +31,7 @@ use crate::{
     },
     flight::{FlightSystems, PlayerAircraft},
     physics::Layer,
-    world::CityLayout,
+    world::damage::{BuildingDestroyed, RepairCity},
 };
 
 /// Enemy aircraft types. Later modes add bombers.
@@ -168,6 +168,13 @@ pub struct AiConfig {
     pub awareness: f32,
     /// How long being hit gives priority for an attack slot (s).
     pub provoked_time: f32,
+    /// An attacker that lost the player flies to where it last saw it and
+    /// gives up its slot after this long (s) ...
+    pub search_time: f32,
+    /// ... or once it gets this close to that point without finding it (m),
+    /// and may not attack again for this long (s).
+    pub search_arrival: f32,
+    pub slot_rest: f32,
     /// Collision avoidance looks this far ahead (s).
     pub collision_horizon: f32,
     /// Closest pass (m) enemies keep between each other.
@@ -208,6 +215,9 @@ impl Default for AiConfig {
             sight_range: 2_500.0,
             awareness: 5.0,
             provoked_time: 8.0,
+            search_time: 8.0,
+            search_arrival: 300.0,
+            slot_rest: 10.0,
             collision_horizon: 3.0,
             formation_min_pass: 30.0,
             avoid_time: 1.2,
@@ -313,6 +323,12 @@ pub struct EnemyPilot {
     /// Seconds since being hit count down from here; a provoked pilot gets
     /// the next free attack slot first.
     pub provoked: f32,
+    /// Where the pilot last saw the player.
+    pub last_seen: Option<Vec3>,
+    /// How long an attacker has been looking for the player it lost (s).
+    pub searching: f32,
+    /// Seconds before a pilot that gave up its slot may attack again.
+    pub slot_rest: f32,
 }
 
 /// One collision avoidance manoeuvre, held until it is done.
@@ -436,6 +452,9 @@ impl Plugin for AiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AiConfig>()
             .init_resource::<AttackSlots>()
+            // The city's damage plugin registers them too.
+            .add_message::<BuildingDestroyed>()
+            .add_message::<RepairCity>()
             .init_resource::<ObstacleMap>()
             .configure_sets(
                 Update,
@@ -447,7 +466,7 @@ impl Plugin for AiPlugin {
             .add_systems(
                 Update,
                 (
-                    obstacles::rebuild_obstacles.run_if(resource_exists_and_changed::<CityLayout>),
+                    obstacles::rebuild_obstacles,
                     tactics::assign_attack_slots,
                     (fly_enemies, bomber::fly_bombers),
                 )
@@ -569,10 +588,42 @@ fn fly_enemies(
         if seen || incoming.is_some() || hit.contains(&entity) {
             pilot.aware = cfg.awareness;
         }
+        if seen {
+            pilot.last_seen = player.map(|p| p.position);
+        }
+        pilot.slot_rest -= dt;
+
+        // An attacker only knows where the player is while aware; after
+        // that it flies to where it saw the player last, and gives up its
+        // slot when the search fails.
+        let known = if pilot.aware > 0.0 || !pilot.attacking {
+            pilot.searching = 0.0;
+            player
+        } else {
+            pilot.searching += dt;
+            let arrived = pilot
+                .last_seen
+                .is_none_or(|p| p.distance(position) < cfg.search_arrival);
+            if pilot.searching > cfg.search_time || arrived {
+                pilot.attacking = false;
+                pilot.slot_rest = cfg.slot_rest;
+                pilot.searching = 0.0;
+                pilot.last_seen = None;
+                player
+            } else {
+                pilot.last_seen.map(|p| PlayerView {
+                    position: p,
+                    velocity: Vec3::ZERO,
+                    forward: Vec3::ZERO,
+                })
+            }
+        };
 
         let mut decision = think(
-            &cfg, &stats, &mut pilot, &mut rng, position, forward, player, incoming, dt,
+            &cfg, &stats, &mut pilot, &mut rng, position, forward, known, incoming, dt,
         );
+        // Nobody shoots at what it cannot see.
+        decision.fire &= pilot.aware > 0.0;
         // Without an attack slot: wait with the flight (still breaking
         // when threatened, see `think`).
         if !pilot.attacking && pilot.mode == PilotMode::Pursue {

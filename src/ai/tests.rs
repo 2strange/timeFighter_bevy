@@ -681,6 +681,8 @@ fn forty_eight_enemies_at_once_stay_stable() {
 #[test]
 fn an_enemy_that_never_saw_the_player_does_not_break() {
     let mut app = app(60.0, false);
+    // A waiting enemy: attackers are told where the player is.
+    app.insert_resource(super::AttackSlots { max: 0 });
     spawn_player(
         &mut app,
         Transform::from_xyz(0.0, 800.0, 0.0),
@@ -986,4 +988,44 @@ fn bomber_gunners_hit_a_close_pursuer_but_not_a_distant_one() {
     };
     assert!(hits_on_player_at(300.0), "rear gunner never hit at 300 m");
     assert!(!hits_on_player_at(1_500.0), "hit from 1.5 km");
+}
+
+#[test]
+fn an_attacker_that_loses_the_player_searches_and_gives_up_its_slot() {
+    let mut app = app(60.0, false);
+    app.world_mut().resource_mut::<CombatConfig>().player_health = 10_000.0;
+    app.insert_resource(super::AttackSlots { max: 1 });
+    let cfg = app.world().resource::<AiConfig>().clone();
+    spawn_ghost_player(
+        &mut app,
+        Transform::from_xyz(0.0, 800.0, 3_000.0),
+        170.0,
+        FlightInput::default(),
+    );
+    let enemy = spawn_enemy(&mut app, Transform::from_xyz(0.0, 800.0, 0.0));
+    app.update();
+    assert!(app.world().get::<EnemyPilot>(enemy).unwrap().attacking);
+    // The player sits right behind it, out of its sight.
+    app.insert_resource(Follow(enemy)).add_systems(
+        Update,
+        follow_target
+            .after(crate::flight::FlightSystems::Simulate)
+            .before(super::AiSystems),
+    );
+    let mut released_after = None;
+    for frame in 0..(25 * 60) {
+        app.update();
+        let pilot = app.world().get::<EnemyPilot>(enemy).unwrap();
+        if !pilot.attacking {
+            released_after = Some(frame as f32 / 60.0);
+            break;
+        }
+    }
+    let released = released_after.expect("kept its slot without seeing the player");
+    // Not at once: it remembers, then searches.
+    assert!(released > cfg.awareness, "gave up after {released} s");
+    assert!(
+        released <= cfg.awareness + cfg.search_time + 0.5,
+        "after {released} s"
+    );
 }
