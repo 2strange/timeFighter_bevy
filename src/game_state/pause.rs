@@ -12,6 +12,8 @@ use bevy::{
     winit::{UpdateMode, WinitSettings},
 };
 
+use crate::flight::{KeyHelpAppExt, KeyHelpSection};
+
 /// Why the game is paused. Game time runs only when nothing holds it;
 /// further reasons (menus, cut scenes) get their own field.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +46,7 @@ pub struct PausePlugin;
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Pause>()
+            .add_key_help(KeyHelpSection::Game, "P / Esc", "pause")
             .add_systems(Startup, spawn_pause_screen)
             .add_systems(
                 Update,

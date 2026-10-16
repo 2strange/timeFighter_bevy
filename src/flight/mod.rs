@@ -15,6 +15,7 @@ mod tests;
 use bevy::prelude::*;
 
 pub use config::FlightConfig;
+pub use key_help::{KeyHelpAppExt, KeyHelpLines, KeyHelpSection};
 pub use model::{FlightInput, FlightState, step};
 
 /// Marks the aircraft flown by the player.
@@ -50,12 +51,17 @@ pub struct PlayerFlightPlugin;
 
 impl Plugin for PlayerFlightPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (jet::spawn_player_jet, key_help::spawn_key_help))
+        app.add_key_help(KeyHelpSection::Flight, "W / S", "pitch (W = nose down)")
+            .add_key_help(KeyHelpSection::Flight, "A / D", "roll")
+            .add_key_help(KeyHelpSection::Flight, "Q / E or Left / Right", "yaw")
+            .add_key_help(KeyHelpSection::Flight, "Up / Down", "throttle")
+            .add_key_help(KeyHelpSection::Help, "F1", "show / hide this help")
+            .add_systems(Startup, (jet::spawn_player_jet, key_help::spawn_key_help))
             .add_systems(
                 Update,
                 (
                     (input::keyboard_input, input::respawn).in_set(FlightSystems::Input),
-                    key_help::toggle_key_help,
+                    (key_help::toggle_key_help, key_help::update_key_help),
                     jet::fall_back_to_primitive_jet,
                 ),
             );

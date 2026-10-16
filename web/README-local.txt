@@ -16,7 +16,10 @@ Controls
     Q / E         yaw left / right
     Left / Right  yaw left / right (same as Q / E)
     Up / Down     throttle (50 ... 500 m/s)
-    R             reset to spawn
+    Space / left mouse            machine gun
+    Right Shift / right Alt (Option) / right mouse
+                                  missile (homes on a locked target)
+    Enter / R     fly again after a round
     P / Esc       pause (also automatic when the tab loses focus)
     F1            show / hide the key help
 
