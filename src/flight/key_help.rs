@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 
-use crate::game_state::{RestartRound, Round, RoundPhase};
+use crate::game_state::{Pause, RestartRound, Round, RoundPhase};
 
 /// Key that shows and hides the help.
 pub const HELP_KEY: KeyCode = KeyCode::KeyI;
@@ -109,7 +109,7 @@ pub(super) fn update_key_help(lines: Res<KeyHelpLines>, mut help: Query<&mut Tex
 pub(super) fn toggle_key_help(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    round: Option<Res<Round>>,
+    (round, pause): (Option<Res<Round>>, Option<Res<Pause>>),
     mut restarts: MessageReader<RestartRound>,
     mut was_running: Local<bool>,
     mut auto_hide_in: Local<Option<f32>>,
@@ -119,6 +119,13 @@ pub(super) fn toggle_key_help(
     // than Running for one frame, or as a pending restart request.
     if restarts.read().count() > 0 {
         *was_running = false;
+    }
+    // Behind the start menu a round only waits as a backdrop: it counts as
+    // started once the menu is gone.
+    if pause.is_some_and(|p| p.menu) {
+        *was_running = false;
+        *auto_hide_in = None;
+        return;
     }
     let running = round.is_some_and(|r| r.phase == RoundPhase::Running);
     let round_started = running && !*was_running;

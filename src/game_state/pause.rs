@@ -23,11 +23,19 @@ pub struct Pause {
     pub player: bool,
     /// The round is decided and the result screen shows.
     pub round_over: bool,
+    /// The start menu is open. P/Esc and focus loss do nothing meanwhile,
+    /// and no pause screen covers the menu.
+    pub menu: bool,
 }
 
 impl Pause {
     pub fn is_paused(&self) -> bool {
-        self.player || self.round_over
+        self.player || self.round_over || self.menu
+    }
+
+    /// Nothing animates: redraw only on input.
+    fn idle(&self) -> bool {
+        self.player || self.menu
     }
 }
 
@@ -56,6 +64,9 @@ impl Plugin for PausePlugin {
 }
 
 fn toggle_pause(keys: Option<Res<ButtonInput<KeyCode>>>, mut pause: ResMut<Pause>) {
+    if pause.menu {
+        return;
+    }
     if keys.is_some_and(|keys| keys.any_just_pressed([KeyCode::KeyP, KeyCode::Escape])) {
         pause.player = !pause.player;
     }
@@ -70,7 +81,7 @@ fn pause_when_window_hidden(
 ) {
     let lost_focus = focus.read().any(|event| !event.focused);
     let hidden = occlusion.read().any(|event| event.occluded);
-    if lost_focus || hidden {
+    if (lost_focus || hidden) && !pause.menu {
         pause.player = true;
     }
 }
@@ -97,7 +108,7 @@ fn apply_pause(
     }
 
     if let Some(mut winit) = winit {
-        match (pause.player, running) {
+        match (pause.idle(), running) {
             (true, None) => {
                 commands.insert_resource(RunningWinitSettings(winit.clone()));
                 winit.focused_mode = UpdateMode::reactive_low_power(IDLE_REDRAW);
@@ -112,7 +123,7 @@ fn apply_pause(
     }
 
     for mut visibility in &mut screen {
-        *visibility = if pause.player {
+        *visibility = if pause.player && !pause.menu {
             Visibility::Visible
         } else {
             Visibility::Hidden

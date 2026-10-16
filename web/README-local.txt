@@ -10,6 +10,8 @@ with any static web server on your own machine, for example:
 Then open http://localhost:8000 in Chrome, Firefox or Safari and click
 into the game once so it receives the keyboard.
 
+The game opens in a start menu (arrow keys + Enter, or the mouse).
+
 Controls
     W / S         pitch (W = nose down, S = nose up)
     A / D         roll left / right
@@ -20,6 +22,7 @@ Controls
     Right Shift / right Alt (Option) / right mouse
                                   missile (homes on a locked target)
     Enter / R     fly again after a round
+    M             back to the start menu after a round
     P / Esc       pause (also automatic when the tab loses focus)
     I             show / hide the key help (shown when a round starts)
 

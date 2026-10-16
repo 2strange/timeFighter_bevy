@@ -10,6 +10,7 @@ pub mod combat;
 pub mod flight;
 pub mod game_state;
 pub mod hud;
+pub mod menu;
 pub mod physics;
 pub mod world;
 
@@ -116,7 +117,7 @@ pub struct AppModePlugin(pub AppMode);
 impl Plugin for AppModePlugin {
     fn build(&self, app: &mut App) {
         match self.0 {
-            AppMode::Game => app.add_plugins(GamePlugin),
+            AppMode::Game => app.add_plugins((GamePlugin, menu::MenuPlugin)),
             AppMode::Showroom => app.add_plugins(aircraft::ShowroomPlugin),
         };
     }
