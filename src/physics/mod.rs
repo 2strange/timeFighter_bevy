@@ -67,7 +67,10 @@ impl Plugin for PhysicsPlugin {
                 (projectile::report_hits, projectile::expire)
                     .chain()
                     .after(PhysicsSet::Writeback),
-                crash::detect_crashes.after(PhysicsSet::Writeback),
+                remember_aircraft_pose.before(PhysicsSet::SyncBackend),
+                (restore_aircraft_pose, crash::detect_crashes)
+                    .chain()
+                    .after(PhysicsSet::Writeback),
             ),
         );
     }
@@ -134,6 +137,29 @@ impl AircraftSize {
     }
 }
 
+/// The pose gameplay gave an aircraft this frame. Rapier writes its own
+/// body pose back into `Transform` after every step, also when it skipped
+/// the step (a frame with dt = 0: first frame, pause, result screen). For a
+/// kinematic aircraft that would undo a teleport made in such a frame, so
+/// the pose is restored after the write-back. The flight model and gameplay
+/// own aircraft poses; Rapier only reads them.
+#[derive(Component, Debug, Default, Clone, Copy)]
+pub struct AircraftPose(Option<Transform>);
+
+fn remember_aircraft_pose(mut aircraft: Query<(&Transform, &mut AircraftPose)>) {
+    for (transform, mut pose) in &mut aircraft {
+        pose.0 = Some(*transform);
+    }
+}
+
+fn restore_aircraft_pose(mut aircraft: Query<(&mut Transform, &AircraftPose)>) {
+    for (mut transform, pose) in &mut aircraft {
+        if let Some(pose) = pose.0 {
+            transform.set_if_neq(pose);
+        }
+    }
+}
+
 /// Collider and body for a jet-sized aircraft; see [`aircraft_body_sized`].
 pub fn aircraft_body(layer: Layer) -> impl Bundle {
     aircraft_body_sized(layer, AircraftSize::JET)
@@ -158,5 +184,6 @@ pub fn aircraft_body_sized(layer: Layer, size: AircraftSize) -> impl Bundle {
             | ActiveCollisionTypes::KINEMATIC_KINEMATIC,
         // Rapier's CCD does not sweep kinematic bodies; this does.
         CrashSweep::default(),
+        AircraftPose::default(),
     )
 }

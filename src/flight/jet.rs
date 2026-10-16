@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn primitive_jet_replaces_a_model_that_fails_to_load() {
-        // A jet whose scene points at a missing file and has no meshes yet.
+        // A jet whose scene points at a missing file and has no meshes.
         let mut app = headless_app(GamePlugin);
         app.insert_resource(FlightConfig {
             player_model: None,
@@ -219,13 +219,15 @@ mod tests {
             .entity_mut(jet)
             .despawn_related::<Children>()
             .insert(WorldAssetRoot(missing));
-        app.update();
-        assert_eq!(meshes_below(app.world(), jet), 0);
 
+        // Loading fails on a background thread; how many frames that takes
+        // depends on the machine's load, so wait on the outcome, not frames.
         update_until(&mut app, |app| {
-            app.world().get::<WorldAssetRoot>(jet).is_none()
+            app.world().get::<WorldAssetRoot>(jet).is_none() && meshes_below(app.world(), jet) > 0
         });
-        app.update();
-        assert_eq!(meshes_below(app.world(), jet), 8);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(meshes_below(app.world(), jet), 8, "one primitive jet, once");
     }
 }

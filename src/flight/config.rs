@@ -43,7 +43,7 @@ pub struct FlightConfig {
     pub max_dt: f32,
 
     /// Safety net (m): the jet's centre never goes below this height. It
-    /// lies under the lowest ground (the river's water at −20 m), so the jet
+    /// lies under the lowest ground (the river's water at −25 m), so the jet
     /// always touches a world collider first and the physics reports
     /// `PlayerCrashed`; the clamp only keeps it from falling out of the
     /// world until gameplay reacts.
@@ -79,7 +79,7 @@ impl Default for FlightConfig {
             idle_damping_per_second: 0.98_f32.powi(60),
 
             max_dt: crate::MAX_STEP,
-            min_altitude: -25.0,
+            min_altitude: -30.0,
 
             spawn_position: Vec3::new(0.0, 500.0, 800.0),
             spawn_pitch: (-15.0_f32).to_radians(),

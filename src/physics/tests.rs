@@ -492,6 +492,34 @@ fn a_jet_crashes_once_until_it_is_moved_somewhere_new() {
 }
 
 #[test]
+fn teleport_in_a_frame_without_physics_step_sticks() {
+    // dt = 0 (paused game time): Rapier skips the step but still writes its
+    // old body pose back. The aircraft must stay where gameplay put it.
+    let mut app = app(30);
+    let player = spawn_player(&mut app, Vec3::new(0.0, 500.0, 0.0), Vec3::ZERO);
+    run(&mut app, 0.2);
+
+    app.world_mut().resource_mut::<Time<Virtual>>().pause();
+    let target = Vec3::new(1_000.0, 800.0, 2_000.0);
+    app.world_mut()
+        .entity_mut(player)
+        .insert(Transform::from_translation(target));
+    for _ in 0..3 {
+        app.update();
+        let at = app.world().get::<Transform>(player).unwrap().translation;
+        assert_eq!(at, target, "teleport undone while paused");
+    }
+
+    app.world_mut().resource_mut::<Time<Virtual>>().unpause();
+    for _ in 0..3 {
+        app.update();
+    }
+    let at = app.world().get::<Transform>(player).unwrap().translation;
+    assert_eq!(at, target, "teleport undone after resuming");
+    assert!(crashes(&app).is_empty(), "a teleport is not a crash");
+}
+
+#[test]
 fn bullet_at_2000_m_s_and_10_fps_still_hits() {
     // 200 m per step against a 10 m box.
     let mut app = app(10);
