@@ -34,6 +34,15 @@
       .keys { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 0; font-size: 14px; }
       .keys dt { color: var(--amber); white-space: nowrap; }
       .keys dd { margin: 0; color: #dfe9e2; }
+      .choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 6px; }
+      .choice {
+        padding: 8px 14px; font: 15px system-ui, sans-serif; cursor: pointer;
+        color: var(--hud); background: transparent; border: 1px solid var(--hud-dim);
+      }
+      .choice[aria-pressed="true"] { color: #0b1218; background: var(--hud); border-color: var(--hud); }
+      .choice:disabled { color: rgba(184, 255, 199, 0.35); border-style: dashed; cursor: not-allowed; }
+      .choice:not(:disabled):hover, .choice:focus-visible { border-color: var(--amber); outline: none; }
+      .hint { font-size: 13px; color: var(--hud-dim); margin: 0; }
       #play {
         display: block; margin: 26px auto 8px; padding: 14px 56px;
         font: 600 22px system-ui, sans-serif; letter-spacing: 0.2em;
@@ -72,6 +81,25 @@
           of propeller bombers is heading for the rooftops. You are the only thing
           in the sky that can stop them.
         </p>
+
+        <h2>Mode</h2>
+        <div class="choices" id="modes" role="group" aria-label="Mode">
+          <button class="choice" type="button" data-mode="hunt">Hunt</button>
+          <button class="choice" type="button" data-mode="protect">Protect</button>
+          <button class="choice" type="button" disabled title="Coming soon">Battle (coming soon)</button>
+        </div>
+        <p class="hint" id="mode-hint"></p>
+
+        <h2>Difficulty</h2>
+        <div class="choices" id="levels" role="group" aria-label="Difficulty">
+          <button class="choice" type="button" data-level="0">Super Easy</button>
+          <button class="choice" type="button" data-level="1">Easy</button>
+          <button class="choice" type="button" data-level="2">Normal</button>
+          <button class="choice" type="button" data-level="3">Hard</button>
+          <button class="choice" type="button" data-level="4">Insane</button>
+          <button class="choice" type="button" data-level="5">Custom…</button>
+        </div>
+        <p class="hint">Custom opens the in-game menu with all the values.</p>
 
         <h2>Controls</h2>
         <dl class="keys">
@@ -133,30 +161,123 @@
         return bytes;
       }
 
+      // --- Mode and difficulty, handed to the game ---------------------------
+      // The game reads its menu choice from localStorage ("key=value;..."),
+      // and starts without its menu when "timefighter.autostart" is "1".
+      // Without storage (private windows) the choice goes into the URL.
+      const MENU_KEY = 'timefighter.menu';
+      const LEVEL_NAMES = ['super-easy', 'easy', 'normal', 'hard', 'insane', 'custom'];
+      const MODE_HINTS = {
+        hunt: 'Shoot down every fighter.',
+        protect: 'Stop the bomber waves before they wreck the city centre.',
+      };
+
+      function storage() {
+        try {
+          const test = '__timefighter__';
+          localStorage.setItem(test, test);
+          localStorage.removeItem(test);
+          return localStorage;
+        } catch {
+          return null;
+        }
+      }
+
+      function readStored() {
+        const pairs = new Map();
+        const line = storage()?.getItem(MENU_KEY) ?? '';
+        for (const pair of line.split(';')) {
+          const at = pair.indexOf('=');
+          if (at > 0) pairs.set(pair.slice(0, at), pair.slice(at + 1));
+        }
+        return pairs;
+      }
+
+      const stored = readStored();
+      let mode = stored.get('mode') === 'protect' ? 'protect' : 'hunt';
+      let level = Number(stored.get('level') ?? 2);
+      if (!(level >= 0 && level <= 5)) level = 2;
+
+      function showChoices() {
+        for (const button of document.querySelectorAll('[data-mode]')) {
+          button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+        }
+        for (const button of document.querySelectorAll('[data-level]')) {
+          button.setAttribute('aria-pressed', String(Number(button.dataset.level) === level));
+        }
+        document.getElementById('mode-hint').textContent = MODE_HINTS[mode];
+      }
+      document.getElementById('modes').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-mode]');
+        if (!button || button.disabled) return;
+        mode = button.dataset.mode;
+        showChoices();
+      });
+      document.getElementById('levels').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-level]');
+        if (!button) return;
+        level = Number(button.dataset.level);
+        showChoices();
+      });
+      showChoices();
+
+      function handOver() {
+        const store = storage();
+        if (store) {
+          // Keep everything else the menu stored (custom values, light).
+          const pairs = readStored();
+          pairs.set('mode', mode);
+          pairs.set('level', String(level));
+          store.setItem(MENU_KEY, [...pairs].map(([k, v]) => `${k}=${v}`).join(';'));
+          store.setItem('timefighter.autostart', '1');
+        } else {
+          // Only mode and level change; other parameters (e.g. ?set=)
+          // stay as they are.
+          const params = new URLSearchParams(location.search);
+          params.set('mode', mode);
+          params.set('level', LEVEL_NAMES[level]);
+          history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`);
+        }
+      }
+
+      // --- Start -------------------------------------------------------------
+      let module = null;
+
       function ready() {
         play.disabled = false;
         play.textContent = 'START';
-        status.textContent = 'Ready. Press Start or Enter.';
+        status.textContent = 'Ready. Pick mode and difficulty, then Start.';
         play.focus();
       }
 
-      play.addEventListener('click', () => {
-        start.classList.add('hidden');
-        canvas.focus();
+      play.addEventListener('click', async () => {
+        if (!module) return;
+        play.disabled = true;
+        play.textContent = 'STARTING';
+        status.textContent = 'Starting the engine…';
+        handOver();
+        try {
+          // Bevy hands control to the browser's event loop by throwing; that
+          // exception means the game is running. Anything else is a failure.
+          try {
+            await init({ module_or_path: module });
+          } catch (error) {
+            if (!String(error).includes('Using exceptions for control flow')) throw error;
+          }
+          start.classList.add('hidden');
+          canvas.focus();
+        } catch (error) {
+          play.textContent = 'ERROR';
+          status.textContent = `The game could not start (${error?.message ?? error}). Reload the page to try again.`;
+        }
       });
 
       try {
         const wasm = await download('./timefighter_bg.wasm');
-        play.textContent = 'STARTING';
-        status.textContent = 'Starting the engine…';
-        // The game starts behind this page, in its own menu, paused. Bevy
-        // hands control to the browser's event loop by throwing; that
-        // exception means the game is running. Anything else is a failure.
-        try {
-          await init({ module_or_path: wasm });
-        } catch (error) {
-          if (!String(error).includes('Using exceptions for control flow')) throw error;
-        }
+        play.textContent = 'PREPARING';
+        status.textContent = 'Preparing the game…';
+        // Compile now, so Start only has to run it.
+        module = await WebAssembly.compile(wasm);
         ready();
       } catch (error) {
         play.textContent = 'ERROR';

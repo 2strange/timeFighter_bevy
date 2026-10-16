@@ -14,4 +14,4 @@ pub use round::{
     Outcome, RESTART_KEYS, RestartRound, Round, RoundPhase, RoundPlugin, RoundStats, RoundSystems,
     weapons_free,
 };
-pub use settings::{Difficulty, DifficultyParams, GameSettings, MissionConfig, PilotMix};
+pub use settings::{Difficulty, DifficultyParams, EnemySet, GameSettings, MissionConfig, PilotMix};

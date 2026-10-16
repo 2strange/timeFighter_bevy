@@ -61,9 +61,13 @@ impl Plugin for MenuPlugin {
         let selection = storage::load()
             .map(|line| MenuSelection::from_line(&line))
             .unwrap_or_default();
+        let (selection, menu) = after_start_page(selection, storage::start_request().as_deref());
+        if menu != Menu::default() {
+            storage::save(&selection.to_line());
+        }
         app.add_key_help(KeyHelpSection::Round, "M", "menu after a round");
         app.insert_resource(selection)
-            .init_resource::<Menu>()
+            .insert_resource(menu)
             .add_systems(
                 Startup,
                 (prepare_first_round, spawn_menu, spawn_result_button),
@@ -83,6 +87,36 @@ impl Plugin for MenuPlugin {
                     .chain(),
             );
     }
+}
+
+/// What the start page asked for: with a fixed level the game starts right
+/// away (menu closed, the first round uses the selection); with Custom the
+/// menu opens on the custom values. Without a request: the menu as usual.
+pub fn after_start_page(
+    mut selection: MenuSelection,
+    request: Option<&str>,
+) -> (MenuSelection, Menu) {
+    let Some(request) = request else {
+        return (selection, Menu::default());
+    };
+    selection.apply_request(request);
+    let menu = if selection.is_custom() {
+        let first_custom = selection
+            .rows()
+            .iter()
+            .find(|row| matches!(row.id, RowId::Custom(_)))
+            .map_or(RowId::Start, |row| row.id);
+        Menu {
+            open: true,
+            cursor: first_custom,
+        }
+    } else {
+        Menu {
+            open: false,
+            cursor: RowId::Start,
+        }
+    };
+    (selection, menu)
 }
 
 /// The round behind the menu already uses the stored choice (light).

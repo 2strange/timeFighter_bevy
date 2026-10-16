@@ -112,7 +112,8 @@ impl AircraftSize {
         let length = self.length();
         let span = self.span();
         let centre_z = (self.min.z + self.max.z) / 2.0;
-        let radius = (0.065 * length).min(self.max.y.max(0.1));
+        // Not thicker than the model above and below the fuselage axis.
+        let radius = (0.065 * length).min(self.max.y.min(-self.min.y).max(0.1));
         let mut parts = vec![
             (
                 Vec3::new(0.0, 0.0, centre_z),

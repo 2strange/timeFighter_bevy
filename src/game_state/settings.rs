@@ -21,16 +21,94 @@ pub struct GameSettings {
 /// Technical choices behind the modes, not offered in the menu (yet).
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct MissionConfig {
-    /// The bomber type of Protect: `EnemyKind::Lancaster` (default) or
-    /// `EnemyKind::B17`, both with their own model, size and gunners.
+    /// Which aircraft the enemy flies.
+    pub set: EnemySet,
+    /// The bomber type of Protect in the first set: `EnemyKind::Lancaster`
+    /// (default) or `EnemyKind::B17`, both with their own model, size and
+    /// gunners.
     pub bomber: EnemyKind,
 }
 
 impl Default for MissionConfig {
     fn default() -> Self {
         Self {
+            set: EnemySet::First,
             bomber: EnemyKind::Lancaster,
         }
+    }
+}
+
+impl MissionConfig {
+    /// The configuration asked for in the page's query (`?set=second`) or,
+    /// natively, on the command line (`--set=second`); defaults otherwise.
+    pub fn from_query(query: &str) -> Self {
+        let set = query
+            .trim_start_matches('?')
+            .split('&')
+            .chain(query.split_whitespace())
+            .filter_map(|part| part.trim_start_matches("--").strip_prefix("set="))
+            .find_map(EnemySet::from_name)
+            .unwrap_or_default();
+        Self { set, ..default() }
+    }
+
+    /// From the page URL in the browser, from the command line otherwise.
+    pub fn detect() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let query = web_sys::window()
+                .and_then(|w| w.location().search().ok())
+                .unwrap_or_default();
+            Self::from_query(&query)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self::from_query(&std::env::args().skip(1).collect::<Vec<_>>().join(" "))
+        }
+    }
+}
+
+/// The enemy's aircraft.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EnemySet {
+    /// Spitfires, and Lancasters or B-17s.
+    #[default]
+    First,
+    /// Mixed pairs of Bf 109 K-4 (leading, a little slower) and Me 309;
+    /// bomber flights of a Ju 390 leading He 177s.
+    Second,
+}
+
+impl EnemySet {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "first" => Some(EnemySet::First),
+            "second" => Some(EnemySet::Second),
+            _ => None,
+        }
+    }
+
+    /// A fighter flight of `count`, in formation order.
+    pub fn fighters(self, count: u32) -> Vec<EnemyKind> {
+        (0..count)
+            .map(|i| match self {
+                EnemySet::First => EnemyKind::Spitfire,
+                EnemySet::Second if i % 2 == 0 => EnemyKind::Bf109K4,
+                EnemySet::Second => EnemyKind::Me309,
+            })
+            .collect()
+    }
+
+    /// A bomber flight of `count`, in formation order (`bomber` is the
+    /// first set's type).
+    pub fn bombers(self, count: u32, bomber: EnemyKind) -> Vec<EnemyKind> {
+        (0..count)
+            .map(|i| match self {
+                EnemySet::First => bomber,
+                EnemySet::Second if i == 0 => EnemyKind::Ju390,
+                EnemySet::Second => EnemyKind::He177,
+            })
+            .collect()
     }
 }
 

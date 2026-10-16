@@ -238,3 +238,71 @@ fn choosing_protect_in_the_menu_starts_a_protect_round() {
     assert_eq!(app.world().resource::<Mission>().mode, GameMode::Protect);
     assert!(app.world().resource::<Round>().is_running());
 }
+
+#[test]
+fn start_page_requests_pick_mode_and_level_by_name_or_index() {
+    let (selection, menu) =
+        after_start_page(MenuSelection::default(), Some("mode=protect;level=hard"));
+    assert_eq!(selection.mode, MenuMode::Protect);
+    assert_eq!(selection.settings().difficulty, Difficulty::Hard);
+    assert!(!menu.open, "a fixed level starts right away");
+
+    let (selection, _) = after_start_page(MenuSelection::default(), Some("level=super-easy"));
+    assert_eq!(selection.settings().difficulty, Difficulty::SuperEasy);
+    let (selection, _) = after_start_page(MenuSelection::default(), Some("level=4"));
+    assert_eq!(selection.settings().difficulty, Difficulty::Insane);
+
+    // Unknown values change nothing, but still start.
+    let (selection, menu) = after_start_page(
+        MenuSelection::default(),
+        Some("mode=battle;level=impossible"),
+    );
+    assert_eq!(selection, MenuSelection::default());
+    assert!(!menu.open);
+
+    // The one-shot flag alone: start with the stored selection.
+    let mut stored = MenuSelection::default();
+    stored.select(RowId::Difficulty, 1);
+    let (selection, menu) = after_start_page(stored.clone(), Some(""));
+    assert_eq!(selection, stored);
+    assert!(!menu.open);
+
+    // No request: the menu as usual.
+    assert_eq!(after_start_page(stored.clone(), None).1, Menu::default());
+}
+
+#[test]
+fn custom_from_the_start_page_opens_the_menu_on_the_custom_values() {
+    let (selection, menu) = after_start_page(MenuSelection::default(), Some("level=custom"));
+    assert!(selection.is_custom());
+    assert!(menu.open);
+    assert!(matches!(menu.cursor, RowId::Custom(_)), "{:?}", menu.cursor);
+}
+
+#[test]
+fn url_queries_count_as_start_requests_only_with_mode_or_level() {
+    use super::storage::query_names_a_start;
+    assert!(query_names_a_start("?mode=protect&level=hard"));
+    assert!(query_names_a_start("level=easy"));
+    assert!(!query_names_a_start("?showroom"));
+    assert!(!query_names_a_start(""));
+}
+
+#[test]
+fn autostarted_game_runs_without_menu_or_pause() {
+    let mut app = headless_app(AppModePlugin(AppMode::Game));
+    let (selection, start) =
+        after_start_page(MenuSelection::default(), Some("mode=protect;level=easy"));
+    app.insert_resource(selection).insert_resource(start);
+    for _ in 0..3 {
+        app.update();
+    }
+    assert!(!menu(&app).open);
+    assert!(!app.world().resource::<Pause>().is_paused());
+    assert!(app.world().resource::<Round>().is_running());
+    assert_eq!(settings(&app).difficulty, Difficulty::Easy);
+    assert_eq!(
+        app.world().resource::<crate::game_state::Mission>().mode,
+        crate::game_state::GameMode::Protect
+    );
+}

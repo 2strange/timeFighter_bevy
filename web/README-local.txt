@@ -10,7 +10,8 @@ with any static web server on your own machine, for example:
 Then open http://localhost:8000 in Chrome, Firefox or Safari and click
 into the game once so it receives the keyboard.
 
-The game opens in a start menu (arrow keys + Enter, or the mouse).
+Pick mode and difficulty on the start page and press Start; "Custom" opens
+the in-game menu with all values (arrow keys + Enter, or the mouse).
 
 Controls
     W / S         pitch (W = nose down, S = nose up)

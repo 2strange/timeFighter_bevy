@@ -11,8 +11,8 @@ use bevy::{
 use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use super::{
-    Difficulty, GameMode, GameSettings, Mission, Outcome, Pause, PausePlugin, RestartRound, Round,
-    RoundPhase, RoundPlugin, WaveTrigger,
+    Difficulty, GameMode, GameSettings, Mission, MissionConfig, Outcome, Pause, PausePlugin,
+    RestartRound, Round, RoundPhase, RoundPlugin, WaveTrigger,
 };
 use crate::{
     ai::{AiPlugin, Enemy},
@@ -539,7 +539,7 @@ fn difficulty_table_matches_the_design() {
     );
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
-        let mission = Mission::hunt(difficulty);
+        let mission = Mission::hunt(difficulty, &MissionConfig::default());
         assert_eq!(mission.enemy_count(), params.enemies, "{difficulty:?}");
         assert_eq!(
             mission.waves.len() as u32,
@@ -557,7 +557,7 @@ fn custom_difficulty_is_clamped_and_splits_uneven_flights() {
         enemy_speed: 9.0,
         ..default()
     });
-    let mission = Mission::hunt(custom);
+    let mission = Mission::hunt(custom, &MissionConfig::default());
     let sizes: Vec<u32> = mission.waves.iter().map(|w| w.enemy_count()).collect();
     assert_eq!(sizes, vec![3, 3, 1]);
     assert!(mission.waves[0].groups[0].tuning.speed <= 2.0);
@@ -618,7 +618,7 @@ fn non_finite_custom_values_count_as_normal() {
     });
     let params = custom.params().clamped();
     assert_eq!((params.enemy_speed, params.enemy_accuracy), (1.0, 1.0));
-    let mission = Mission::hunt(custom);
+    let mission = Mission::hunt(custom, &MissionConfig::default());
     let tuning = mission.waves[0].groups[0].tuning;
     assert_eq!((tuning.speed, tuning.accuracy), (1.0, 1.0));
 }
@@ -648,7 +648,7 @@ fn easy_levels_lock_faster_and_send_fewer_attackers() {
 fn protect_sends_bomber_flights_by_the_table() {
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
-        let mission = Mission::protect(difficulty, crate::ai::EnemyKind::Lancaster);
+        let mission = Mission::protect(difficulty, &MissionConfig::default());
         assert_eq!(
             mission.waves.len() as u32,
             params.bomber_waves,
@@ -723,7 +723,10 @@ fn protect_flies_the_configured_bomber() {
             protect(Difficulty::SuperEasy),
             true,
         );
-        app.insert_resource(crate::game_state::MissionConfig { bomber });
+        app.insert_resource(crate::game_state::MissionConfig {
+            bomber,
+            ..default()
+        });
         app.world_mut().write_message(RestartRound);
         app.update();
         let kinds: Vec<_> = app
@@ -803,4 +806,124 @@ fn a_protect_round_arms_the_jet_with_the_protect_missiles() {
         8,
         "Hunt"
     );
+}
+
+#[test]
+fn the_second_set_flies_mixed_pairs_and_ju_390_led_bombers() {
+    use crate::{ai::EnemyKind, game_state::EnemySet};
+    let config = MissionConfig {
+        set: EnemySet::Second,
+        ..default()
+    };
+    let hunt = Mission::hunt(Difficulty::Hard, &config);
+    assert_eq!(
+        hunt.waves[0].groups[0].members,
+        vec![
+            EnemyKind::Bf109K4,
+            EnemyKind::Me309,
+            EnemyKind::Bf109K4,
+            EnemyKind::Me309
+        ]
+    );
+    let protect = Mission::protect(Difficulty::Normal, &config);
+    assert_eq!(
+        protect.waves[0].groups[0].members,
+        vec![
+            EnemyKind::Ju390,
+            EnemyKind::He177,
+            EnemyKind::He177,
+            EnemyKind::He177
+        ]
+    );
+    // Leaders are the slower types, so formations hold together.
+    assert!(EnemyKind::Bf109K4.stats().cruise_speed < EnemyKind::Me309.stats().cruise_speed);
+    assert!(EnemyKind::Ju390.stats().cruise_speed < EnemyKind::He177.stats().cruise_speed);
+    assert_eq!(
+        EnemyKind::Ju390.stats().health,
+        2.0 * EnemyKind::He177.stats().health
+    );
+    // The first set stays as it was.
+    let first = Mission::hunt(Difficulty::Hard, &MissionConfig::default());
+    assert!(
+        first.waves[0].groups[0]
+            .members
+            .iter()
+            .all(|k| *k == EnemyKind::Spitfire)
+    );
+}
+
+#[test]
+fn the_set_is_chosen_by_url_or_command_line() {
+    use crate::game_state::EnemySet;
+    assert_eq!(
+        MissionConfig::from_query("?set=second").set,
+        EnemySet::Second
+    );
+    assert_eq!(
+        MissionConfig::from_query("?a=1&set=second").set,
+        EnemySet::Second
+    );
+    assert_eq!(
+        MissionConfig::from_query("--showroom --set=second").set,
+        EnemySet::Second
+    );
+    assert_eq!(MissionConfig::from_query("").set, EnemySet::First);
+    assert_eq!(
+        MissionConfig::from_query("?set=nonsense").set,
+        EnemySet::First
+    );
+}
+
+#[test]
+fn a_second_set_round_spawns_the_mixed_flight() {
+    let (mut app, _) = app();
+    app.insert_resource(MissionConfig {
+        set: crate::game_state::EnemySet::Second,
+        ..default()
+    });
+    app.world_mut().write_message(RestartRound);
+    app.update();
+    let mut kinds: Vec<_> = app
+        .world_mut()
+        .query::<&Enemy>()
+        .iter(app.world())
+        .map(|e| format!("{:?}", e.kind))
+        .collect();
+    kinds.sort();
+    assert_eq!(kinds, vec!["Bf109K4", "Bf109K4", "Me309", "Me309"]);
+    run_for(&mut app, 5.0);
+    assert_eq!(round(&app).phase, RoundPhase::Running);
+}
+
+#[test]
+fn a_second_set_protect_round_sends_a_ju_390_with_he_177s() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        protect(Difficulty::SuperEasy),
+        true,
+    );
+    app.insert_resource(MissionConfig {
+        set: crate::game_state::EnemySet::Second,
+        ..default()
+    });
+    app.world_mut().write_message(RestartRound);
+    app.update();
+    let mut kinds: Vec<_> = app
+        .world_mut()
+        .query::<(&Enemy, &crate::combat::Turrets)>()
+        .iter(app.world())
+        .map(|(e, t)| (format!("{:?}", e.kind), t.mounts.len()))
+        .collect();
+    kinds.sort();
+    assert_eq!(
+        kinds,
+        vec![
+            ("He177".to_string(), 2),
+            ("He177".to_string(), 2),
+            ("He177".to_string(), 2),
+            ("Ju390".to_string(), 2)
+        ]
+    );
+    run_for(&mut app, 5.0);
+    assert_eq!(round(&app).phase, RoundPhase::Running);
 }
