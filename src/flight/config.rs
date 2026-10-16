@@ -78,7 +78,7 @@ impl Default for FlightConfig {
 
             idle_damping_per_second: 0.98_f32.powi(60),
 
-            max_dt: 0.1,
+            max_dt: crate::MAX_STEP,
             min_altitude: -25.0,
 
             spawn_position: Vec3::new(0.0, 500.0, 800.0),

@@ -1,6 +1,6 @@
 //! Fast projectiles (bullets, missiles) with continuous collision detection.
 
-use bevy::{platform::collections::HashSet, prelude::*};
+use bevy::{platform::collections::HashMap, prelude::*};
 use bevy_rapier3d::prelude::*;
 
 use super::Layer;
@@ -67,10 +67,12 @@ pub(super) fn report_hits(
     mut commands: Commands,
     mut collisions: MessageReader<CollisionEvent>,
     projectiles: Query<&Transform, (With<Projectile>, Without<ProjectileSpent>)>,
+    targets: Query<(&Collider, &GlobalTransform)>,
     mut hits: MessageWriter<ProjectileHit>,
 ) {
-    // A projectile can touch several colliders in one step; only the first counts.
-    let mut spent = HashSet::new();
+    // A projectile can touch several colliders in one step (e.g. a house
+    // and the ground at its foot); the one nearest to it was hit first.
+    let mut nearest: HashMap<Entity, (Entity, f32)> = HashMap::new();
     for event in collisions.read() {
         let CollisionEvent::Started(a, b, _) = *event else {
             continue;
@@ -79,20 +81,29 @@ pub(super) fn report_hits(
             let Ok(transform) = projectiles.get(projectile) else {
                 continue;
             };
-            if !spent.insert(projectile) {
-                continue;
-            }
-            hits.write(ProjectileHit {
-                projectile,
-                target,
-                point: transform.translation,
+            let distance = targets.get(target).map_or(f32::MAX, |(collider, at)| {
+                let (_, rotation, translation) = at.to_scale_rotation_translation();
+                collider.distance_to_point(translation, rotation, transform.translation, true)
             });
-            commands.entity(projectile).insert((
-                ProjectileSpent,
-                RigidBodyDisabled,
-                ColliderDisabled,
-            ));
+            let entry = nearest.entry(projectile).or_insert((target, distance));
+            if distance < entry.1 {
+                *entry = (target, distance);
+            }
         }
+    }
+
+    for (projectile, (target, _)) in nearest {
+        let Ok(transform) = projectiles.get(projectile) else {
+            continue;
+        };
+        hits.write(ProjectileHit {
+            projectile,
+            target,
+            point: transform.translation,
+        });
+        commands
+            .entity(projectile)
+            .insert((ProjectileSpent, RigidBodyDisabled, ColliderDisabled));
     }
 }
 
@@ -110,7 +121,8 @@ pub(super) fn expire(
     mut projectiles: Query<(Entity, &mut Projectile), Without<ProjectileSpent>>,
 ) {
     for (entity, mut projectile) in &mut projectiles {
-        projectile.lifetime -= time.delta_secs();
+        // Same capped step as the physics, so lifetime and range agree.
+        projectile.lifetime -= time.delta_secs().min(crate::MAX_STEP);
         if projectile.lifetime <= 0.0 {
             commands.entity(entity).despawn();
         }

@@ -6,6 +6,7 @@ use bevy::{prelude::*, time::TimeUpdateStrategy, transform::TransformPlugin};
 use bevy_rapier3d::prelude::*;
 
 use super::*;
+use crate::{aircraft::AircraftModel, flight::PlayerAircraft};
 
 /// Hits and crashes as seen by a gameplay system in `Update`, plus whether
 /// the projectile entity was still readable there.
@@ -13,11 +14,13 @@ use super::*;
 struct Seen {
     hits: Vec<(ProjectileHit, bool)>,
     crashes: Vec<PlayerCrashed>,
+    enemy_crashes: Vec<EnemyCrashed>,
 }
 
 fn record(
     mut hits: MessageReader<ProjectileHit>,
     mut crashes: MessageReader<PlayerCrashed>,
+    mut enemy_crashes: MessageReader<EnemyCrashed>,
     projectiles: Query<&Projectile>,
     mut seen: ResMut<Seen>,
 ) {
@@ -25,6 +28,7 @@ fn record(
         seen.hits.push((*hit, projectiles.contains(hit.projectile)));
     }
     seen.crashes.extend(crashes.read().copied());
+    seen.enemy_crashes.extend(enemy_crashes.read().copied());
 }
 
 /// Moves test aircraft at a constant velocity, like the flight model would.
@@ -319,6 +323,26 @@ fn unspent_projectiles_expire() {
     assert!(hits(&app).is_empty());
 }
 
+fn spawn_player(app: &mut App, at: Vec3, velocity: Vec3) -> Entity {
+    app.world_mut()
+        .spawn((
+            PlayerAircraft,
+            aircraft_body(Layer::Player),
+            Cruise(velocity),
+            Transform::from_translation(at),
+        ))
+        .id()
+}
+
+fn crashes(app: &App) -> Vec<(Entity, Entity)> {
+    let seen = app.world().resource::<Seen>();
+    seen.crashes
+        .iter()
+        .map(|c| (c.player, c.obstacle))
+        .chain(seen.enemy_crashes.iter().map(|c| (c.enemy, c.obstacle)))
+        .collect()
+}
+
 #[test]
 fn player_crashes_into_buildings() {
     let mut app = app(30);
@@ -329,67 +353,192 @@ fn player_crashes_into_buildings() {
         Layer::World,
     );
     // Full speed, 16.7 m per frame, at a 20 m deep building.
-    let player = app
-        .world_mut()
-        .spawn((
-            PlayerAircraft,
-            aircraft_body(Layer::Player),
-            Cruise(Vec3::new(0.0, 0.0, -500.0)),
-            Transform::from_xyz(0.0, 50.0, 0.0),
-        ))
-        .id();
-    run(&mut app, 1.5);
-    let crashes = app.world().resource::<Seen>().crashes.clone();
-    assert!(!crashes.is_empty(), "no crash reported");
-    assert_eq!(
-        crashes[0],
-        PlayerCrashed {
-            player,
-            obstacle: building
-        }
+    let player = spawn_player(
+        &mut app,
+        Vec3::new(0.0, 50.0, 0.0),
+        Vec3::new(0.0, 0.0, -500.0),
     );
+    run(&mut app, 1.5);
+    assert_eq!(crashes(&app), vec![(player, building)]);
+    // Reported where the jet met the facade (z = -590), not somewhere inside.
+    let point = app.world().resource::<Seen>().crashes[0].point;
+    assert!((point.z + 590.0).abs() < 1.0, "crash at {point}");
 }
 
 #[test]
 fn player_crashes_into_the_ground() {
     let mut app = app(30);
     let ground = spawn_ground(&mut app);
-    let player = app
-        .world_mut()
-        .spawn((
-            PlayerAircraft,
-            aircraft_body(Layer::Player),
-            Cruise(Vec3::new(0.0, -100.0, -200.0)),
-            Transform::from_xyz(0.0, 100.0, 0.0),
-        ))
-        .id();
-    run(&mut app, 1.5);
-    let crashes = app.world().resource::<Seen>().crashes.clone();
-    assert_eq!(
-        crashes.first(),
-        Some(&PlayerCrashed {
-            player,
-            obstacle: ground
-        })
+    let player = spawn_player(
+        &mut app,
+        Vec3::new(0.0, 100.0, 0.0),
+        Vec3::new(0.0, -100.0, -200.0),
     );
+    run(&mut app, 1.5);
+    assert_eq!(crashes(&app), vec![(player, ground)]);
 }
 
 #[test]
-fn enemies_crashing_is_not_a_player_crash() {
+fn thin_deck_and_wall_stop_a_jet_at_500_m_s_and_10_fps() {
+    // The jet moves 50 m per frame: one frame before a 1.5 m bridge deck
+    // (or a 0.5 m wall), the next frame well past it. Only the swept cast
+    // between the two poses can see the impact.
+    let cases = [
+        // Diving straight down through a deck.
+        (
+            Vec3::new(0.0, 27.0, 0.0),
+            Vec3::new(0.0, -500.0, 0.0),
+            Vec3::new(40.0, 0.75, 40.0),
+        ),
+        // Flying level through a wall.
+        (
+            Vec3::new(0.0, 0.0, 27.0),
+            Vec3::new(0.0, 0.0, -500.0),
+            Vec3::new(40.0, 40.0, 0.25),
+        ),
+    ];
+    for (start, velocity, half) in cases {
+        let mut app = app(10);
+        let obstacle = spawn_box(&mut app, Vec3::ZERO, half, Layer::World);
+        let player = spawn_player(&mut app, start, velocity);
+        run(&mut app, 0.5);
+        assert_eq!(crashes(&app), vec![(player, obstacle)], "{velocity}");
+    }
+}
+
+#[test]
+fn player_and_spitfire_collide() {
     let mut app = app(30);
-    spawn_box(
+    let enemy = app
+        .world_mut()
+        .spawn((
+            AircraftModel::Spitfire.body(Layer::Enemy),
+            Cruise(Vec3::new(0.0, 0.0, 150.0)),
+            Transform::from_xyz(0.0, 300.0, -400.0),
+        ))
+        .id();
+    let player = spawn_player(
+        &mut app,
+        Vec3::new(0.0, 300.0, 0.0),
+        Vec3::new(0.0, 0.0, -150.0),
+    );
+    run(&mut app, 2.0);
+    let mut got = crashes(&app);
+    got.sort();
+    let mut expected = vec![(player, enemy), (enemy, player)];
+    expected.sort();
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn enemy_crashing_into_the_world_is_an_enemy_crash() {
+    let mut app = app(30);
+    let building = spawn_box(
         &mut app,
         Vec3::new(0.0, 50.0, -300.0),
         Vec3::splat(10.0),
         Layer::World,
     );
-    app.world_mut().spawn((
-        aircraft_body(Layer::Enemy),
-        Cruise(Vec3::new(0.0, 0.0, -300.0)),
-        Transform::from_xyz(0.0, 50.0, 0.0),
-    ));
+    let enemy = app
+        .world_mut()
+        .spawn((
+            AircraftModel::Spitfire.body(Layer::Enemy),
+            Cruise(Vec3::new(0.0, 0.0, -300.0)),
+            Transform::from_xyz(0.0, 50.0, 0.0),
+        ))
+        .id();
     run(&mut app, 1.5);
     assert!(app.world().resource::<Seen>().crashes.is_empty());
+    assert_eq!(crashes(&app), vec![(enemy, building)]);
+}
+
+#[test]
+fn being_shot_is_not_a_crash() {
+    let mut app = app(60);
+    let player = spawn_player(&mut app, Vec3::ZERO, Vec3::ZERO);
+    let bullet = fire(
+        &mut app,
+        Vec3::new(0.0, 0.0, -200.0),
+        Vec3::new(0.0, 0.0, 800.0),
+        0.1,
+        Layer::EnemyProjectile,
+    );
+    run(&mut app, 0.5);
+    assert!(crashes(&app).is_empty());
+    let hits = hits(&app);
+    assert_eq!(hits.len(), 1);
+    assert_eq!((hits[0].projectile, hits[0].target), (bullet, player));
+}
+
+#[test]
+fn a_jet_crashes_once_until_it_is_moved_somewhere_new() {
+    let mut app = app(30);
+    spawn_ground(&mut app);
+    let player = spawn_player(
+        &mut app,
+        Vec3::new(0.0, 30.0, 0.0),
+        Vec3::new(0.0, -100.0, -200.0),
+    );
+    // Keeps going into and through the ground plane: still one crash.
+    run(&mut app, 2.0);
+    assert_eq!(crashes(&app).len(), 1);
+
+    // Respawn far away; flying into the ground again is a new crash.
+    app.world_mut()
+        .entity_mut(player)
+        .insert(Transform::from_xyz(0.0, 30.0, 5_000.0));
+    run(&mut app, 1.0);
+    assert_eq!(crashes(&app).len(), 2);
+}
+
+#[test]
+fn bullet_at_2000_m_s_and_10_fps_still_hits() {
+    // 200 m per step against a 10 m box.
+    let mut app = app(10);
+    let enemy = spawn_box(
+        &mut app,
+        Vec3::new(0.0, 0.0, -1_500.0),
+        Vec3::splat(5.0),
+        Layer::Enemy,
+    );
+    fire(
+        &mut app,
+        Vec3::ZERO,
+        Vec3::new(0.0, 0.0, -2_000.0),
+        0.05,
+        Layer::PlayerProjectile,
+    );
+    run(&mut app, 1.5);
+    let hits = hits(&app);
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].target, enemy);
+}
+
+#[test]
+fn hit_in_the_last_frame_of_life_still_counts() {
+    // At 300 m/s and 30 fps the missile reaches the wall (z = -95) in its
+    // tenth frame, exactly when its lifetime of 10 frames runs out.
+    let mut app = app(30);
+    spawn_box(
+        &mut app,
+        Vec3::new(0.0, 0.0, -100.0),
+        Vec3::splat(5.0),
+        Layer::World,
+    );
+    app.world_mut().spawn(projectile(
+        Transform::default(),
+        Vec3::new(0.0, 0.0, -300.0),
+        0.3,
+        Layer::PlayerProjectile,
+        10.0 / 30.0,
+    ));
+    run(&mut app, 1.0);
+    let seen = &app.world().resource::<Seen>().hits;
+    assert_eq!(seen.len(), 1, "hit lost to expiry");
+    assert!(
+        seen[0].1,
+        "projectile despawned before gameplay could read it"
+    );
 }
 
 #[test]

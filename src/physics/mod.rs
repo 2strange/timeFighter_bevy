@@ -5,9 +5,11 @@
 //! kinematic bodies moved by the flight model, projectiles are fast dynamic
 //! bodies with continuous collision detection (CCD), the world is static.
 //!
-//! Gameplay reacts to two messages: [`ProjectileHit`] and [`PlayerCrashed`].
+//! Gameplay reacts to [`ProjectileHit`], [`PlayerCrashed`] and
+//! [`EnemyCrashed`].
 //! Damage, health and what a hit means belong to the combat code.
 
+mod crash;
 mod groups;
 mod projectile;
 #[cfg(test)]
@@ -16,14 +18,11 @@ mod tests;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+pub use crash::{CrashSweep, EnemyCrashed, PlayerCrashed};
 pub use groups::Layer;
 pub use projectile::{Projectile, ProjectileHit, ProjectileSpent, projectile};
 
-use crate::flight::PlayerAircraft;
-
-/// Longest physics step (s), as in the flight model: below 10 fps the game
-/// runs in slow motion instead of letting things jump.
-const MAX_STEP: f32 = 0.1;
+use crate::MAX_STEP;
 
 /// Highest speed of any body (m/s), well above the fastest projectile.
 pub const MAX_SPEED: f32 = 2_000.0;
@@ -59,24 +58,19 @@ impl Plugin for PhysicsPlugin {
         })
         .add_message::<ProjectileHit>()
         .add_message::<PlayerCrashed>()
+        .add_message::<EnemyCrashed>()
         .add_systems(
             PostUpdate,
             (
                 projectile::despawn_spent.before(PhysicsSet::SyncBackend),
-                (projectile::report_hits, report_crashes).after(PhysicsSet::Writeback),
-                projectile::expire.after(PhysicsSet::Writeback),
+                // A projectile hit in its last frame of life still counts.
+                (projectile::report_hits, projectile::expire)
+                    .chain()
+                    .after(PhysicsSet::Writeback),
+                crash::detect_crashes.after(PhysicsSet::Writeback),
             ),
         );
     }
-}
-
-/// The player's aircraft touched a world collider (ground, water,
-/// building, bridge). What follows (explosion, game over) is up to gameplay.
-#[derive(Message, Clone, Copy, Debug, PartialEq)]
-pub struct PlayerCrashed {
-    pub player: Entity,
-    /// The collider it hit.
-    pub obstacle: Entity,
 }
 
 /// Marks ground colliders (land, water). The world builds them from its
@@ -148,38 +142,21 @@ pub fn aircraft_body(layer: Layer) -> impl Bundle {
 /// Collider and body for an aircraft of `size`.
 ///
 /// Aircraft are kinematic: the flight model moves them, Rapier only checks
-/// what they touch, with CCD so a fast jet does not pass through a wall
-/// between two frames.
+/// what they touch. Crashes are found by contacts plus a swept cast per
+/// frame (see [`CrashSweep`]), so a fast jet cannot pass through a thin
+/// wall between two frames.
 pub fn aircraft_body_sized(layer: Layer, size: AircraftSize) -> impl Bundle {
     (
         RigidBody::KinematicPositionBased,
         size.collider(),
-        Ccd::enabled(),
         layer.groups(),
         ActiveEvents::COLLISION_EVENTS,
-        // Kinematic bodies ignore static ones by default; we want to know
-        // when the jet flies into the ground or a building.
-        ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_STATIC,
+        // Kinematic bodies ignore static and other kinematic ones by
+        // default; we want the jet hitting buildings and other aircraft.
+        ActiveCollisionTypes::default()
+            | ActiveCollisionTypes::KINEMATIC_STATIC
+            | ActiveCollisionTypes::KINEMATIC_KINEMATIC,
+        // Rapier's CCD does not sweep kinematic bodies; this does.
+        CrashSweep::default(),
     )
-}
-
-fn report_crashes(
-    mut collisions: MessageReader<CollisionEvent>,
-    players: Query<(), With<PlayerAircraft>>,
-    layers: Query<&CollisionGroups>,
-    mut crashes: MessageWriter<PlayerCrashed>,
-) {
-    for event in collisions.read() {
-        let CollisionEvent::Started(a, b, _) = *event else {
-            continue;
-        };
-        for (player, obstacle) in [(a, b), (b, a)] {
-            let is_world = layers
-                .get(obstacle)
-                .is_ok_and(|g| g.memberships.contains(Layer::World.group()));
-            if players.contains(player) && is_world {
-                crashes.write(PlayerCrashed { player, obstacle });
-            }
-        }
-    }
 }
