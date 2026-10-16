@@ -1,7 +1,8 @@
-use bevy::{asset::AssetMetaCheck, prelude::*};
-use timefighter::GamePlugin;
+use bevy::{asset::AssetMetaCheck, log::LogPlugin, prelude::*};
+use timefighter::{AppMode, AppModePlugin};
 
 fn main() {
+    let mode = AppMode::detect();
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -13,7 +14,7 @@ fn main() {
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "TimeFighter".into(),
+                        title: mode.window_title().into(),
                         // Browser: render into <canvas id="game"> and fill its parent.
                         canvas: Some("#game".into()),
                         fit_canvas_to_parent: true,
@@ -22,8 +23,22 @@ fn main() {
                         ..default()
                     }),
                     ..default()
-                }),
+                })
+                .set(log_settings()),
         )
-        .add_plugins(GamePlugin)
+        .add_plugins(AppModePlugin(mode))
         .run();
+}
+
+/// The browser console only gets warnings and errors.
+fn log_settings() -> LogPlugin {
+    if cfg!(target_arch = "wasm32") {
+        LogPlugin {
+            level: bevy::log::Level::WARN,
+            filter: "wgpu=error".into(),
+            ..default()
+        }
+    } else {
+        LogPlugin::default()
+    }
 }

@@ -13,7 +13,7 @@ mod tests;
 
 use bevy::prelude::*;
 
-pub use showroom::{ShowroomPlugin, ShowroomState};
+pub use showroom::{ShowroomPlugin, ShowroomView};
 
 /// Normalised aircraft models available in `assets/aircraft/`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

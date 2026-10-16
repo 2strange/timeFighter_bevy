@@ -69,3 +69,5 @@ panic = "abort"
 # Browser platform glue (timers, panic hook) only for the WASM target.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 bevy = { version = "=0.20.0", default-features = false, features = ["web"] }
+# Reading the page URL (game or showroom). Same version Bevy already uses.
+web-sys = { version = "=0.3.106", features = ["Window", "Location"] }

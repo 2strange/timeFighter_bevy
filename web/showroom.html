@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TimeFighter - Aircraft showroom</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #9ebddb; overflow: hidden; }
+      #game { display: block; width: 100%; height: 100%; outline: none; }
+      #loading {
+        position: absolute; inset: 0; display: grid; place-items: center;
+        font: 16px system-ui, sans-serif; color: #1b2a3a;
+      }
+      #nav {
+        position: absolute; right: 12px; bottom: 12px;
+        font: 14px system-ui, sans-serif; color: #fff; opacity: 0.8;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">Loading…</div>
+    <canvas id="game" tabindex="0"></canvas>
+    <a id="nav" href="index.html">Back to the game</a>
+    <!-- Same WebAssembly as the game; it starts the showroom when the page is showroom.html. -->
+    <script type="module">
+      import init from './timefighter.js';
+      const canvas = document.getElementById('game');
+      canvas.addEventListener('click', () => canvas.focus());
+      init().catch((error) => {
+        // Bevy hands control to the browser's event loop by throwing; that is not a failure.
+        if (!String(error).includes('Using exceptions for control flow')) throw error;
+      });
+      new MutationObserver(() => document.getElementById('loading')?.remove())
+        .observe(canvas, { attributes: true });
+      canvas.focus();
+    </script>
+  </body>
+</html>

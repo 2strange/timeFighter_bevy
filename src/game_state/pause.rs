@@ -12,19 +12,18 @@ use bevy::{
     winit::{UpdateMode, WinitSettings},
 };
 
-/// Why the game is paused. Game time runs only when nothing holds it.
+/// Why the game is paused. Game time runs only when nothing holds it;
+/// further reasons (menus, cut scenes) get their own field.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Pause {
     /// Paused by the player (P / Esc) or because the window lost focus.
     /// Shows the pause screen and throttles rendering.
     pub player: bool,
-    /// Paused by the aircraft showroom, which keeps rendering.
-    pub showroom: bool,
 }
 
 impl Pause {
     pub fn is_paused(&self) -> bool {
-        self.player || self.showroom
+        self.player
     }
 }
 
@@ -279,17 +278,5 @@ mod tests {
         });
         app.update();
         assert!(app.world().resource::<Pause>().player);
-    }
-
-    #[test]
-    fn showroom_pause_freezes_without_player_pause() {
-        let (mut app, jet) = app();
-        app.update();
-        app.world_mut().resource_mut::<Pause>().showroom = true;
-        app.update();
-        let frozen = position(&app, jet);
-        app.update();
-        assert_eq!(position(&app, jet), frozen);
-        assert!(!app.world().resource::<Pause>().player);
     }
 }
