@@ -17,6 +17,9 @@ bevy = { version = "=0.20.0", default-features = false, features = [
   "multi_threaded",
   "bevy_asset",
   "bevy_log",
+  # Registers reflected types automatically. Spawning glTF scenes needs every
+  # component in them registered; without this the scene spawner panics.
+  "reflect_auto_register",
   "bevy_winit",
   "x11",
   "webgl2",

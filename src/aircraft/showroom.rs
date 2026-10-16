@@ -227,3 +227,144 @@ fn spawn_help(mut commands: Commands) {
         Visibility::Hidden,
     ));
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use bevy::{
+        asset::AssetMetaCheck,
+        input::{
+            ButtonState,
+            keyboard::{Key, KeyboardInput, NativeKey},
+        },
+        log::LogPlugin,
+        render::{RenderPlugin, settings::WgpuSettings},
+        window::ExitCondition,
+        winit::WinitPlugin,
+    };
+
+    use super::*;
+    use crate::GamePlugin;
+
+    /// The full game with all plugins, but no window and no GPU.
+    fn headless_game() -> App {
+        let mut app = App::new();
+        app.add_plugins(
+            DefaultPlugins
+                .build()
+                .disable::<WinitPlugin>()
+                .disable::<LogPlugin>()
+                .set(RenderPlugin {
+                    render_creation: WgpuSettings {
+                        backends: None,
+                        ..default()
+                    }
+                    .into(),
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: ExitCondition::DontExit,
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    meta_check: AssetMetaCheck::Never,
+                    ..default()
+                }),
+        )
+        .add_plugins(GamePlugin);
+        app.finish();
+        app.cleanup();
+        app
+    }
+
+    fn key(app: &mut App, key_code: KeyCode, state: ButtonState) {
+        let window = Entity::PLACEHOLDER;
+        app.world_mut().write_message(KeyboardInput {
+            key_code,
+            logical_key: Key::Unidentified(NativeKey::Unidentified),
+            state,
+            text: None,
+            repeat: false,
+            window,
+        });
+    }
+
+    fn tap(app: &mut App, key_code: KeyCode) {
+        key(app, key_code, ButtonState::Pressed);
+        app.update();
+        key(app, key_code, ButtonState::Released);
+        app.update();
+    }
+
+    /// Number of entities with a mesh below `root`.
+    fn meshes_below(world: &mut World, root: Entity) -> usize {
+        let mut count = 0;
+        let mut stack = vec![root];
+        while let Some(entity) = stack.pop() {
+            if world.get::<Mesh3d>(entity).is_some() {
+                count += 1;
+            }
+            if let Some(children) = world.get::<Children>(entity) {
+                stack.extend(children.iter());
+            }
+        }
+        count
+    }
+
+    fn camera(app: &mut App) -> Transform {
+        let mut query = app.world_mut().query_filtered::<&Transform, With<Camera3d>>();
+        *query.single(app.world()).unwrap()
+    }
+
+    #[test]
+    fn showroom_shows_all_models_and_reacts_to_keys() {
+        let mut app = headless_game();
+        app.update();
+        tap(&mut app, KeyCode::KeyM);
+        assert!(app.world().resource::<ShowroomState>().active);
+
+        let roots: Vec<(Entity, String)> = app
+            .world_mut()
+            .query_filtered::<(Entity, &Name), With<WorldAssetRoot>>()
+            .iter(app.world())
+            .map(|(e, n)| (e, n.to_string()))
+            .collect();
+        assert_eq!(roots.len(), AircraftModel::ALL.len(), "model roots spawned");
+
+        // Loading runs on background threads; give it a few seconds.
+        let start = Instant::now();
+        loop {
+            app.update();
+            let missing: Vec<_> = roots
+                .iter()
+                .filter(|(e, _)| meshes_below(app.world_mut(), *e) == 0)
+                .map(|(_, n)| n.clone())
+                .collect();
+            if missing.is_empty() {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(20),
+                "no meshes spawned for {missing:?}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Orbit: holding D for a while must move the camera.
+        let before = camera(&mut app);
+        key(&mut app, KeyCode::KeyD, ButtonState::Pressed);
+        for _ in 0..20 {
+            app.update();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        key(&mut app, KeyCode::KeyD, ButtonState::Released);
+        app.update();
+        let after = camera(&mut app);
+        assert!(
+            before.translation.distance(after.translation) > 0.5,
+            "camera did not orbit: {before:?} -> {after:?}"
+        );
+    }
+}
