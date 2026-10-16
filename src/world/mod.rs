@@ -44,6 +44,27 @@ impl Plugin for CityPlugin {
     }
 }
 
+/// Build target, for settings WebGL2 cannot handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Native,
+    /// Browser build on WebGL2.
+    Web,
+}
+
+impl Target {
+    pub const CURRENT: Target = if cfg!(target_arch = "wasm32") {
+        Target::Web
+    } else {
+        Target::Native
+    };
+}
+
+/// Suggested camera far plane (m) for the web build, where chunks have no
+/// visibility range: just past the day fog's 9 km visibility, so frustum
+/// culling drops what the fog has already hidden.
+pub const WEB_CAMERA_FAR: f32 = 9_500.0;
+
 /// Render-cost knobs of the world, tuned on Austin's frame-rate measurements.
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct WorldRenderConfig {
@@ -55,29 +76,14 @@ pub struct WorldRenderConfig {
     pub shadow_cascades: usize,
     /// Building chunks fade out between these distances from the camera to
     /// the chunk centre (m); just short of where the day fog (9 km
-    /// visibility) has swallowed them anyway.
-    pub draw_fade: std::ops::Range<f32>,
+    /// visibility) has swallowed them anyway. `None` on the web, see
+    /// [`WorldRenderConfig::for_target`].
+    pub draw_fade: Option<std::ops::Range<f32>>,
 }
 
 impl Default for WorldRenderConfig {
     fn default() -> Self {
-        // A single 2048² cascade spreads its texels over the whole shadow
-        // distance: ~0.5 m per texel at 1 km, enough for building-sized
-        // shadows. Farther reach would make them visibly blocky, so the web
-        // build trades range for sharpness; native keeps 1.5 km in 3 cascades.
-        if cfg!(target_arch = "wasm32") {
-            Self {
-                shadow_distance: 1_000.0,
-                shadow_cascades: 1,
-                draw_fade: 7_500.0..8_000.0,
-            }
-        } else {
-            Self {
-                shadow_distance: 1_500.0,
-                shadow_cascades: 3,
-                draw_fade: 7_500.0..8_000.0,
-            }
-        }
+        Self::for_target(Target::CURRENT)
     }
 }
 
@@ -85,7 +91,39 @@ impl WorldRenderConfig {
     /// Nearest cascade boundary; must stay below `shadow_distance`.
     const FIRST_CASCADE: f32 = 150.0;
 
+    /// Defaults per target.
+    ///
+    /// Shadows: a single 2048² cascade spreads its texels over the whole
+    /// shadow distance, ~0.5 m per texel at 1 km, enough for building-sized
+    /// shadows; farther reach would make them blocky, so the web trades
+    /// range for sharpness. Native keeps 1.5 km in 3 cascades.
+    ///
+    /// Visibility ranges: none on the web. In Bevy 0.20 a crossfading
+    /// `VisibilityRange` makes the mesh vertex shader read the range table
+    /// (view binding 14). Without storage buffers (WebGL2) that table is a
+    /// `uniform array<vec4<f32>, 64>` (1024 bytes), but the bind group layout
+    /// declares a minimum binding size of 16 bytes, so pipeline creation
+    /// fails validation and the app quits. Use [`WEB_CAMERA_FAR`] instead.
+    pub fn for_target(target: Target) -> Self {
+        match target {
+            Target::Web => Self {
+                shadow_distance: 1_000.0,
+                shadow_cascades: 1,
+                draw_fade: None,
+            },
+            Target::Native => Self {
+                shadow_distance: 1_500.0,
+                shadow_cascades: 3,
+                draw_fade: Some(7_500.0..8_000.0),
+            },
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_for(Target::CURRENT)
+    }
+
+    pub fn validate_for(&self, target: Target) -> Result<(), String> {
         if !(self.shadow_distance.is_finite() && self.shadow_distance > Self::FIRST_CASCADE) {
             return Err(format!(
                 "shadow_distance must exceed {} m, got {}",
@@ -93,32 +131,41 @@ impl WorldRenderConfig {
                 self.shadow_distance
             ));
         }
-        let max_cascades = if cfg!(target_arch = "wasm32") { 1 } else { 4 };
+        let max_cascades = match target {
+            Target::Web => 1,
+            Target::Native => 4,
+        };
         if !(1..=max_cascades).contains(&self.shadow_cascades) {
             return Err(format!(
-                "shadow_cascades must be 1..={max_cascades} on this target, got {}",
+                "shadow_cascades must be 1..={max_cascades} on {target:?}, got {}",
                 self.shadow_cascades
             ));
         }
-        let (a, b) = (self.draw_fade.start, self.draw_fade.end);
-        if !(a.is_finite() && b.is_finite() && 0.0 < a && a <= b) {
-            return Err(format!(
-                "draw_fade must satisfy 0 < start <= end, got {a}..{b}"
-            ));
+        if let Some(fade) = &self.draw_fade {
+            if target == Target::Web {
+                return Err("draw_fade (VisibilityRange) crashes WebGL2 in Bevy 0.20; \
+                            use None on Web"
+                    .into());
+            }
+            let (a, b) = (fade.start, fade.end);
+            if !(a.is_finite() && b.is_finite() && 0.0 < a && a <= b) {
+                return Err(format!(
+                    "draw_fade must satisfy 0 < start <= end, got {a}..{b}"
+                ));
+            }
         }
         Ok(())
     }
 
-    /// Visibility range shared by all chunks (one entry in Bevy's range
-    /// table, well within WebGL2's limit of 64).
-    pub fn chunk_visibility(&self) -> VisibilityRange {
-        VisibilityRange {
+    /// Visibility range shared by all chunks, if this target uses one.
+    pub fn chunk_visibility(&self) -> Option<VisibilityRange> {
+        self.draw_fade.as_ref().map(|fade| VisibilityRange {
             start_margin: 0.0..0.0,
-            end_margin: self.draw_fade.clone(),
+            end_margin: fade.clone(),
             // Chunk meshes sit at the origin in world coordinates; measure
             // the distance to the chunk's bounds centre instead.
             use_aabb: true,
-        }
+        })
     }
 }
 
@@ -331,12 +378,14 @@ fn spawn_buildings(
             Surface::Residential => residential.clone(),
             Surface::Plain => plain.clone(),
         };
-        commands.spawn((
+        let mut entity = commands.spawn((
             Name::new(format!("City chunk {chunk:?} {surface:?}")),
             Mesh3d(meshes.add(data.into_mesh())),
             MeshMaterial3d(material),
-            visibility.clone(),
         ));
+        if let Some(range) = &visibility {
+            entity.insert(range.clone());
+        }
     }
 }
 

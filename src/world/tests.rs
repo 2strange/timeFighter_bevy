@@ -3,7 +3,7 @@
 use bevy::{math::Rect, prelude::*};
 
 use super::{
-    CityPlugin, WorldRenderConfig,
+    CityPlugin, Target, WEB_CAMERA_FAR, WorldRenderConfig,
     layout::{
         Bridge, BuildingKind, CityConfig, CityLayout, MAX_LINES_PER_SIDE, RiverConfig, Roof,
         StreetClass, Zone, street_lines,
@@ -532,50 +532,70 @@ fn generate_panics_with_the_reason() {
 
 #[test]
 fn render_config_is_valid_and_rejects_nonsense() {
-    let cfg = WorldRenderConfig::default();
-    assert_eq!(cfg.validate(), Ok(()));
-    assert!(cfg.shadow_distance <= 1_500.0);
-    assert!(
-        WorldRenderConfig {
-            shadow_cascades: 0,
-            ..cfg.clone()
+    for target in [Target::Native, Target::Web] {
+        let cfg = WorldRenderConfig::for_target(target);
+        assert_eq!(cfg.validate_for(target), Ok(()), "{target:?}");
+        assert!(cfg.shadow_distance <= 1_500.0);
+        let bad = [
+            WorldRenderConfig {
+                shadow_distance: 100.0,
+                ..cfg.clone()
+            },
+            WorldRenderConfig {
+                shadow_cascades: 0,
+                ..cfg.clone()
+            },
+            WorldRenderConfig {
+                shadow_cascades: 5,
+                ..cfg.clone()
+            },
+        ];
+        for b in bad {
+            assert!(b.validate_for(target).is_err(), "{target:?}: {b:?}");
         }
-        .validate()
-        .is_err()
-    );
-    assert!(
-        WorldRenderConfig {
-            shadow_cascades: 5,
-            ..cfg.clone()
-        }
-        .validate()
-        .is_err()
-    );
+    }
+    let native = WorldRenderConfig::for_target(Target::Native);
+    assert_eq!(native, WorldRenderConfig::default());
     // Chunks must fade out before the day fog (9 km visibility) ends.
-    assert!(cfg.draw_fade.end <= 9_000.0);
-    let range = cfg.chunk_visibility();
-    assert!(range.use_aabb);
+    let fade = native.draw_fade.clone().unwrap();
+    assert!(fade.end <= 9_000.0);
+    assert!(native.chunk_visibility().unwrap().use_aabb);
     assert!(
         WorldRenderConfig {
-            shadow_distance: 100.0,
-            ..cfg.clone()
+            draw_fade: Some(8_000.0..7_000.0),
+            ..native
         }
-        .validate()
-        .is_err()
-    );
-    assert!(
-        WorldRenderConfig {
-            draw_fade: 8_000.0..7_000.0,
-            ..cfg
-        }
-        .validate()
+        .validate_for(Target::Native)
         .is_err()
     );
 }
 
-/// Size of the generated city; fails when the city outgrows the render
-/// budget (counts, not measured frame time; that happens on Austin's Mac).
-/// Run with `--nocapture` to see the numbers.
+#[test]
+fn web_config_has_no_visibility_range_and_one_cascade() {
+    // Crossfading VisibilityRange crashes WebGL2 in Bevy 0.20 (binding 14
+    // validation error); one cascade is all WebGL2 renders.
+    let web = WorldRenderConfig::for_target(Target::Web);
+    assert_eq!(web.draw_fade, None);
+    assert!(web.chunk_visibility().is_none());
+    assert_eq!(web.shadow_cascades, 1);
+    let with_range = WorldRenderConfig {
+        draw_fade: Some(7_500.0..8_000.0),
+        ..web.clone()
+    };
+    let err = with_range.validate_for(Target::Web).unwrap_err();
+    assert!(err.contains("VisibilityRange"), "{err}");
+    assert!(
+        WorldRenderConfig {
+            shadow_cascades: 3,
+            ..web
+        }
+        .validate_for(Target::Web)
+        .is_err()
+    );
+    // Suggested far plane sits just behind the day fog's visibility.
+    assert!((9_000.0..10_000.0).contains(&WEB_CAMERA_FAR));
+}
+
 #[test]
 fn city_stays_within_render_budget() {
     let layout = city();
