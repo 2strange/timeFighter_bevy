@@ -4,7 +4,7 @@ use bevy::{math::Rect, prelude::*};
 
 use super::{
     CityPlugin, WorldRenderConfig,
-    layout::{BuildingKind, CityConfig, CityLayout, Roof, StreetClass, Zone},
+    layout::{Bridge, BuildingKind, CityConfig, CityLayout, RiverConfig, Roof, StreetClass, Zone},
     meshes::{self, Surface},
 };
 
@@ -239,6 +239,9 @@ fn farms_lie_outside_the_city_and_off_the_roads() {
             streets.iter().all(|s| r.intersect(*s).is_empty()),
             "farm {r:?} on a road"
         );
+        for w in layout.river_rects() {
+            assert!(r.intersect(w).is_empty(), "farm {r:?} in the river");
+        }
         for b in layout.blocks.iter().filter(|b| b.zone.is_urban()) {
             assert!(
                 r.intersect(b.rect).is_empty(),
@@ -313,8 +316,17 @@ fn every_paved_rect_shows_asphalt_lanes() {
         } else {
             Vec2::new(along, lane(1, i))
         };
-        assert_eq!(color_at(p), meshes::ASPHALT, "{axis}/{i} segment at {p}");
         checked += 1;
+        if layout.on_river(p) {
+            // Paved across the river: the street runs on a bridge above.
+            let deck = |b: &Bridge| {
+                let d = b.parts[0];
+                Rect::new(d.min().x, d.min().z, d.max().x, d.max().z).contains(p)
+            };
+            assert!(layout.bridges.iter().any(deck), "no bridge at {p}");
+            continue;
+        }
+        assert_eq!(color_at(p), meshes::ASPHALT, "{axis}/{i} segment at {p}");
     }
     for i in 0..layout.lines[0].len() {
         for k in 0..layout.lines[1].len() {
@@ -335,6 +347,7 @@ fn building_faces_point_outwards() {
         for part in &b.parts {
             let mut single = CityLayout {
                 buildings: Vec::new(),
+                bridges: Vec::new(),
                 ..layout.clone()
             };
             single.buildings.push(super::Building {
@@ -389,7 +402,7 @@ fn city_plugin_inserts_the_layout_headless() {
 /// Fixed fingerprint of the default city. If a deliberate generator change
 /// moves it, update the constant; if it differs between native and WASM,
 /// the generator is not platform-independent.
-const DEFAULT_CITY_FINGERPRINT: u64 = 0xee8b_16fc_da30_86e2;
+const DEFAULT_CITY_FINGERPRINT: u64 = 0x4e5a_c39e_0a65_fe94;
 
 #[test]
 fn default_city_matches_golden_fingerprint() {
@@ -438,7 +451,7 @@ fn invalid_configs_are_rejected_with_a_reason() {
         (
             "multiple of patch_size",
             CityConfig {
-                patch_size: 300.0,
+                patch_size: 700.0,
                 ..base.clone()
             },
         ),
@@ -549,13 +562,220 @@ fn city_stays_within_render_budget() {
         ground.positions.len(),
     );
 
-    assert!(layout.buildings.len() <= 8_000, "too many buildings");
-    assert!(chunks.len() <= 128, "too many building meshes");
-    assert!(tris <= 110_000, "too many building triangles");
-    assert!(verts <= 230_000, "too many building vertices");
+    println!(
+        "river cells {}, bridges {}, farms {}",
+        layout.river.len(),
+        layout.bridges.len(),
+        layout.farms.len()
+    );
+    // Phase 1 measured smooth on Austin's Mac at ~7k buildings / ~136k
+    // triangles; the enlarged city (~12k / ~225k) keeps ~10 % headroom.
+    assert!(layout.buildings.len() <= 14_000, "too many buildings");
+    assert!(chunks.len() <= 224, "too many building meshes");
+    assert!(tris <= 190_000, "too many building triangles");
+    assert!(verts <= 400_000, "too many building vertices");
     assert!(
-        ground.triangle_count() <= 45_000,
+        ground.triangle_count() <= 64_000,
         "too many ground triangles"
     );
-    assert!(ground.positions.len() <= 90_000, "too many ground vertices");
+    assert!(
+        ground.positions.len() <= 128_000,
+        "too many ground vertices"
+    );
+}
+
+#[test]
+fn river_forks_and_keeps_buildings_out() {
+    let layout = city();
+    let river = layout.river_rects();
+    assert!(!layout.river.is_empty());
+    // Tuning-fork shape: one stem reaching the south edge, two arms the north edge.
+    let nz = layout.lines[1].len();
+    let south: Vec<_> = layout.river.iter().filter(|c| c.1 == nz).collect();
+    let north: Vec<_> = layout.river.iter().filter(|c| c.1 == 0).collect();
+    assert_eq!((south.len(), north.len()), (1, 2), "{south:?} / {north:?}");
+    assert!(north[0].0 < south[0].0 && south[0].0 < north[1].0);
+
+    for b in &layout.buildings {
+        for p in &b.parts {
+            let fp = footprint(p.min(), p.max());
+            for w in &river {
+                assert!(
+                    fp.intersect(*w).is_empty(),
+                    "{:?} at {:?} stands in the river",
+                    b.kind,
+                    p.center
+                );
+            }
+        }
+    }
+    assert!(
+        layout
+            .blocks
+            .iter()
+            .filter(|b| b.zone == Zone::Water)
+            .count()
+            > 20
+    );
+}
+
+#[test]
+fn every_paved_street_across_the_river_has_one_bridge() {
+    let layout = city();
+    let cfg = layout.config.river.clone().unwrap();
+    let crossings: Vec<_> = layout.river_crossings().collect();
+    let paved: Vec<_> = crossings
+        .iter()
+        .filter(|&&(a, i, g)| layout.segment_active(a, i, g))
+        .collect();
+    assert!(paved.len() >= 20, "only {} bridges", paved.len());
+    assert_eq!(paved.len(), layout.bridges.len());
+    for &&(axis, i, g) in &paved {
+        let n = layout
+            .bridges
+            .iter()
+            .filter(|b| (b.axis, b.line, b.gap) == (axis, i, g))
+            .count();
+        assert_eq!(n, 1, "line {axis}/{i} over gap {g}");
+        // A street paved on one bank only ends at the quay instead.
+        let line = layout.lines[axis][i];
+        assert!(
+            line.class == StreetClass::Boulevard
+                || (layout.segment_active(axis, i, g - 1) && layout.segment_active(axis, i, g + 1))
+        );
+    }
+    for b in &layout.bridges {
+        let deck = b.parts[0];
+        assert!(deck.underside);
+        assert!(
+            deck.min().y >= cfg.bridge_clearance - 1e-3,
+            "too low to fly under"
+        );
+        // The deck spans the whole river gap, water and quays.
+        let span = layout.gap_range(1 - b.axis, b.gap);
+        let (lo, hi) = if b.axis == 0 {
+            (deck.min().z, deck.max().z)
+        } else {
+            (deck.min().x, deck.max().x)
+        };
+        assert!((lo - span.0).abs() < 1e-3 && (hi - span.1).abs() < 1e-3);
+        // Under the deck: open water between the abutments.
+        let under = Vec2::new(deck.center.x, deck.center.z);
+        assert!(layout.on_river(under));
+        for p in &b.parts {
+            assert!(p.half_size.min_element() > 0.0);
+            assert!(p.min().y >= -1e-3);
+        }
+    }
+}
+
+#[test]
+fn river_has_water_between_quays() {
+    let layout = city();
+    let quads = meshes::ground_quads(&layout);
+    let water: f64 = quads
+        .iter()
+        .filter(|q| q.is_water())
+        .map(|q| f64::from(q.rect.width()) * f64::from(q.rect.height()))
+        .sum();
+    assert!(water > 5.0e6, "only {water} m² of water");
+    let quay = layout.config.river.as_ref().unwrap().quay_width;
+    // Across the stem: quay, water, quay.
+    let &(gx, gz) = layout.river.iter().max_by_key(|c| c.1).unwrap();
+    let (x0, x1) = layout.gap_range(0, gx);
+    let z = layout.gap_range(1, gz).0 + 50.0;
+    let color_at = |x: f32| {
+        quads
+            .iter()
+            .find(|q| q.rect.contains(Vec2::new(x, z)))
+            .unwrap()
+            .color
+    };
+    assert!(color_at(x0 + quay / 2.0) != meshes::WATER);
+    assert_eq!(color_at((x0 + x1) / 2.0), meshes::WATER);
+    assert!(color_at(x1 - quay / 2.0) != meshes::WATER);
+}
+
+#[test]
+fn bridge_faces_point_outwards() {
+    let layout = city();
+    for b in layout.bridges.iter().take(10) {
+        for part in &b.parts {
+            let single = CityLayout {
+                buildings: Vec::new(),
+                bridges: vec![Bridge {
+                    parts: vec![*part],
+                    ..b.clone()
+                }],
+                ..layout.clone()
+            };
+            for data in meshes::building_meshes(&single).values() {
+                for t in data.indices.chunks(3) {
+                    let [p0, p1, p2] = [0, 1, 2].map(|k| Vec3::from(data.positions[t[k] as usize]));
+                    let n = (p1 - p0).cross(p2 - p0);
+                    assert!(n.dot((p0 + p1 + p2) / 3.0 - part.center) > 0.0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_city_without_river_is_valid() {
+    let layout = CityLayout::generate(&CityConfig {
+        river: None,
+        ..default()
+    });
+    assert!(layout.river.is_empty() && layout.bridges.is_empty());
+    assert!(layout.blocks.iter().all(|b| b.zone != Zone::Water));
+}
+
+#[test]
+fn invalid_river_configs_are_rejected() {
+    let river = RiverConfig::default();
+    let cases = [
+        (
+            "leave no water",
+            RiverConfig {
+                quay_width: 60.0,
+                ..river.clone()
+            },
+        ),
+        (
+            "west_x < stem_x",
+            RiverConfig {
+                west_x: 2_000.0,
+                ..river.clone()
+            },
+        ),
+        (
+            "outside the street grid",
+            RiverConfig {
+                fork_z: -9_000.0,
+                ..river.clone()
+            },
+        ),
+        (
+            "bridge_clearance",
+            RiverConfig {
+                bridge_clearance: 0.0,
+                ..river.clone()
+            },
+        ),
+        (
+            "one block between",
+            RiverConfig {
+                stem_x: -1_700.0,
+                ..river.clone()
+            },
+        ),
+    ];
+    for (reason, river) in cases {
+        let cfg = CityConfig {
+            river: Some(river),
+            ..default()
+        };
+        let err = CityLayout::try_generate(&cfg).expect_err(reason);
+        assert!(err.contains(reason), "expected '{reason}' in: {err}");
+    }
 }

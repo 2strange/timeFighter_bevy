@@ -2,8 +2,8 @@
 //!
 //! The city is generated as plain data first ([`CityLayout`], seeded and
 //! deterministic) and then rendered from it: the ground is one flat mesh
-//! with streets painted in as vertex colours, buildings are merged per
-//! 800 m chunk and facade material, so the whole city takes a few dozen draw
+//! with streets painted in as vertex colours (plus one for the river),
+//! buildings and bridges are merged per 1 km chunk and facade material, so the whole city takes a few dozen draw
 //! calls and is frustum-culled chunk by chunk. Each building also carries
 //! its collision boxes for the physics phase.
 //!
@@ -11,7 +11,7 @@
 //! scaled per building would stretch the window raster (UVs are per mesh,
 //! not per instance), and fixing that needs a custom world-space shader.
 //! Merged chunks keep metre-true UVs with the stock `StandardMaterial`, give
-//! a similar draw-call count (~110 meshes, 3 materials) and cull per chunk.
+//! a similar draw-call count (a few hundred meshes, 3 materials) and cull per chunk.
 //! Trade-off: removing a destroyed building means rebuilding its chunk mesh
 //! (about 70 buildings, milliseconds).
 
@@ -247,17 +247,28 @@ fn spawn_ground(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let quads = meshes::ground_quads(&layout);
-    commands.spawn((
-        Name::new("Ground"),
-        Mesh3d(meshes.add(meshes::ground_mesh_data(&quads).into_mesh())),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            perceptual_roughness: 0.95,
-            ..default()
-        })),
-        // Flat ground never shadows anything.
-        NotShadowCaster,
-    ));
+    let (water, land): (Vec<_>, Vec<_>) = meshes::ground_quads(&layout)
+        .into_iter()
+        .partition(meshes::GroundQuad::is_water);
+    // Land and water are disjoint quads in the same plane: two materials,
+    // still no overlap.
+    let surfaces = [("Ground", land, 0.95, 0.5), ("River", water, 0.12, 0.6)];
+    for (name, quads, roughness, reflectance) in surfaces {
+        if quads.is_empty() {
+            continue;
+        }
+        commands.spawn((
+            Name::new(name),
+            Mesh3d(meshes.add(meshes::ground_mesh_data(&quads).into_mesh())),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                perceptual_roughness: roughness,
+                reflectance,
+                ..default()
+            })),
+            // Flat ground never shadows anything.
+            NotShadowCaster,
+        ));
+    }
 }
 
 fn spawn_buildings(

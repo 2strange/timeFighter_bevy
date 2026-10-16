@@ -28,6 +28,8 @@ const LAWN: [f32; 3] = [0.40, 0.52, 0.30];
 const PARK: [f32; 3] = [0.30, 0.47, 0.24];
 pub const MEADOW: [f32; 3] = [0.42, 0.54, 0.30];
 const YARD: [f32; 3] = [0.55, 0.49, 0.40];
+pub const WATER: [f32; 3] = [0.20, 0.33, 0.42];
+const QUAY: [f32; 3] = [0.62, 0.60, 0.56];
 const PATCHES: [[f32; 3]; 4] = [
     [0.40, 0.52, 0.29],
     [0.45, 0.55, 0.31],
@@ -40,6 +42,13 @@ const PATCHES: [[f32; 3]; 4] = [
 pub struct GroundQuad {
     pub rect: Rect,
     pub color: [f32; 3],
+}
+
+impl GroundQuad {
+    /// Water gets its own, glossier material.
+    pub fn is_water(&self) -> bool {
+        self.color == WATER
+    }
 }
 
 /// What a ground cell shows.
@@ -55,11 +64,12 @@ enum Cell {
 
 /// Partitions the whole ground into non-overlapping coloured rectangles.
 ///
-/// Every street, block, field and patch edge becomes a breakpoint on its
-/// axis; each cell of the resulting grid is classified at its centre.
-/// Equal plain cells are merged along x, street cells are split into their
-/// cross-section strips. All quads lie in the plane y = 0, never on top of
-/// each other, so nothing can z-fight.
+/// Every street, quay and patch edge becomes a breakpoint on its axis; each
+/// cell of the resulting grid is classified at its centre. Equal plain
+/// cells are merged along x, street cells are split into their
+/// cross-section strips. Farm fields are cut in afterwards, so their edges
+/// do not split the whole map. All quads lie in the plane y = 0, never on
+/// top of each other, so nothing can z-fight.
 pub fn ground_quads(layout: &CityLayout) -> Vec<GroundQuad> {
     let cfg = &layout.config;
     let mut breaks: [Vec<f32>; 2] = [Vec::new(), Vec::new()];
@@ -73,14 +83,25 @@ pub fn ground_quads(layout: &CityLayout) -> Vec<GroundQuad> {
             out.extend([-edge, edge]);
             edge += cfg.patch_size;
         }
-        for farm in &layout.farms {
-            for r in std::iter::once(farm.yard).chain(farm.strips.iter().map(|s| s.0)) {
-                let (lo, hi) = if axis == 0 {
-                    (r.min.x, r.max.x)
-                } else {
-                    (r.min.y, r.max.y)
+        // Quay edges only where a water cell borders land on this axis, so
+        // a long river column does not split every row of the map.
+        if let Some(river) = &cfg.river {
+            for &(gx, gz) in &layout.river {
+                let (g, other) = if axis == 0 { (gx, gz) } else { (gz, gx) };
+                let water = |g: usize| {
+                    if axis == 0 {
+                        layout.is_water(g, other)
+                    } else {
+                        layout.is_water(other, g)
+                    }
                 };
-                out.extend([lo, hi]);
+                let (lo, hi) = layout.gap_range(axis, g);
+                if g > 0 && !water(g - 1) {
+                    out.push(lo + river.quay_width);
+                }
+                if g < layout.lines[axis].len() && !water(g + 1) {
+                    out.push(hi - river.quay_width);
+                }
             }
         }
         out.sort_by(f32::total_cmp);
@@ -127,17 +148,47 @@ pub fn ground_quads(layout: &CityLayout) -> Vec<GroundQuad> {
             });
         }
     }
+
+    for farm in &layout.farms {
+        let fields = farm.strips.iter().copied();
+        for (rect, color) in std::iter::once((farm.yard, YARD)).chain(fields) {
+            quads = cut_in(quads, rect, color);
+        }
+    }
     quads
 }
 
+/// Replaces the area of `rect` in `quads` with `color`, splitting the quads
+/// it touches into the parts outside it.
+fn cut_in(quads: Vec<GroundQuad>, rect: Rect, color: [f32; 3]) -> Vec<GroundQuad> {
+    let mut out = Vec::with_capacity(quads.len() + 8);
+    for q in quads {
+        let hit = q.rect.intersect(rect);
+        if hit.is_empty() {
+            out.push(q);
+            continue;
+        }
+        let r = q.rect;
+        let pieces = [
+            Rect::new(r.min.x, r.min.y, r.max.x, hit.min.y),
+            Rect::new(r.min.x, hit.max.y, r.max.x, r.max.y),
+            Rect::new(r.min.x, hit.min.y, hit.min.x, hit.max.y),
+            Rect::new(hit.max.x, hit.min.y, r.max.x, hit.max.y),
+        ];
+        for piece in pieces.into_iter().filter(|p| !p.is_empty()) {
+            out.push(GroundQuad {
+                rect: piece,
+                color: q.color,
+            });
+        }
+        out.push(GroundQuad { rect: hit, color });
+    }
+    out
+}
+
 fn classify(layout: &CityLayout, p: Vec2) -> Cell {
-    for farm in &layout.farms {
-        if farm.yard.contains(p) {
-            return Cell::Plain(YARD);
-        }
-        if let Some((_, color)) = farm.strips.iter().find(|(r, _)| r.contains(p)) {
-            return Cell::Plain(*color);
-        }
+    if layout.on_river(p) {
+        return Cell::Plain(river_surface(layout, p));
     }
     match (layout.slot(0, p.x), layout.slot(1, p.y)) {
         (Slot::Line(i), Slot::Line(k)) => {
@@ -165,10 +216,22 @@ fn classify(layout: &CityLayout, p: Vec2) -> Cell {
                 Zone::Midtown => COURTYARD,
                 Zone::Suburb => LAWN,
                 Zone::Park => PARK,
-                Zone::Rural => countryside(layout, p),
+                Zone::Rural | Zone::Water => countryside(layout, p),
             })
         }
         _ => Cell::Plain(countryside(layout, p)),
+    }
+}
+
+/// Quay along the banks, water in between. A point is quay when land lies
+/// within one quay width of it.
+fn river_surface(layout: &CityLayout, p: Vec2) -> [f32; 3] {
+    let quay = layout.config.river.as_ref().map_or(0.0, |r| r.quay_width);
+    let probes = [Vec2::X, Vec2::NEG_X, Vec2::Y, Vec2::NEG_Y].map(|d| p + d * quay);
+    if probes.iter().all(|&q| layout.on_river(q)) {
+        WATER
+    } else {
+        QUAY
     }
 }
 
@@ -319,11 +382,19 @@ pub type ChunkMeshes = BTreeMap<((i32, i32), Surface), MeshData>;
 
 pub fn building_meshes(layout: &CityLayout) -> ChunkMeshes {
     let mut chunks: BTreeMap<(i32, i32), [MeshData; 3]> = BTreeMap::new();
-    for building in &layout.buildings {
-        let (lo, hi) = building.bounds();
+    let structures = layout
+        .buildings
+        .iter()
+        .map(|b| &b.parts)
+        .chain(layout.bridges.iter().map(|b| &b.parts));
+    for parts in structures {
+        let (lo, hi) = parts.iter().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(lo, hi), p| (lo.min(p.min()), hi.max(p.max())),
+        );
         let chunk = ((lo.xz() + hi.xz()) / 2.0 / layout.config.chunk_size).floor();
         let meshes = chunks.entry((chunk.x as i32, chunk.y as i32)).or_default();
-        for part in &building.parts {
+        for part in parts {
             add_part(part, meshes);
         }
     }
@@ -404,6 +475,20 @@ fn add_part(part: &Part, meshes: &mut [MeshData; 3]) {
             ],
             &[Vec2::ZERO; 4],
             part.roof_color,
+        );
+    }
+
+    if part.underside {
+        // Counter-clockwise seen from below: the normal points down.
+        meshes[Surface::Plain as usize].polygon(
+            &[
+                Vec3::new(lo.x, lo.y, lo.z),
+                Vec3::new(hi.x, lo.y, lo.z),
+                Vec3::new(hi.x, lo.y, hi.z),
+                Vec3::new(lo.x, lo.y, hi.z),
+            ],
+            &[Vec2::ZERO; 4],
+            part.wall_color,
         );
     }
 }

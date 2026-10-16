@@ -15,7 +15,7 @@
 use bevy::{math::Rect, prelude::*};
 
 use super::{
-    buildings::{farm_at, farm_buildings, fill_block},
+    buildings::{bridge_parts, farm_at, farm_buildings, fill_block},
     rng::Rng,
 };
 
@@ -66,6 +66,43 @@ pub struct CityConfig {
     pub patch_size: f32,
     /// Edge length of a render chunk (buildings are merged per chunk).
     pub chunk_size: f32,
+    /// Forked river through the city, `None` for none.
+    pub river: Option<RiverConfig>,
+}
+
+/// A canal-like river shaped like a tuning fork: the stem comes in from the
+/// south (+Z) along one block column, forks along one block row, and both
+/// arms leave to the north (−Z) along their own columns. It follows the
+/// street grid, so the banks are quays and every crossing street is a
+/// straight bridge. Positions pick the grid gap that contains them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RiverConfig {
+    pub stem_x: f32,
+    pub fork_z: f32,
+    pub west_x: f32,
+    pub east_x: f32,
+    /// Paved quay along each bank, inside the river's block gap.
+    pub quay_width: f32,
+    /// Free height between water and bridge deck: enough to fly under.
+    pub bridge_clearance: f32,
+    pub deck_thickness: f32,
+}
+
+impl Default for RiverConfig {
+    // Stem east of downtown, fork north of it, west arm through midtown,
+    // east arm through the suburbs. Seen from the spawn point (0, 500, 800)
+    // heading −Z, the fork lies ahead and the stem to the right.
+    fn default() -> Self {
+        Self {
+            stem_x: 1_300.0,
+            fork_z: -1_300.0,
+            west_x: -1_800.0,
+            east_x: 3_000.0,
+            quay_width: 10.0,
+            bridge_clearance: 20.0,
+            deck_thickness: 3.0,
+        }
+    }
 }
 
 impl Default for CityConfig {
@@ -80,8 +117,8 @@ impl Default for CityConfig {
     fn default() -> Self {
         Self {
             seed: 0x7146_f16e,
-            grid_half_extent: 3_000.0,
-            city_radius: 2_400.0,
+            grid_half_extent: 4_600.0,
+            city_radius: 4_000.0,
             block_min: 110.0,
             block_max: 190.0,
             street_width: 28.0,
@@ -91,16 +128,19 @@ impl Default for CityConfig {
             sidewalk_width: 6.0,
             setback: 3.0,
             building_gap: 6.0,
-            downtown_radius: 0.26,
-            midtown_radius: 0.52,
+            // Downtown 880 m (was 624 m), midtown to 2.4 km (was 1.25 km),
+            // suburbs to 4 km (was 2.4 km), farmland to ~6.4 km.
+            downtown_radius: 0.22,
+            midtown_radius: 0.6,
             zone_noise: 0.06,
             tower_height_center: 320.0,
             tower_height_edge: 110.0,
-            farm_count: 7,
+            farm_count: 20,
             ground_half_extent: 20_000.0,
-            inner_half_extent: 4_000.0,
+            inner_half_extent: 7_500.0,
             patch_size: 500.0,
-            chunk_size: 800.0,
+            chunk_size: 1_000.0,
+            river: Some(RiverConfig::default()),
         }
     }
 }
@@ -185,6 +225,31 @@ impl CityConfig {
                 self.inner_half_extent, self.patch_size
             ));
         }
+        if let Some(river) = &self.river {
+            for (name, v) in [
+                ("quay_width", river.quay_width),
+                ("bridge_clearance", river.bridge_clearance),
+                ("deck_thickness", river.deck_thickness),
+            ] {
+                if !(v.is_finite() && v > 0.0) {
+                    return Err(format!("river {name} must be a positive number, got {v}"));
+                }
+            }
+            if 2.0 * river.quay_width >= self.block_min {
+                return Err(format!(
+                    "river quays ({} m each) leave no water in a {} m block",
+                    river.quay_width, self.block_min
+                ));
+            }
+            if !(river.west_x < river.stem_x && river.stem_x < river.east_x) {
+                return Err("river arms must satisfy west_x < stem_x < east_x".into());
+            }
+            for v in [river.stem_x, river.fork_z, river.west_x, river.east_x] {
+                if !(v.is_finite() && v.abs() < self.grid_half_extent - self.block_max) {
+                    return Err(format!("river position {v} lies outside the street grid"));
+                }
+            }
+        }
         // The ground mesh gets a breakpoint per patch edge; keep it bounded.
         if (self.ground_half_extent - self.inner_half_extent) / self.patch_size > 200.0 {
             return Err(format!(
@@ -249,12 +314,14 @@ pub enum Zone {
     Suburb,
     Park,
     Rural,
+    /// Block taken by the river.
+    Water,
 }
 
 impl Zone {
     /// Built-up blocks get their surrounding streets paved.
     pub fn is_urban(self) -> bool {
-        !matches!(self, Zone::Rural)
+        !matches!(self, Zone::Rural | Zone::Water)
     }
 }
 
@@ -298,6 +365,8 @@ pub struct Part {
     /// sRGB colours.
     pub wall_color: [f32; 3],
     pub roof_color: [f32; 3],
+    /// Draw the bottom face too (bridge decks seen from below).
+    pub underside: bool,
 }
 
 impl Part {
@@ -350,6 +419,17 @@ impl Building {
     }
 }
 
+/// A street bridge over the river: deck, parapets and two abutments on the
+/// quays. Like buildings, the parts double as collision boxes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bridge {
+    /// The street it carries: line `line` on `axis` over gap `gap`.
+    pub axis: usize,
+    pub line: usize,
+    pub gap: usize,
+    pub parts: Vec<Part>,
+}
+
 /// Farmland at the city edge: a yard with buildings next to a striped field.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Farm {
@@ -384,6 +464,11 @@ pub struct CityLayout {
     pub blocks: Vec<Block>,
     pub buildings: Vec<Building>,
     pub farms: Vec<Farm>,
+    /// Gap cells `(gx, gz)` covered by water, sorted. Gap cell `(gx, gz)`
+    /// lies between x-lines `gx - 1`, `gx` and z-lines `gz - 1`, `gz`; the
+    /// cells at index 0 and n reach to the ground edge.
+    pub river: Vec<(usize, usize)>,
+    pub bridges: Vec<Bridge>,
 }
 
 impl CityLayout {
@@ -404,7 +489,12 @@ impl CityLayout {
             blocks: Vec::new(),
             buildings: Vec::new(),
             farms: Vec::new(),
+            river: Vec::new(),
+            bridges: Vec::new(),
         };
+        if let Some(river) = &config.river {
+            layout.river = layout.river_cells(river)?;
+        }
 
         let (nx, nz) = layout.block_counts();
         for iz in 0..nz {
@@ -412,7 +502,11 @@ impl CityLayout {
                 let (x, z) = (&layout.lines[0], &layout.lines[1]);
                 let rect = Rect::new(x[ix].max(), z[iz].max(), x[ix + 1].min(), z[iz + 1].min());
                 let mut rng = Rng::stream(config.seed, 3, ix as i64, iz as i64);
-                let zone = zone_at(config, rect.center(), &mut rng);
+                let zone = if layout.is_water(ix + 1, iz + 1) {
+                    Zone::Water
+                } else {
+                    zone_at(config, rect.center(), &mut rng)
+                };
                 layout.blocks.push(Block { rect, zone });
             }
         }
@@ -422,8 +516,117 @@ impl CityLayout {
             fill_block(config, block, &mut rng, &mut layout.buildings);
         }
 
+        if let Some(river) = &config.river {
+            layout.bridges = layout
+                .river_crossings()
+                .filter(|&(axis, i, g)| layout.segment_active(axis, i, g))
+                .map(|(axis, i, g)| {
+                    let line = layout.lines[axis][i];
+                    let span = layout.gap_range(1 - axis, g);
+                    Bridge {
+                        axis,
+                        line: i,
+                        gap: g,
+                        parts: bridge_parts(axis, (line.min(), line.max()), span, river),
+                    }
+                })
+                .collect();
+        }
+
         layout.place_farms();
         Ok(layout)
+    }
+
+    /// Water cells of the river described by `r`.
+    fn river_cells(&self, r: &RiverConfig) -> Result<Vec<(usize, usize)>, String> {
+        let gap_of = |axis: usize, v: f32| {
+            let g = match self.slot(axis, v) {
+                Slot::Gap(g) => g,
+                Slot::Line(i) => i + 1,
+            };
+            if g == 0 || g >= self.lines[axis].len() {
+                return Err(format!("river position {v} is not between two streets"));
+            }
+            Ok(g)
+        };
+        let (west, stem, east) = (
+            gap_of(0, r.west_x)?,
+            gap_of(0, r.stem_x)?,
+            gap_of(0, r.east_x)?,
+        );
+        let fork = gap_of(1, r.fork_z)?;
+        // Neighbouring columns would merge into one wide lake at the fork.
+        if west + 2 > stem || stem + 2 > east {
+            return Err("river arms need at least one block between them".into());
+        }
+        let nz = self.lines[1].len();
+        let mut cells: Vec<(usize, usize)> = (fork..=nz)
+            .map(|gz| (stem, gz))
+            .chain((west..=east).map(|gx| (gx, fork)))
+            .chain((0..=fork).flat_map(|gz| [(west, gz), (east, gz)]))
+            .collect();
+        cells.sort_unstable();
+        cells.dedup();
+        Ok(cells)
+    }
+
+    /// Whether gap cell `(gx, gz)` is river.
+    pub fn is_water(&self, gx: usize, gz: usize) -> bool {
+        self.river.binary_search(&(gx, gz)).is_ok()
+    }
+
+    /// The gap cells on both sides of line `i` on `axis` within gap `g` of
+    /// the other axis.
+    fn beside(axis: usize, i: usize, g: usize) -> [(usize, usize); 2] {
+        if axis == 0 {
+            [(i, g), (i + 1, g)]
+        } else {
+            [(g, i), (g, i + 1)]
+        }
+    }
+
+    /// Whether line `i` on `axis` crosses the river within gap `g`.
+    pub fn crosses_river(&self, axis: usize, i: usize, g: usize) -> bool {
+        Self::beside(axis, i, g)
+            .iter()
+            .all(|&(gx, gz)| self.is_water(gx, gz))
+    }
+
+    /// Every `(axis, line, gap)` where a street line crosses the river,
+    /// paved or not.
+    pub fn river_crossings(&self) -> impl Iterator<Item = (usize, usize, usize)> + '_ {
+        self.river.iter().flat_map(move |&(gx, gz)| {
+            let east =
+                (gx < self.lines[0].len() && self.is_water(gx + 1, gz)).then_some((0, gx, gz));
+            let south =
+                (gz < self.lines[1].len() && self.is_water(gx, gz + 1)).then_some((1, gz, gx));
+            east.into_iter().chain(south)
+        })
+    }
+
+    /// Ground covered by the river (x, z): water cells and the corridors of
+    /// the lines crossing it, quays included.
+    pub fn river_rects(&self) -> Vec<Rect> {
+        let cells = self.river.iter().map(|&(gx, gz)| {
+            let (x0, x1) = self.gap_range(0, gx);
+            let (z0, z1) = self.gap_range(1, gz);
+            Rect::new(x0, z0, x1, z1)
+        });
+        let crossings = self.river_crossings().map(|(axis, i, g)| {
+            let line = self.lines[axis][i];
+            axis_rect(axis, (line.min(), line.max()), self.gap_range(1 - axis, g))
+        });
+        cells.chain(crossings).collect()
+    }
+
+    /// Whether `p` lies on the river (water or quay).
+    pub fn on_river(&self, p: Vec2) -> bool {
+        match (self.slot(0, p.x), self.slot(1, p.y)) {
+            (Slot::Gap(gx), Slot::Gap(gz)) => self.is_water(gx, gz),
+            (Slot::Line(i), Slot::Gap(g)) => self.crosses_river(0, i, g),
+            (Slot::Gap(g), Slot::Line(k)) => self.crosses_river(1, k, g),
+            (Slot::Line(_), Slot::Line(_)) => false,
+        }
     }
 
     /// Number of blocks along x and z.
@@ -462,7 +665,17 @@ impl CityLayout {
     /// Whether line `i` on `axis` is paved across gap `g` of the other axis.
     /// Boulevards run through the whole map; other streets only where they
     /// touch a built-up block.
+    /// Across the river a street is paved (as a bridge) when it is paved on
+    /// both banks.
     pub fn segment_active(&self, axis: usize, i: usize, g: usize) -> bool {
+        if self.crosses_river(axis, i, g) {
+            return self.lines[axis][i].class == StreetClass::Boulevard
+                || (g > 0 && self.bank_active(axis, i, g - 1) && self.bank_active(axis, i, g + 1));
+        }
+        self.bank_active(axis, i, g)
+    }
+
+    fn bank_active(&self, axis: usize, i: usize, g: usize) -> bool {
         if self.lines[axis][i].class == StreetClass::Boulevard {
             return true;
         }
@@ -558,6 +771,22 @@ impl CityLayout {
                 }
                 h.f32s(&p.wall_color);
                 h.f32s(&p.roof_color);
+                h.usize(usize::from(p.underside));
+            }
+        }
+        h.usize(self.river.len());
+        for &(gx, gz) in &self.river {
+            h.usize(gx);
+            h.usize(gz);
+        }
+        h.usize(self.bridges.len());
+        for b in &self.bridges {
+            h.usize(b.axis);
+            h.usize(b.line);
+            h.usize(b.gap);
+            for p in &b.parts {
+                h.f32s(&p.center.to_array());
+                h.f32s(&p.half_size.to_array());
             }
         }
         h.usize(self.farms.len());
@@ -582,12 +811,13 @@ impl CityLayout {
             .filter(|b| b.zone.is_urban())
             .map(|b| b.rect)
             .collect();
+        let river = self.river_rects();
         let mut rng = Rng::stream(cfg.seed, 5, 0, 0);
         let reach = cfg.inner_half_extent - 450.0;
         let mut farms = Vec::new();
         let mut buildings = Vec::new();
 
-        for _ in 0..400 {
+        for _ in 0..4_000 {
             if farms.len() >= cfg.farm_count {
                 break;
             }
@@ -608,6 +838,7 @@ impl CityLayout {
                 || rect.min.y.abs().max(rect.max.y.abs()) > reach + 300.0
                 || !clear(&streets, 15.0)
                 || !clear(&urban, 30.0)
+                || !clear(&river, 30.0)
                 || !clear(&other_farms, 60.0)
             {
                 continue;

@@ -8,7 +8,7 @@ use bevy::{math::Rect, prelude::*};
 use super::{
     layout::{
         BAY, Block, Building, BuildingKind, CityConfig, Facade, Farm, OFFICE_FLOOR, Part,
-        RESIDENTIAL_FLOOR, Roof, Zone,
+        RESIDENTIAL_FLOOR, RiverConfig, Roof, Zone, axis_rect,
     },
     rng::Rng,
 };
@@ -94,6 +94,7 @@ fn part(
         roof: Roof::Flat,
         wall_color: wall,
         roof_color: roof,
+        underside: false,
     }
 }
 
@@ -168,8 +169,10 @@ pub(super) fn fill_block(cfg: &CityConfig, block: &Block, rng: &mut Rng, out: &m
         }
         Zone::Suburb => {
             let t = ((r - cfg.midtown_radius) / (1.0 - cfg.midtown_radius)).clamp(0.0, 1.0);
-            let occupancy = 0.9 - 0.45 * t;
-            for lot in lot_rects(Vec2::new(26.0, 32.0)) {
+            // Thinner and with bigger plots towards the countryside; this
+            // keeps the much wider suburb ring within the render budget.
+            let occupancy = 0.85 - 0.5 * t;
+            for lot in lot_rects(Vec2::new(26.0, 32.0) * (1.0 + 0.5 * t)) {
                 if !rng.chance(occupancy) {
                     continue;
                 }
@@ -209,7 +212,7 @@ pub(super) fn fill_block(cfg: &CityConfig, block: &Block, rng: &mut Rng, out: &m
                 });
             }
         }
-        Zone::Park | Zone::Rural => {}
+        Zone::Park | Zone::Rural | Zone::Water => {}
     }
 }
 
@@ -325,7 +328,7 @@ fn gabled(fp: Rect, walls: f32, facade: Facade, wall: [f32; 3], roof: [f32; 3]) 
 
 /// A farm (yard beside a field of three crop strips) centred near `center`.
 pub(super) fn farm_at(center: Vec2, rng: &mut Rng) -> Farm {
-    let field = Vec2::new(rng.range(220.0, 360.0), rng.range(160.0, 260.0)).round();
+    let field = Vec2::new(rng.range(360.0, 600.0), rng.range(260.0, 420.0)).round();
     let yard_size = 72.0;
     let field_rect = Rect::from_center_size(center, field);
     let yard_x = if rng.chance(0.5) {
@@ -339,11 +342,16 @@ pub(super) fn farm_at(center: Vec2, rng: &mut Rng) -> Farm {
         yard_x + yard_size,
         center.y + yard_size / 2.0,
     );
-    let strip = field.x / 3.0;
-    let strips = (0..3)
+    let n = 3 + rng.below(3) as usize;
+    let strip = field.x / n as f32;
+    let strips = (0..n)
         .map(|i| {
             let x0 = field_rect.min.x + strip * i as f32;
-            let x1 = if i == 2 { field_rect.max.x } else { x0 + strip };
+            let x1 = if i + 1 == n {
+                field_rect.max.x
+            } else {
+                x0 + strip
+            };
             (
                 Rect::new(x0, field_rect.min.y, x1, field_rect.max.y),
                 rng.pick(&CROPS),
@@ -400,4 +408,68 @@ pub(super) fn farm_buildings(yard: Rect, rng: &mut Rng, out: &mut Vec<Building>)
             FLAT_ROOFS[0],
         )],
     });
+}
+
+const CONCRETE: [f32; 3] = [0.66, 0.65, 0.62];
+const DECK_ASPHALT: [f32; 3] = [0.30, 0.31, 0.33];
+
+/// Bridge carrying a street corridor `across` (coordinates on `axis`) over
+/// the river gap `span` (coordinates on the other axis): a deck high enough
+/// to fly under, parapets, and abutments on the quays. No ramps; at arcade
+/// speed the abutments read as the bridgeheads.
+pub(super) fn bridge_parts(
+    axis: usize,
+    across: (f32, f32),
+    span: (f32, f32),
+    river: &RiverConfig,
+) -> Vec<Part> {
+    let rect = |a: (f32, f32), s: (f32, f32)| axis_rect(axis, a, s);
+    let quay = river.quay_width;
+    let deck_y = river.bridge_clearance;
+    let mut deck = part(
+        rect(across, span),
+        deck_y,
+        river.deck_thickness,
+        Facade::Plain,
+        CONCRETE,
+        DECK_ASPHALT,
+    );
+    deck.underside = true;
+    let top = deck_y + river.deck_thickness;
+    let parapet = 0.8;
+    vec![
+        deck,
+        part(
+            rect((across.0, across.0 + parapet), span),
+            top,
+            1.2,
+            Facade::Plain,
+            CONCRETE,
+            CONCRETE,
+        ),
+        part(
+            rect((across.1 - parapet, across.1), span),
+            top,
+            1.2,
+            Facade::Plain,
+            CONCRETE,
+            CONCRETE,
+        ),
+        part(
+            rect(across, (span.0, span.0 + quay)),
+            0.0,
+            deck_y,
+            Facade::Plain,
+            CONCRETE,
+            CONCRETE,
+        ),
+        part(
+            rect(across, (span.1 - quay, span.1)),
+            0.0,
+            deck_y,
+            Facade::Plain,
+            CONCRETE,
+            CONCRETE,
+        ),
+    ]
 }
