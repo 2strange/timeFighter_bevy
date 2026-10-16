@@ -76,8 +76,8 @@ impl CustomField {
         CustomField::CityLoss,
     ];
 
-    /// Only meaningful with bombers (Protect).
-    fn protect_only(self) -> bool {
+    /// Only meaningful with bombers (Protect, Battle).
+    fn bombers_only(self) -> bool {
         matches!(
             self,
             CustomField::BomberWaves
@@ -300,10 +300,10 @@ impl MenuSelection {
             },
         ];
         if self.is_custom() {
-            let protect = self.mode == MenuMode::Protect;
+            let bombers = matches!(self.mode, MenuMode::Protect | MenuMode::Battle);
             let fields = CustomField::ALL
                 .iter()
-                .filter(|f| protect || !f.protect_only());
+                .filter(|f| bombers || !f.bombers_only());
             rows.extend(fields.map(|&field| {
                 Row {
                     id: RowId::Custom(field),
@@ -351,7 +351,10 @@ impl MenuSelection {
             RowId::Difficulty => {
                 if index < LEVELS {
                     if index == CUSTOM_LEVEL && !self.is_custom() && !self.custom_edited {
-                        self.custom = self.difficulty().params();
+                        // The values of the level for this mode (missiles
+                        // differ between modes).
+                        let mode = self.mode.game_mode().unwrap_or_default();
+                        self.custom = self.difficulty().params_for(mode);
                     }
                     self.level = index;
                 }
