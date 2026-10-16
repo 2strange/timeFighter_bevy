@@ -14,6 +14,11 @@
 
 use bevy::{math::Rect, prelude::*};
 
+use super::{
+    buildings::{farm_at, farm_buildings, fill_block},
+    rng::Rng,
+};
+
 /// Horizontal facade module (m). Footprints are multiples of it, so the
 /// window raster ends cleanly at the building edges.
 pub const BAY: f32 = 3.0;
@@ -65,8 +70,8 @@ pub struct CityConfig {
 
 impl Default for CityConfig {
     // Scale reference: the jet spans 13 m and flies 50–500 m/s.
-    // - Street 28 m: four 3.5 m lanes plus 7 m sidewalks each side, a normal
-    //   four-lane city street. With the 3 m setback the facades are ≥ 34 m
+    // - Street 28 m: four ~3.8 m lanes plus 6 m sidewalks each side, a
+    //   normal four-lane city street. With the 3 m setback the facades are ≥ 34 m
     //   apart: tight but flyable wings level, easy in knife-edge.
     // - Avenue 48 m (≥ 54 m between facades): the canyons to fly through,
     //   ~20 m clearance per wingtip; one every third line, so every ~500 m.
@@ -100,11 +105,122 @@ impl Default for CityConfig {
     }
 }
 
+impl CityConfig {
+    /// Checks that the generator terminates and produces a sane city.
+    pub fn validate(&self) -> Result<(), String> {
+        let positive = [
+            ("grid_half_extent", self.grid_half_extent),
+            ("city_radius", self.city_radius),
+            ("block_min", self.block_min),
+            ("block_max", self.block_max),
+            ("street_width", self.street_width),
+            ("avenue_width", self.avenue_width),
+            ("boulevard_width", self.boulevard_width),
+            ("tower_height_center", self.tower_height_center),
+            ("tower_height_edge", self.tower_height_edge),
+            ("ground_half_extent", self.ground_half_extent),
+            ("inner_half_extent", self.inner_half_extent),
+            ("patch_size", self.patch_size),
+            ("chunk_size", self.chunk_size),
+        ];
+        let non_negative = [
+            ("sidewalk_width", self.sidewalk_width),
+            ("setback", self.setback),
+            ("building_gap", self.building_gap),
+            ("zone_noise", self.zone_noise),
+        ];
+        for (name, v) in positive {
+            if !(v.is_finite() && v > 0.0) {
+                return Err(format!("{name} must be a positive number, got {v}"));
+            }
+        }
+        for (name, v) in non_negative {
+            if !(v.is_finite() && v >= 0.0) {
+                return Err(format!("{name} must be zero or positive, got {v}"));
+            }
+        }
+        if self.avenue_every == 0 {
+            return Err("avenue_every must be at least 1".into());
+        }
+        if self.block_min > self.block_max {
+            return Err(format!(
+                "block_min {} exceeds block_max {}",
+                self.block_min, self.block_max
+            ));
+        }
+        for class in [
+            StreetClass::Street,
+            StreetClass::Avenue,
+            StreetClass::Boulevard,
+        ] {
+            let width = self.width(class);
+            let paved = 2.0 * self.sidewalk_width + class.median_width();
+            if width <= paved {
+                return Err(format!(
+                    "{class:?} width {width} leaves no lanes beside sidewalks and median ({paved} m)"
+                ));
+            }
+        }
+        if !(0.0 < self.downtown_radius
+            && self.downtown_radius < self.midtown_radius
+            && self.midtown_radius < 1.0)
+        {
+            return Err(format!(
+                "zone radii must satisfy 0 < downtown ({}) < midtown ({}) < 1",
+                self.downtown_radius, self.midtown_radius
+            ));
+        }
+        if self.grid_half_extent >= self.inner_half_extent
+            || self.inner_half_extent > self.ground_half_extent
+        {
+            return Err(format!(
+                "extents must satisfy grid ({}) < inner ({}) <= ground ({})",
+                self.grid_half_extent, self.inner_half_extent, self.ground_half_extent
+            ));
+        }
+        let tiles = self.inner_half_extent / self.patch_size;
+        if (tiles - tiles.round()).abs() > 1e-3 {
+            return Err(format!(
+                "inner_half_extent {} must be a multiple of patch_size {}",
+                self.inner_half_extent, self.patch_size
+            ));
+        }
+        // The ground mesh gets a breakpoint per patch edge; keep it bounded.
+        if (self.ground_half_extent - self.inner_half_extent) / self.patch_size > 200.0 {
+            return Err(format!(
+                "patch_size {} is too small for the ground",
+                self.patch_size
+            ));
+        }
+        Ok(())
+    }
+
+    /// Corridor width of a street class.
+    pub fn width(&self, class: StreetClass) -> f32 {
+        match class {
+            StreetClass::Street => self.street_width,
+            StreetClass::Avenue => self.avenue_width,
+            StreetClass::Boulevard => self.boulevard_width,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StreetClass {
     Street,
     Avenue,
     Boulevard,
+}
+
+impl StreetClass {
+    /// Painted centre line (streets) or green median (wider classes).
+    pub fn median_width(self) -> f32 {
+        match self {
+            StreetClass::Street => 0.6,
+            StreetClass::Avenue => 4.0,
+            StreetClass::Boulevard => 8.0,
+        }
+    }
 }
 
 /// One street corridor of the grid, infinite along its direction; which
@@ -271,7 +387,13 @@ pub struct CityLayout {
 }
 
 impl CityLayout {
+    /// Generates the city; panics with the reason if `config` is invalid.
     pub fn generate(config: &CityConfig) -> Self {
+        Self::try_generate(config).unwrap_or_else(|e| panic!("invalid CityConfig: {e}"))
+    }
+
+    pub fn try_generate(config: &CityConfig) -> Result<Self, String> {
+        config.validate()?;
         let lines = [
             street_lines(config, &mut Rng::stream(config.seed, 1, 0, 0)),
             street_lines(config, &mut Rng::stream(config.seed, 2, 0, 0)),
@@ -301,7 +423,7 @@ impl CityLayout {
         }
 
         layout.place_farms();
-        layout
+        Ok(layout)
     }
 
     /// Number of blocks along x and z.
@@ -370,18 +492,7 @@ impl CityLayout {
 
     /// Every paved rectangle (x, z): active segments and their crossings.
     pub fn street_rects(&self) -> Vec<Rect> {
-        let mut rects = Vec::new();
-        for axis in 0..2 {
-            let other = 1 - axis;
-            for (i, line) in self.lines[axis].iter().enumerate() {
-                for g in 0..=self.lines[other].len() {
-                    if self.segment_active(axis, i, g) {
-                        let (lo, hi) = self.gap_range(other, g);
-                        rects.push(axis_rect(axis, (line.min(), line.max()), (lo, hi)));
-                    }
-                }
-            }
-        }
+        let mut rects: Vec<Rect> = self.street_segments().map(|(_, _, r)| r).collect();
         for (i, xl) in self.lines[0].iter().enumerate() {
             for (k, zl) in self.lines[1].iter().enumerate() {
                 if self.crossing_active(0, i, k) || self.crossing_active(1, k, i) {
@@ -390,6 +501,74 @@ impl CityLayout {
             }
         }
         rects
+    }
+
+    /// Paved stretches between crossings as `(axis, line index, rect)`.
+    pub fn street_segments(&self) -> impl Iterator<Item = (usize, usize, Rect)> + '_ {
+        (0..2).flat_map(move |axis| {
+            let other = 1 - axis;
+            self.lines[axis]
+                .iter()
+                .enumerate()
+                .flat_map(move |(i, line)| {
+                    (0..=self.lines[other].len())
+                        .filter(move |&g| self.segment_active(axis, i, g))
+                        .map(move |g| {
+                            let across = self.gap_range(other, g);
+                            (axis, i, axis_rect(axis, (line.min(), line.max()), across))
+                        })
+                })
+        })
+    }
+
+    /// Stable 64-bit hash (FNV-1a) of the generated data, independent of
+    /// the platform and the Rust version. Native and WASM builds of the same
+    /// seed must print the same value.
+    pub fn fingerprint(&self) -> u64 {
+        let mut h = Fnv::default();
+        for lines in &self.lines {
+            h.usize(lines.len());
+            for l in lines {
+                h.f32s(&[l.center, l.width]);
+                h.usize(l.class as usize);
+            }
+        }
+        for b in &self.blocks {
+            h.f32s(&[b.rect.min.x, b.rect.min.y, b.rect.max.x, b.rect.max.y]);
+            h.usize(b.zone as usize);
+        }
+        h.usize(self.buildings.len());
+        for b in &self.buildings {
+            h.usize(b.kind as usize);
+            h.usize(b.zone as usize);
+            h.usize(b.parts.len());
+            for p in &b.parts {
+                h.f32s(&p.center.to_array());
+                h.f32s(&p.half_size.to_array());
+                h.usize(p.facade as usize);
+                match p.roof {
+                    Roof::Flat => h.usize(0),
+                    Roof::Gable {
+                        ridge_along_x,
+                        height,
+                    } => {
+                        h.usize(1 + usize::from(ridge_along_x));
+                        h.f32s(&[height]);
+                    }
+                }
+                h.f32s(&p.wall_color);
+                h.f32s(&p.roof_color);
+            }
+        }
+        h.usize(self.farms.len());
+        for f in &self.farms {
+            let rects = std::iter::once((f.yard, [0.0; 3])).chain(f.strips.iter().copied());
+            for (r, color) in rects {
+                h.f32s(&[r.min.x, r.min.y, r.max.x, r.max.y]);
+                h.f32s(&color);
+            }
+        }
+        h.0
     }
 
     /// Farms in the countryside ring: clear of paved streets, urban blocks and
@@ -453,11 +632,7 @@ pub fn axis_rect(axis: usize, along: (f32, f32), across: (f32, f32)) -> Rect {
 /// Grid lines on one axis: a boulevard through the centre, then corridors
 /// outwards on both sides with random block sizes in between.
 fn street_lines(cfg: &CityConfig, rng: &mut Rng) -> Vec<StreetLine> {
-    let width = |class| match class {
-        StreetClass::Street => cfg.street_width,
-        StreetClass::Avenue => cfg.avenue_width,
-        StreetClass::Boulevard => cfg.boulevard_width,
-    };
+    let width = |class| cfg.width(class);
     let center = StreetLine {
         center: 0.0,
         width: cfg.boulevard_width,
@@ -511,437 +686,27 @@ fn zone_at(cfg: &CityConfig, center: Vec2, rng: &mut Rng) -> Zone {
     }
 }
 
-// Calm palette (sRGB).
-const OFFICE_TINTS: [[f32; 3]; 4] = [
-    [0.80, 0.85, 0.90],
-    [0.88, 0.88, 0.86],
-    [0.76, 0.80, 0.85],
-    [0.92, 0.89, 0.83],
-];
-const RESIDENTIAL_WALLS: [[f32; 3]; 6] = [
-    [0.90, 0.87, 0.80],
-    [0.85, 0.79, 0.68],
-    [0.86, 0.75, 0.65],
-    [0.80, 0.80, 0.78],
-    [0.87, 0.85, 0.76],
-    [0.74, 0.77, 0.80],
-];
-const FLAT_ROOFS: [[f32; 3]; 3] = [[0.42, 0.42, 0.43], [0.50, 0.49, 0.47], [0.36, 0.37, 0.39]];
-const PITCHED_ROOFS: [[f32; 3]; 3] = [[0.62, 0.30, 0.22], [0.36, 0.36, 0.39], [0.48, 0.32, 0.24]];
-const PLANT_GREY: [f32; 3] = [0.58, 0.58, 0.57];
-const BARN_RED: [f32; 3] = [0.55, 0.22, 0.16];
-const SILO_WHITE: [f32; 3] = [0.78, 0.78, 0.75];
-const CROPS: [[f32; 3]; 4] = [
-    [0.76, 0.68, 0.40],
-    [0.48, 0.62, 0.30],
-    [0.47, 0.37, 0.27],
-    [0.80, 0.76, 0.36],
-];
+/// FNV-1a over little-endian bytes.
+struct Fnv(u64);
 
-/// Snaps `v` down to a multiple of `step`, at least one step.
-fn snap(v: f32, step: f32) -> f32 {
-    ((v / step).floor() * step).max(step)
+impl Default for Fnv {
+    fn default() -> Self {
+        Fnv(0xcbf2_9ce4_8422_2325)
+    }
 }
 
-/// Splits `rect` into a grid of lots close to `target` edge length.
-fn lots(rect: Rect, target: Vec2) -> Vec<Rect> {
-    let size = rect.size();
-    let n = (size / target).round().max(Vec2::ONE);
-    let (nx, nz) = (n.x as usize, n.y as usize);
-    let step = size / n;
-    let mut out = Vec::with_capacity(nx * nz);
-    for j in 0..nz {
-        for i in 0..nx {
-            let min = rect.min + step * Vec2::new(i as f32, j as f32);
-            out.push(Rect::from_corners(min, min + step));
+impl Fnv {
+    fn bytes(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0 ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
         }
     }
-    out
-}
-
-/// A footprint of `want` (snapped to the bay) at a random spot in `lot`, or
-/// `None` if the lot is too small.
-fn footprint_in(lot: Rect, want: Vec2, rng: &mut Rng) -> Option<Rect> {
-    let size = Vec2::new(
-        snap(want.x.min(lot.width()), BAY),
-        snap(want.y.min(lot.height()), BAY),
-    );
-    if size.x > lot.width() || size.y > lot.height() {
-        return None;
+    fn usize(&mut self, v: usize) {
+        self.bytes(&(v as u64).to_le_bytes());
     }
-    let slack = lot.size() - size;
-    let min = lot.min + slack * Vec2::new(rng.f32(), rng.f32());
-    Some(Rect::from_corners(min, min + size))
-}
-
-/// Box part standing on `base_y` over `footprint`.
-fn part(
-    footprint: Rect,
-    base_y: f32,
-    height: f32,
-    facade: Facade,
-    wall: [f32; 3],
-    roof: [f32; 3],
-) -> Part {
-    let c = footprint.center();
-    let h = footprint.half_size();
-    Part {
-        center: Vec3::new(c.x, base_y + height / 2.0, c.y),
-        half_size: Vec3::new(h.x, height / 2.0, h.y),
-        facade,
-        roof: Roof::Flat,
-        wall_color: wall,
-        roof_color: roof,
-    }
-}
-
-/// `footprint` shrunk to `factor` around its centre, snapped to the bay.
-fn shrink(footprint: Rect, factor: f32) -> Rect {
-    let size = footprint.size();
-    let new = Vec2::new(snap(size.x * factor, BAY), snap(size.y * factor, BAY)).min(size);
-    Rect::from_center_size(footprint.center(), new)
-}
-
-fn fill_block(cfg: &CityConfig, block: &Block, rng: &mut Rng, out: &mut Vec<Building>) {
-    let inner = block.rect.inflate(-cfg.setback);
-    // Lots are shrunk by half a gap each, so neighbours keep `building_gap`
-    // and the block edge keeps at least `setback`.
-    let lot_rects = |target: Vec2| -> Vec<Rect> {
-        lots(inner, target)
-            .into_iter()
-            .map(|l| l.inflate(-cfg.building_gap / 2.0))
-            .filter(|l| !l.is_empty())
-            .collect()
-    };
-    let r = block.rect.center().length() / cfg.city_radius;
-
-    match block.zone {
-        Zone::Downtown => {
-            let t = (r / cfg.downtown_radius).clamp(0.0, 1.0);
-            let cap =
-                cfg.tower_height_center + (cfg.tower_height_edge - cfg.tower_height_center) * t;
-            for lot in lot_rects(Vec2::splat(60.0)) {
-                let want = lot.size() * Vec2::new(rng.range(0.7, 1.0), rng.range(0.7, 1.0));
-                let Some(fp) = footprint_in(lot, want.max(Vec2::splat(18.0)), rng) else {
-                    continue;
-                };
-                let height = snap(cap * rng.range(0.5, 1.0), OFFICE_FLOOR).max(OFFICE_FLOOR * 12.0);
-                out.push(tower(fp, height, rng));
-            }
+    fn f32s(&mut self, vs: &[f32]) {
+        for v in vs {
+            self.bytes(&v.to_bits().to_le_bytes());
         }
-        Zone::Midtown => {
-            let t = ((r - cfg.downtown_radius) / (cfg.midtown_radius - cfg.downtown_radius))
-                .clamp(0.0, 1.0);
-            let cap = 75.0 - 45.0 * t;
-            if rng.chance(0.3) {
-                slabs(inner, rng, out);
-                return;
-            }
-            for lot in lot_rects(Vec2::splat(45.0)) {
-                let want = lot.size() * Vec2::new(rng.range(0.6, 0.95), rng.range(0.6, 0.95));
-                let Some(fp) = footprint_in(lot, want, rng) else {
-                    continue;
-                };
-                let office = rng.chance(0.3);
-                let (facade, floor, wall) = if office {
-                    (Facade::Office, OFFICE_FLOOR, rng.pick(&OFFICE_TINTS))
-                } else {
-                    (
-                        Facade::Residential,
-                        RESIDENTIAL_FLOOR,
-                        rng.pick(&RESIDENTIAL_WALLS),
-                    )
-                };
-                let height = snap(cap * rng.range(0.55, 1.0), floor).max(floor * 5.0);
-                let mut parts = vec![part(fp, 0.0, height, facade, wall, rng.pick(&FLAT_ROOFS))];
-                if rng.chance(0.2) {
-                    parts.push(rooftop(&parts[0], rng));
-                }
-                out.push(Building {
-                    kind: BuildingKind::MidRise,
-                    zone: Zone::Midtown,
-                    parts,
-                });
-            }
-        }
-        Zone::Suburb => {
-            let t = ((r - cfg.midtown_radius) / (1.0 - cfg.midtown_radius)).clamp(0.0, 1.0);
-            let occupancy = 0.9 - 0.45 * t;
-            for lot in lot_rects(Vec2::new(26.0, 32.0)) {
-                if !rng.chance(occupancy) {
-                    continue;
-                }
-                if t < 0.3 && rng.chance(0.15) {
-                    let want = Vec2::new(rng.range(15.0, 24.0), rng.range(12.0, 18.0));
-                    if let Some(fp) = footprint_in(lot, want, rng) {
-                        let height = RESIDENTIAL_FLOOR * (3 + rng.below(2)) as f32;
-                        let wall = rng.pick(&RESIDENTIAL_WALLS);
-                        out.push(Building {
-                            kind: BuildingKind::Apartment,
-                            zone: Zone::Suburb,
-                            parts: vec![part(
-                                fp,
-                                0.0,
-                                height,
-                                Facade::Residential,
-                                wall,
-                                rng.pick(&FLAT_ROOFS),
-                            )],
-                        });
-                    }
-                    continue;
-                }
-                let want = Vec2::new(rng.range(9.0, 16.0), rng.range(9.0, 13.0));
-                let Some(fp) = footprint_in(lot, want, rng) else {
-                    continue;
-                };
-                // Two storeys near town, mostly bungalows at the edge.
-                let floors = if rng.chance(0.8 - 0.6 * t) { 2.0 } else { 1.0 };
-                let walls = RESIDENTIAL_FLOOR * floors;
-                let wall = rng.pick(&RESIDENTIAL_WALLS);
-                let roof = rng.pick(&PITCHED_ROOFS);
-                out.push(Building {
-                    kind: BuildingKind::House,
-                    zone: Zone::Suburb,
-                    parts: vec![gabled(fp, walls, Facade::Residential, wall, roof)],
-                });
-            }
-        }
-        Zone::Park | Zone::Rural => {}
-    }
-}
-
-/// Office tower, either one shaft or two to three setback tiers.
-fn tower(fp: Rect, height: f32, rng: &mut Rng) -> Building {
-    let tint = rng.pick(&OFFICE_TINTS);
-    let roof = rng.pick(&FLAT_ROOFS);
-    let mut parts = Vec::new();
-    let kind = if height > 120.0 && rng.chance(0.45) {
-        let tiers = 2 + rng.below(2);
-        let mut base_y = 0.0;
-        let mut footprint = fp;
-        for i in 0..tiers {
-            let remaining = height - base_y;
-            let h = if i + 1 == tiers {
-                remaining
-            } else {
-                snap(remaining * rng.range(0.4, 0.6), OFFICE_FLOOR)
-            };
-            parts.push(part(footprint, base_y, h, Facade::Office, tint, roof));
-            base_y += h;
-            footprint = shrink(footprint, rng.range(0.65, 0.85));
-        }
-        BuildingKind::SetbackTower
-    } else {
-        parts.push(part(fp, 0.0, height, Facade::Office, tint, roof));
-        BuildingKind::Tower
-    };
-    if rng.chance(0.5) {
-        let top = rooftop(parts.last().unwrap(), rng);
-        parts.push(top);
-    }
-    Building {
-        kind,
-        zone: Zone::Downtown,
-        parts,
-    }
-}
-
-/// Small plant room on top of `below`.
-fn rooftop(below: &Part, rng: &mut Rng) -> Part {
-    let footprint = Rect::from_center_half_size(below.center.xz(), below.half_size.xz());
-    let fp = shrink(footprint, rng.range(0.3, 0.45));
-    let height = rng.range(4.0, 8.0).round();
-    part(
-        fp,
-        below.max().y,
-        height,
-        Facade::Plain,
-        PLANT_GREY,
-        below.roof_color,
-    )
-}
-
-/// Rows of long residential slabs along the block's long side.
-fn slabs(inner: Rect, rng: &mut Rng, out: &mut Vec<Building>) {
-    let along_x = inner.width() >= inner.height();
-    let (long, short) = if along_x {
-        (inner.width(), inner.height())
-    } else {
-        (inner.height(), inner.width())
-    };
-    let depth = if rng.chance(0.5) { 12.0 } else { 15.0 };
-    let court = 24.0;
-    let n = (((short + court) / (depth + court)).floor() as usize).max(1);
-    let pitch = if n > 1 {
-        (short - depth) / (n - 1) as f32
-    } else {
-        0.0
-    };
-    let length = snap(long * rng.range(0.75, 1.0), BAY).min(snap(long, BAY));
-    let wall = rng.pick(&RESIDENTIAL_WALLS);
-    let roof = rng.pick(&FLAT_ROOFS);
-    for i in 0..n {
-        let across = if n > 1 {
-            -short / 2.0 + depth / 2.0 + pitch * i as f32
-        } else {
-            0.0
-        };
-        let height = RESIDENTIAL_FLOOR * (10 + rng.below(7)) as f32;
-        let size = if along_x {
-            Vec2::new(length, depth)
-        } else {
-            Vec2::new(depth, length)
-        };
-        let offset = if along_x {
-            Vec2::new(0.0, across)
-        } else {
-            Vec2::new(across, 0.0)
-        };
-        let fp = Rect::from_center_size(inner.center() + offset, size);
-        out.push(Building {
-            kind: BuildingKind::Slab,
-            zone: Zone::Midtown,
-            parts: vec![part(fp, 0.0, height, Facade::Residential, wall, roof)],
-        });
-    }
-}
-
-/// Box with `walls` metres of wall and a gable roof over the shorter span.
-fn gabled(fp: Rect, walls: f32, facade: Facade, wall: [f32; 3], roof: [f32; 3]) -> Part {
-    let ridge_along_x = fp.width() >= fp.height();
-    let span = fp.width().min(fp.height());
-    let roof_height = (span * 0.35).round();
-    Part {
-        roof: Roof::Gable {
-            ridge_along_x,
-            height: roof_height,
-        },
-        ..part(fp, 0.0, walls + roof_height, facade, wall, roof)
-    }
-}
-
-/// A farm (yard beside a field of three crop strips) centred near `center`.
-fn farm_at(center: Vec2, rng: &mut Rng) -> Farm {
-    let field = Vec2::new(rng.range(220.0, 360.0), rng.range(160.0, 260.0)).round();
-    let yard_size = 72.0;
-    let field_rect = Rect::from_center_size(center, field);
-    let yard_x = if rng.chance(0.5) {
-        field_rect.max.x
-    } else {
-        field_rect.min.x - yard_size
-    };
-    let yard = Rect::new(
-        yard_x,
-        center.y - yard_size / 2.0,
-        yard_x + yard_size,
-        center.y + yard_size / 2.0,
-    );
-    let strip = field.x / 3.0;
-    let strips = (0..3)
-        .map(|i| {
-            let x0 = field_rect.min.x + strip * i as f32;
-            let x1 = if i == 2 { field_rect.max.x } else { x0 + strip };
-            (
-                Rect::new(x0, field_rect.min.y, x1, field_rect.max.y),
-                rng.pick(&CROPS),
-            )
-        })
-        .collect();
-    Farm { yard, strips }
-}
-
-/// Farmhouse, barn and silo in a row along the yard.
-fn farm_buildings(yard: Rect, rng: &mut Rng, out: &mut Vec<Building>) {
-    let m = 6.0;
-    let house = Rect::new(
-        yard.min.x + m,
-        yard.min.y + m,
-        yard.min.x + m + 15.0,
-        yard.min.y + m + 9.0,
-    );
-    let barn = Rect::new(
-        yard.min.x + m,
-        yard.max.y - m - 15.0,
-        yard.min.x + m + 27.0,
-        yard.max.y - m,
-    );
-    let silo = Rect::from_center_size(
-        Vec2::new(yard.max.x - m - 6.0, yard.center().y),
-        Vec2::splat(6.0),
-    );
-    out.push(Building {
-        kind: BuildingKind::Farmhouse,
-        zone: Zone::Rural,
-        parts: vec![gabled(
-            house,
-            RESIDENTIAL_FLOOR * 2.0,
-            Facade::Residential,
-            RESIDENTIAL_WALLS[0],
-            rng.pick(&PITCHED_ROOFS),
-        )],
-    });
-    out.push(Building {
-        kind: BuildingKind::Barn,
-        zone: Zone::Rural,
-        parts: vec![gabled(barn, 8.0, Facade::Plain, BARN_RED, PITCHED_ROOFS[1])],
-    });
-    out.push(Building {
-        kind: BuildingKind::Silo,
-        zone: Zone::Rural,
-        parts: vec![part(
-            silo,
-            0.0,
-            18.0,
-            Facade::Plain,
-            SILO_WHITE,
-            FLAT_ROOFS[0],
-        )],
-    });
-}
-
-/// SplitMix64: tiny, fast, and identical on every platform.
-#[derive(Clone, Debug)]
-pub(crate) struct Rng(u64);
-
-impl Rng {
-    /// Independent stream per `(seed, tag, a, b)`, so changing one block
-    /// does not reshuffle the rest of the city.
-    pub(crate) fn stream(seed: u64, tag: u64, a: i64, b: i64) -> Self {
-        let mut r = Rng(seed ^ tag.wrapping_mul(0x9E37_79B9_7F4A_7C15));
-        let x = r.next_u64() ^ (a as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-        let mut r = Rng(x);
-        let y = r.next_u64() ^ (b as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
-        Rng(y)
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    /// Uniform in `[0, 1)`.
-    pub(crate) fn f32(&mut self) -> f32 {
-        (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
-    }
-
-    pub(crate) fn range(&mut self, lo: f32, hi: f32) -> f32 {
-        lo + (hi - lo) * self.f32()
-    }
-
-    pub(crate) fn chance(&mut self, p: f32) -> bool {
-        self.f32() < p
-    }
-
-    /// Uniform in `0..n`.
-    pub(crate) fn below(&mut self, n: u32) -> u32 {
-        (self.next_u64() % u64::from(n)) as u32
-    }
-
-    pub(crate) fn pick<T: Copy>(&mut self, items: &[T]) -> T {
-        items[self.below(items.len() as u32) as usize]
     }
 }

@@ -17,7 +17,7 @@ use super::layout::{
 };
 
 // Ground colours (sRGB).
-const ASPHALT: [f32; 3] = [0.30, 0.31, 0.33];
+pub const ASPHALT: [f32; 3] = [0.30, 0.31, 0.33];
 const SIDEWALK: [f32; 3] = [0.58, 0.57, 0.55];
 /// Low contrast on purpose: thin bright lines shimmer at a distance.
 const CENTER_LINE: [f32; 3] = [0.62, 0.60, 0.52];
@@ -26,7 +26,7 @@ const PLAZA: [f32; 3] = [0.52, 0.51, 0.49];
 const COURTYARD: [f32; 3] = [0.47, 0.48, 0.43];
 const LAWN: [f32; 3] = [0.40, 0.52, 0.30];
 const PARK: [f32; 3] = [0.30, 0.47, 0.24];
-const MEADOW: [f32; 3] = [0.42, 0.54, 0.30];
+pub const MEADOW: [f32; 3] = [0.42, 0.54, 0.30];
 const YARD: [f32; 3] = [0.55, 0.49, 0.40];
 const PATCHES: [[f32; 3]; 4] = [
     [0.40, 0.52, 0.29],
@@ -34,15 +34,6 @@ const PATCHES: [[f32; 3]; 4] = [
     [0.37, 0.48, 0.27],
     [0.49, 0.53, 0.33],
 ];
-
-/// Centre line or median width per street class.
-fn median_width(class: StreetClass) -> f32 {
-    match class {
-        StreetClass::Street => 0.6,
-        StreetClass::Avenue => 4.0,
-        StreetClass::Boulevard => 8.0,
-    }
-}
 
 /// One coloured rectangle of the ground (x, z).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -189,7 +180,7 @@ fn countryside(layout: &CityLayout, p: Vec2) -> [f32; 3] {
         return MEADOW;
     }
     let tile = (p / cfg.patch_size).floor();
-    let mut rng = super::layout::Rng::stream(cfg.seed, 6, tile.x as i64, tile.y as i64);
+    let mut rng = super::rng::Rng::stream(cfg.seed, 6, tile.x as i64, tile.y as i64);
     rng.pick(&PATCHES)
 }
 
@@ -203,7 +194,7 @@ fn street_strips(
 ) {
     let line = layout.lines[axis][i];
     let sidewalk = layout.config.sidewalk_width;
-    let median = median_width(line.class);
+    let median = line.class.median_width();
     let (lo, hi) = (line.min(), line.max());
     let c = line.center;
     let strips = [

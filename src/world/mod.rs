@@ -6,15 +6,26 @@
 //! 800 m chunk and facade material, so the whole city takes a few dozen draw
 //! calls and is frustum-culled chunk by chunk. Each building also carries
 //! its collision boxes for the physics phase.
+//!
+//! Why merged chunks instead of GPU instancing: instancing a unit cube
+//! scaled per building would stretch the window raster (UVs are per mesh,
+//! not per instance), and fixing that needs a custom world-space shader.
+//! Merged chunks keep metre-true UVs with the stock `StandardMaterial`, give
+//! a similar draw-call count (~110 meshes, 3 materials) and cull per chunk.
+//! Trade-off: removing a destroyed building means rebuilding its chunk mesh
+//! (about 70 buildings, milliseconds).
 
+mod buildings;
 pub mod layout;
 pub mod meshes;
+mod rng;
 pub mod textures;
 
 #[cfg(test)]
 mod tests;
 
 use bevy::{
+    camera::visibility::VisibilityRange,
     light::{CascadeShadowConfigBuilder, NotShadowCaster},
     prelude::*,
 };
@@ -33,6 +44,61 @@ impl Plugin for CityPlugin {
     }
 }
 
+/// Render-cost knobs of the world, tuned on Austin's frame-rate measurements.
+#[derive(Resource, Clone, Debug, PartialEq)]
+pub struct WorldRenderConfig {
+    /// Shadows are drawn up to this distance from the camera (m). Shadow
+    /// passes re-draw every caster per cascade, so this is the main lever.
+    pub shadow_distance: f32,
+    /// Building chunks fade out between these distances from the camera to
+    /// the chunk centre (m); just short of where the day fog (9 km
+    /// visibility) has swallowed them anyway.
+    pub draw_fade: std::ops::Range<f32>,
+}
+
+impl Default for WorldRenderConfig {
+    fn default() -> Self {
+        Self {
+            shadow_distance: 1_500.0,
+            draw_fade: 7_500.0..8_000.0,
+        }
+    }
+}
+
+impl WorldRenderConfig {
+    /// Nearest cascade boundary; must stay below `shadow_distance`.
+    const FIRST_CASCADE: f32 = 150.0;
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !(self.shadow_distance.is_finite() && self.shadow_distance > Self::FIRST_CASCADE) {
+            return Err(format!(
+                "shadow_distance must exceed {} m, got {}",
+                Self::FIRST_CASCADE,
+                self.shadow_distance
+            ));
+        }
+        let (a, b) = (self.draw_fade.start, self.draw_fade.end);
+        if !(a.is_finite() && b.is_finite() && 0.0 < a && a <= b) {
+            return Err(format!(
+                "draw_fade must satisfy 0 < start <= end, got {a}..{b}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Visibility range shared by all chunks (one entry in Bevy's range
+    /// table, well within WebGL2's limit of 64).
+    pub fn chunk_visibility(&self) -> VisibilityRange {
+        VisibilityRange {
+            start_margin: 0.0..0.0,
+            end_margin: self.draw_fade.clone(),
+            // Chunk meshes sit at the origin in world coordinates; measure
+            // the distance to the chunk's bounds centre instead.
+            use_aabb: true,
+        }
+    }
+}
+
 /// City rendering, light, sky and fog on top of [`CityPlugin`].
 pub struct WorldPlugin;
 
@@ -40,6 +106,7 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         let day = LightingPreset::DAY;
         app.add_plugins(CityPlugin)
+            .init_resource::<WorldRenderConfig>()
             .insert_resource(ClearColor(day.sky))
             .insert_resource(GlobalAmbientLight {
                 color: day.ambient_color,
@@ -60,7 +127,15 @@ impl Plugin for WorldPlugin {
 }
 
 fn generate_city(mut commands: Commands, config: Res<CityConfig>) {
-    commands.insert_resource(CityLayout::generate(&config));
+    let layout = CityLayout::generate(&config);
+    // Compare with the native build: same seed must give the same fingerprint.
+    info!(
+        "City seed {:#x}: {} buildings, fingerprint {:016x}",
+        config.seed,
+        layout.buildings.len(),
+        layout.fingerprint()
+    );
+    commands.insert_resource(layout);
 }
 
 /// Light and sky look. `L` toggles between them so Austin can compare on a
@@ -142,7 +217,10 @@ struct Sun;
 #[derive(Resource)]
 struct FacadeMaterials(Vec<Handle<StandardMaterial>>);
 
-fn spawn_sun(mut commands: Commands) {
+fn spawn_sun(mut commands: Commands, render: Res<WorldRenderConfig>) {
+    render
+        .validate()
+        .unwrap_or_else(|e| panic!("invalid WorldRenderConfig: {e}"));
     let day = &LightingPreset::DAY;
     commands.spawn((
         Name::new("Sun"),
@@ -155,8 +233,8 @@ fn spawn_sun(mut commands: Commands) {
         Transform::default().looking_to(day.sun_direction, Vec3::Y),
         CascadeShadowConfigBuilder {
             num_cascades: 3,
-            first_cascade_far_bound: 150.0,
-            maximum_distance: 2_500.0,
+            first_cascade_far_bound: WorldRenderConfig::FIRST_CASCADE,
+            maximum_distance: render.shadow_distance,
             ..default()
         }
         .build(),
@@ -185,10 +263,12 @@ fn spawn_ground(
 fn spawn_buildings(
     mut commands: Commands,
     layout: Res<CityLayout>,
+    render: Res<WorldRenderConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
+    let visibility = render.chunk_visibility();
     let mut facade = |surface: Surface| {
         let (base, glow) = textures::facade_textures(surface);
         materials.add(StandardMaterial {
@@ -221,6 +301,7 @@ fn spawn_buildings(
             Name::new(format!("City chunk {chunk:?} {surface:?}")),
             Mesh3d(meshes.add(data.into_mesh())),
             MeshMaterial3d(material),
+            visibility.clone(),
         ));
     }
 }

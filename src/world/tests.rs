@@ -3,7 +3,7 @@
 use bevy::{math::Rect, prelude::*};
 
 use super::{
-    CityPlugin,
+    CityPlugin, WorldRenderConfig,
     layout::{BuildingKind, CityConfig, CityLayout, Roof, StreetClass, Zone},
     meshes::{self, Surface},
 };
@@ -284,18 +284,48 @@ fn ground_is_one_flat_layer_without_gaps_or_overlaps() {
 }
 
 #[test]
-fn street_centres_are_painted_as_road() {
+fn every_paved_rect_shows_asphalt_lanes() {
     let layout = city();
     let quads = meshes::ground_quads(&layout);
-    let grass = [0.42, 0.54, 0.30];
-    // A point on every paved segment's centre line must not be meadow.
-    for s in layout.street_rects().iter().step_by(7) {
-        let p = s
-            .center()
-            .clamp(Vec2::splat(-3_900.0), Vec2::splat(3_900.0));
-        let q = quads.iter().find(|q| q.rect.contains(p)).unwrap();
-        assert_ne!(q.color, grass, "street at {p} painted as meadow");
+    let color_at = |p: Vec2| {
+        quads
+            .iter()
+            .find(|q| q.rect.contains(p))
+            .unwrap_or_else(|| panic!("no ground at {p}"))
+            .color
+    };
+    // Middle of the lane band right of the centre line / median.
+    let lane = |axis: usize, i: usize| {
+        let l = layout.lines[axis][i];
+        let inner = l.class.median_width() / 2.0;
+        let outer = l.width / 2.0 - layout.config.sidewalk_width;
+        l.center + (inner + outer) / 2.0
+    };
+    let mut checked = 0;
+    for (axis, i, rect) in layout.street_segments() {
+        let along = if axis == 0 {
+            rect.center().y
+        } else {
+            rect.center().x
+        };
+        let p = if axis == 0 {
+            Vec2::new(lane(0, i), along)
+        } else {
+            Vec2::new(along, lane(1, i))
+        };
+        assert_eq!(color_at(p), meshes::ASPHALT, "{axis}/{i} segment at {p}");
+        checked += 1;
     }
+    for i in 0..layout.lines[0].len() {
+        for k in 0..layout.lines[1].len() {
+            if layout.crossing_active(0, i, k) || layout.crossing_active(1, k, i) {
+                let p = Vec2::new(lane(0, i), lane(1, k));
+                assert_eq!(color_at(p), meshes::ASPHALT, "crossing {i}/{k} at {p}");
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, layout.street_rects().len());
 }
 
 #[test]
@@ -356,8 +386,138 @@ fn city_plugin_inserts_the_layout_headless() {
 }
 
 /// Prints the size of the generated city (run with `--nocapture`).
+/// Fixed fingerprint of the default city. If a deliberate generator change
+/// moves it, update the constant; if it differs between native and WASM,
+/// the generator is not platform-independent.
+const DEFAULT_CITY_FINGERPRINT: u64 = 0xee8b_16fc_da30_86e2;
+
 #[test]
-fn report_city_budget() {
+fn default_city_matches_golden_fingerprint() {
+    let fp = city().fingerprint();
+    assert_eq!(fp, DEFAULT_CITY_FINGERPRINT, "fingerprint is {fp:#018x}");
+    let other = CityLayout::generate(&CityConfig {
+        seed: 1,
+        ..default()
+    });
+    assert_ne!(other.fingerprint(), fp);
+}
+
+#[test]
+fn invalid_configs_are_rejected_with_a_reason() {
+    let base = CityConfig::default();
+    assert_eq!(base.validate(), Ok(()));
+    let cases: [(&str, CityConfig); 9] = [
+        (
+            "avenue_every",
+            CityConfig {
+                avenue_every: 0,
+                ..base.clone()
+            },
+        ),
+        (
+            "patch_size",
+            CityConfig {
+                patch_size: 0.0,
+                ..base.clone()
+            },
+        ),
+        (
+            "patch_size",
+            CityConfig {
+                patch_size: -500.0,
+                ..base.clone()
+            },
+        ),
+        (
+            "patch_size",
+            CityConfig {
+                patch_size: 1.0,
+                ..base.clone()
+            },
+        ),
+        (
+            "multiple of patch_size",
+            CityConfig {
+                patch_size: 300.0,
+                ..base.clone()
+            },
+        ),
+        (
+            "block_min",
+            CityConfig {
+                block_min: 300.0,
+                ..base.clone()
+            },
+        ),
+        (
+            "chunk_size",
+            CityConfig {
+                chunk_size: f32::NAN,
+                ..base.clone()
+            },
+        ),
+        (
+            "Street width",
+            CityConfig {
+                street_width: 12.0,
+                ..base.clone()
+            },
+        ),
+        (
+            "zone radii",
+            CityConfig {
+                midtown_radius: 0.1,
+                ..base.clone()
+            },
+        ),
+    ];
+    for (reason, cfg) in cases {
+        let err = CityLayout::try_generate(&cfg).expect_err(reason);
+        assert!(err.contains(reason), "expected '{reason}' in: {err}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "invalid CityConfig: avenue_every")]
+fn generate_panics_with_the_reason() {
+    CityLayout::generate(&CityConfig {
+        avenue_every: 0,
+        ..default()
+    });
+}
+
+#[test]
+fn render_config_is_valid_and_rejects_nonsense() {
+    let cfg = WorldRenderConfig::default();
+    assert_eq!(cfg.validate(), Ok(()));
+    assert!(cfg.shadow_distance <= 1_500.0);
+    // Chunks must fade out before the day fog (9 km visibility) ends.
+    assert!(cfg.draw_fade.end <= 9_000.0);
+    let range = cfg.chunk_visibility();
+    assert!(range.use_aabb);
+    assert!(
+        WorldRenderConfig {
+            shadow_distance: 100.0,
+            ..cfg.clone()
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        WorldRenderConfig {
+            draw_fade: 8_000.0..7_000.0,
+            ..cfg
+        }
+        .validate()
+        .is_err()
+    );
+}
+
+/// Size of the generated city; fails when the city outgrows the render
+/// budget (counts, not measured frame time; that happens on Austin's Mac).
+/// Run with `--nocapture` to see the numbers.
+#[test]
+fn city_stays_within_render_budget() {
     let layout = city();
     let parts: usize = layout.buildings.iter().map(|b| b.parts.len()).sum();
     let chunks = meshes::building_meshes(&layout);
@@ -388,4 +548,14 @@ fn report_city_budget() {
         ground.triangle_count(),
         ground.positions.len(),
     );
+
+    assert!(layout.buildings.len() <= 8_000, "too many buildings");
+    assert!(chunks.len() <= 128, "too many building meshes");
+    assert!(tris <= 110_000, "too many building triangles");
+    assert!(verts <= 230_000, "too many building vertices");
+    assert!(
+        ground.triangle_count() <= 45_000,
+        "too many ground triangles"
+    );
+    assert!(ground.positions.len() <= 90_000, "too many ground vertices");
 }

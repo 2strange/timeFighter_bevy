@@ -7,7 +7,7 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 
-use super::{layout::Rng, meshes::Surface};
+use super::{meshes::Surface, rng::Rng};
 
 /// Pixels per bay and storey.
 const CELL_PX: u32 = 32;
