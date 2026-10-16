@@ -1,7 +1,8 @@
 //! From physics contacts to hits, crashes and damage.
 //!
 //! The physics layer reports what projectiles touch ([`ProjectileHit`]) and
-//! when the player flies into the world ([`PlayerCrashed`]). This module
+//! when aircraft fly into the world or into each other ([`PlayerCrashed`],
+//! [`EnemyCrashed`]). This module
 //! turns that into [`Hit`] and [`Destroyed`] messages, adds the missiles'
 //! proximity fuses, and applies damage in [`apply_hits`].
 
@@ -11,7 +12,7 @@ use bevy_rapier3d::prelude::{ColliderDisabled, RigidBodyDisabled};
 use super::{DestroyCause, Destroyed, Health, Hit, Hitbox, Munition, Team, Weapon};
 use crate::{
     flight::PlayerAircraft,
-    physics::{PlayerCrashed, ProjectileHit, ProjectileSpent},
+    physics::{EnemyCrashed, PlayerCrashed, ProjectileHit, ProjectileSpent},
 };
 
 /// Point of the segment `a..b` closest to `p`.
@@ -99,14 +100,15 @@ pub fn missile_fuses(
     }
 }
 
-/// The player flew into the ground, water, a building or a bridge.
+/// The player flew into the ground, water, a building, a bridge or an
+/// enemy (ramming).
 pub fn player_crashes(
     mut crashes: MessageReader<PlayerCrashed>,
-    mut player: Query<(&Transform, &mut Health), With<PlayerAircraft>>,
+    mut player: Query<&mut Health, With<PlayerAircraft>>,
     mut destroyed: MessageWriter<Destroyed>,
 ) {
     for crash in crashes.read() {
-        let Ok((transform, mut health)) = player.get_mut(crash.player) else {
+        let Ok(mut health) = player.get_mut(crash.player) else {
             continue;
         };
         if health.is_dead() {
@@ -116,9 +118,35 @@ pub fn player_crashes(
         destroyed.write(Destroyed {
             entity: crash.player,
             team: Team::Player,
-            position: transform.translation,
+            position: crash.point,
             cause: DestroyCause::Crash,
         });
+    }
+}
+
+/// An enemy flew into the world or rammed the player. It is destroyed and
+/// counts as a kill.
+pub fn enemy_crashes(
+    mut commands: Commands,
+    mut crashes: MessageReader<EnemyCrashed>,
+    mut enemies: Query<(&Team, &mut Health), Without<PlayerAircraft>>,
+    mut destroyed: MessageWriter<Destroyed>,
+) {
+    for crash in crashes.read() {
+        let Ok((team, mut health)) = enemies.get_mut(crash.enemy) else {
+            continue;
+        };
+        if health.is_dead() {
+            continue;
+        }
+        health.current = 0.0;
+        destroyed.write(Destroyed {
+            entity: crash.enemy,
+            team: *team,
+            position: crash.point,
+            cause: DestroyCause::Crash,
+        });
+        commands.entity(crash.enemy).despawn();
     }
 }
 

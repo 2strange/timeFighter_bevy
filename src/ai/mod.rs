@@ -13,7 +13,6 @@ mod visuals;
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::{CollisionEvent, CollisionGroups};
 
 pub use obstacles::ObstacleMap;
 pub use visuals::EnemyVisualsPlugin;
@@ -21,8 +20,8 @@ pub use visuals::EnemyVisualsPlugin;
 use crate::{
     aircraft::AircraftModel,
     combat::{
-        AircraftVelocity, CombatRng, CombatSystems, DestroyCause, Destroyed, Gun, GunSpec, Health,
-        Hitbox, Missile, Team, Trigger,
+        AircraftVelocity, CombatRng, CombatSystems, Gun, GunSpec, Health, Hitbox, Missile, Team,
+        Trigger,
     },
     flight::{FlightSystems, PlayerAircraft},
     physics::Layer,
@@ -250,8 +249,7 @@ impl Plugin for AiPlugin {
                 )
                     .chain()
                     .in_set(AiSystems),
-            )
-            .add_systems(Update, enemy_crashes.in_set(CombatSystems::DetectHits));
+            );
     }
 }
 
@@ -334,42 +332,6 @@ fn fly_enemies(
             .looking_to(new_forward, Vec3::Y)
             .rotation
             * Quat::from_rotation_z(flight.bank);
-    }
-}
-
-/// An enemy touched the world (ground, water, building, bridge): crashed.
-/// Counts as a kill for the player.
-fn enemy_crashes(
-    mut commands: Commands,
-    mut collisions: MessageReader<CollisionEvent>,
-    enemies: Query<&Transform, With<Enemy>>,
-    groups: Query<&CollisionGroups>,
-    mut destroyed: MessageWriter<Destroyed>,
-) {
-    let mut crashed = Vec::new();
-    for event in collisions.read() {
-        let CollisionEvent::Started(a, b, _) = *event else {
-            continue;
-        };
-        for (enemy, obstacle) in [(a, b), (b, a)] {
-            let is_world = groups
-                .get(obstacle)
-                .is_ok_and(|g| g.memberships.contains(Layer::World.group()));
-            if !is_world || crashed.contains(&enemy) {
-                continue;
-            }
-            let Ok(transform) = enemies.get(enemy) else {
-                continue;
-            };
-            crashed.push(enemy);
-            destroyed.write(Destroyed {
-                entity: enemy,
-                team: Team::Enemy,
-                position: transform.translation,
-                cause: DestroyCause::Crash,
-            });
-            commands.entity(enemy).despawn();
-        }
     }
 }
 

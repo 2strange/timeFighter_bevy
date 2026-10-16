@@ -13,6 +13,7 @@ use crate::{
         Weapon, player_loadout,
     },
     flight::{FlightConfig, FlightState, PlayerAircraft},
+    physics::CrashSweep,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,7 +159,15 @@ fn start_round(
     flight: Option<Res<FlightConfig>>,
     pause: Option<ResMut<Pause>>,
     leftovers: Query<Entity, Or<(With<Enemy>, With<Munition>)>>,
-    mut player: Query<(Entity, &mut FlightState, &mut Transform), With<PlayerAircraft>>,
+    mut player: Query<
+        (
+            Entity,
+            &mut FlightState,
+            &mut Transform,
+            Option<&mut CrashSweep>,
+        ),
+        With<PlayerAircraft>,
+    >,
 ) {
     if round.phase != RoundPhase::Starting {
         return;
@@ -176,11 +185,16 @@ fn start_round(
     for entity in &leftovers {
         commands.entity(entity).despawn();
     }
-    for (jet, mut state, mut transform) in &mut player {
+    for (jet, mut state, mut transform, sweep) in &mut player {
         commands.entity(jet).insert(player_loadout(&combat));
         if let Some(flight) = &flight {
             *state = FlightState::new(flight);
             *transform = flight.spawn_transform();
+        }
+        // Crash detection reports one crash per aircraft; arm it again at
+        // the spawn point (also when the crash happened close to it).
+        if let Some(mut sweep) = sweep {
+            sweep.reset_at(&transform);
         }
     }
     *round = Round {

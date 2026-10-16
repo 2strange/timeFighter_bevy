@@ -287,6 +287,11 @@ fn restart_resets_round_player_and_enemies() {
         .iter(app.world())
         .count();
     assert_eq!(leftovers, 0, "old rounds and missiles removed");
+
+    // Crash detection is armed again: the next crash ends this round too.
+    *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_xyz(0.0, 0.5, 0.0);
+    run_for(&mut app, 1.0);
+    assert_eq!(self::round(&app).phase, RoundPhase::Over(Outcome::Crashed));
 }
 
 #[test]
@@ -329,4 +334,25 @@ fn r_does_not_reset_the_jet_during_a_round() {
     let after = jets.single(app.world()).unwrap().translation;
     assert!(after.distance(spawn) > 1.0, "R reset the jet mid-round");
     assert_eq!(round(&app).phase, RoundPhase::Running);
+}
+
+#[test]
+fn ramming_a_spitfire_loses_the_round_but_counts_the_kill() {
+    let (mut app, jet) = app();
+    let mission = app.world().resource::<Mission>().clone();
+    let enemy = enemies(&mut app)[0];
+    // Put one Spitfire right in the jet's path.
+    let jet_tf = *app.world().get::<Transform>(jet).unwrap();
+    let in_path = Transform::from_translation(jet_tf.translation + jet_tf.forward() * 4.0)
+        .with_rotation(jet_tf.rotation);
+    *app.world_mut().get_mut::<Transform>(enemy).unwrap() = in_path;
+    run_for(&mut app, mission.end_delay + 0.5);
+
+    let round = round(&app);
+    assert_eq!(round.phase, RoundPhase::Over(Outcome::Crashed));
+    assert_eq!(round.stats.kills, 1);
+    assert!(
+        app.world().get_entity(enemy).is_err(),
+        "rammed enemy removed"
+    );
 }

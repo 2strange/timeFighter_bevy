@@ -29,7 +29,7 @@ pub use weapons::{Gun, Missile, MissileRack, Munition, Trigger, Weapon};
 
 use crate::{
     flight::{FlightState, FlightSystems, PlayerAircraft},
-    physics::{PlayerCrashed, ProjectileHit},
+    physics::{EnemyCrashed, PlayerCrashed, ProjectileHit},
 };
 
 /// Side an aircraft or projectile fights on. Projectiles never hit their
@@ -152,6 +152,7 @@ impl Plugin for CombatPlugin {
             // systems also run without it.
             .add_message::<ProjectileHit>()
             .add_message::<PlayerCrashed>()
+            .add_message::<EnemyCrashed>()
             .configure_sets(
                 Update,
                 (
@@ -182,6 +183,7 @@ impl Plugin for CombatPlugin {
                         hits::projectile_hits,
                         hits::missile_fuses,
                         hits::player_crashes,
+                        hits::enemy_crashes,
                         hits::remember_positions,
                     )
                         .chain()
