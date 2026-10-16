@@ -182,6 +182,18 @@ impl CityConfig {
         if self.avenue_every == 0 {
             return Err("avenue_every must be at least 1".into());
         }
+        let narrowest = self
+            .street_width
+            .min(self.avenue_width)
+            .min(self.boulevard_width);
+        let lines = self.grid_half_extent / (self.block_min + narrowest);
+        if lines > MAX_LINES_PER_SIDE as f32 {
+            return Err(format!(
+                "grid_half_extent {} would need up to {lines:.0} street lines per side \
+                 (max {MAX_LINES_PER_SIDE})",
+                self.grid_half_extent
+            ));
+        }
         if self.block_min > self.block_max {
             return Err(format!(
                 "block_min {} exceeds block_max {}",
@@ -750,28 +762,31 @@ impl CityLayout {
             h.f32s(&[b.rect.min.x, b.rect.min.y, b.rect.max.x, b.rect.max.y]);
             h.usize(b.zone as usize);
         }
+        let part = |h: &mut Fnv, p: &Part| {
+            h.f32s(&p.center.to_array());
+            h.f32s(&p.half_size.to_array());
+            h.usize(p.facade as usize);
+            match p.roof {
+                Roof::Flat => h.usize(0),
+                Roof::Gable {
+                    ridge_along_x,
+                    height,
+                } => {
+                    h.usize(1 + usize::from(ridge_along_x));
+                    h.f32s(&[height]);
+                }
+            }
+            h.f32s(&p.wall_color);
+            h.f32s(&p.roof_color);
+            h.usize(usize::from(p.underside));
+        };
         h.usize(self.buildings.len());
         for b in &self.buildings {
             h.usize(b.kind as usize);
             h.usize(b.zone as usize);
             h.usize(b.parts.len());
             for p in &b.parts {
-                h.f32s(&p.center.to_array());
-                h.f32s(&p.half_size.to_array());
-                h.usize(p.facade as usize);
-                match p.roof {
-                    Roof::Flat => h.usize(0),
-                    Roof::Gable {
-                        ridge_along_x,
-                        height,
-                    } => {
-                        h.usize(1 + usize::from(ridge_along_x));
-                        h.f32s(&[height]);
-                    }
-                }
-                h.f32s(&p.wall_color);
-                h.f32s(&p.roof_color);
-                h.usize(usize::from(p.underside));
+                part(&mut h, p);
             }
         }
         h.usize(self.river.len());
@@ -784,9 +799,9 @@ impl CityLayout {
             h.usize(b.axis);
             h.usize(b.line);
             h.usize(b.gap);
+            h.usize(b.parts.len());
             for p in &b.parts {
-                h.f32s(&p.center.to_array());
-                h.f32s(&p.half_size.to_array());
+                part(&mut h, p);
             }
         }
         h.usize(self.farms.len());
@@ -862,7 +877,10 @@ pub fn axis_rect(axis: usize, along: (f32, f32), across: (f32, f32)) -> Rect {
 
 /// Grid lines on one axis: a boulevard through the centre, then corridors
 /// outwards on both sides with random block sizes in between.
-fn street_lines(cfg: &CityConfig, rng: &mut Rng) -> Vec<StreetLine> {
+/// Upper bound on street lines on each side of the centre.
+pub const MAX_LINES_PER_SIDE: usize = 1_000;
+
+pub(super) fn street_lines(cfg: &CityConfig, rng: &mut Rng) -> Vec<StreetLine> {
     let width = |class| cfg.width(class);
     let center = StreetLine {
         center: 0.0,
@@ -872,7 +890,9 @@ fn street_lines(cfg: &CityConfig, rng: &mut Rng) -> Vec<StreetLine> {
     let mut lines = vec![center];
     for dir in [1.0, -1.0] {
         let mut prev = center;
-        for n in 1.. {
+        // Bounded even if f32 stops advancing at huge coordinates;
+        // `validate` keeps real configs far below the cap.
+        for n in 1..=MAX_LINES_PER_SIDE {
             let class = if n % cfg.avenue_every == 0 {
                 StreetClass::Avenue
             } else {
@@ -881,7 +901,7 @@ fn street_lines(cfg: &CityConfig, rng: &mut Rng) -> Vec<StreetLine> {
             let w = width(class);
             let block = rng.range(cfg.block_min, cfg.block_max);
             let c = prev.center + dir * (prev.width / 2.0 + block + w / 2.0);
-            if c.abs() > cfg.grid_half_extent {
+            if c.abs() > cfg.grid_half_extent || c.abs() <= prev.center.abs() {
                 break;
             }
             prev = StreetLine {
