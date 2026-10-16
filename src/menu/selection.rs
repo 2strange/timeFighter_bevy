@@ -5,7 +5,8 @@ use bevy::prelude::*;
 
 use super::rows::{Choice, Row};
 use crate::{
-    game_state::{Difficulty, DifficultyParams, GameMode, GameSettings},
+    ai::EnemyKind,
+    game_state::{Difficulty, DifficultyParams, GameMode, GameSettings, MissionConfig},
     world::Lighting,
 };
 
@@ -208,10 +209,25 @@ impl CustomField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RowId {
     Mode,
+    /// Protect only: which bomber attacks.
+    Bomber,
     Difficulty,
     Custom(CustomField),
     Lighting,
     Start,
+}
+
+/// Bombers offered for Protect, with their menu names.
+const BOMBERS: [(EnemyKind, &str); 2] = [
+    (EnemyKind::Lancaster, "Lancaster"),
+    (EnemyKind::B17, "B-17"),
+];
+
+fn bomber_key(kind: EnemyKind) -> &'static str {
+    match kind {
+        EnemyKind::B17 => "b17",
+        _ => "lancaster",
+    }
 }
 
 /// Number of difficulty choices: the presets plus Custom.
@@ -228,6 +244,8 @@ pub struct MenuSelection {
     /// Custom starts from the level picked before).
     pub custom_edited: bool,
     pub lighting: Lighting,
+    /// Bomber type of Protect.
+    pub bomber: EnemyKind,
 }
 
 impl Default for MenuSelection {
@@ -242,6 +260,7 @@ impl Default for MenuSelection {
             custom: Difficulty::Normal.params(),
             custom_edited: false,
             lighting: Lighting::Day,
+            bomber: MissionConfig::default().bomber,
         }
     }
 }
@@ -299,6 +318,17 @@ impl MenuSelection {
                 selected: self.level,
             },
         ];
+        if self.mode == MenuMode::Protect {
+            rows.insert(
+                1,
+                Row {
+                    id: RowId::Bomber,
+                    label: "Bomber".into(),
+                    choices: BOMBERS.iter().map(|b| Choice::new(b.1)).collect(),
+                    selected: BOMBERS.iter().position(|b| b.0 == self.bomber).unwrap_or(0),
+                },
+            );
+        }
         if self.is_custom() {
             let protect = self.mode == MenuMode::Protect;
             let fields = CustomField::ALL
@@ -362,6 +392,11 @@ impl MenuSelection {
                     self.custom_edited = true;
                 }
             }
+            RowId::Bomber => {
+                if let Some(bomber) = BOMBERS.get(index) {
+                    self.bomber = bomber.0;
+                }
+            }
             RowId::Lighting => {
                 if let Some(lighting) = Lighting::ALL.get(index) {
                     self.lighting = *lighting;
@@ -380,6 +415,7 @@ impl MenuSelection {
             format!("level={}", self.level),
             format!("light={}", self.lighting.label().to_lowercase()),
             format!("edited={}", u8::from(self.custom_edited)),
+            format!("bomber={}", bomber_key(self.bomber)),
         ];
         for field in CustomField::ALL {
             parts.push(format!("{}={}", field.key(), field.get(&self.custom)));
@@ -415,6 +451,11 @@ impl MenuSelection {
                     }
                 }
                 "edited" => selection.custom_edited = value == "1",
+                "bomber" => {
+                    if let Some(bomber) = BOMBERS.iter().find(|b| bomber_key(b.0) == value) {
+                        selection.bomber = bomber.0;
+                    }
+                }
                 _ => {
                     let field = CustomField::ALL.into_iter().find(|f| f.key() == key);
                     if let (Some(field), Ok(value)) = (field, value.parse::<f32>()) {

@@ -23,7 +23,9 @@ pub use selection::{CustomField, MenuMode, MenuSelection, RowId};
 use crate::{
     combat::CombatKeys,
     flight::{KeyHelpAppExt, KeyHelpSection},
-    game_state::{GameSettings, Pause, RestartRound, Round, RoundPhase, TriggerHold},
+    game_state::{
+        GameSettings, MissionConfig, Pause, RestartRound, Round, RoundPhase, TriggerHold,
+    },
     world::{Lighting, LightingSystems},
 };
 
@@ -90,9 +92,11 @@ fn prepare_first_round(
     selection: Res<MenuSelection>,
     mut settings: ResMut<GameSettings>,
     mut lighting: ResMut<Lighting>,
+    mut mission: ResMut<MissionConfig>,
 ) {
     *settings = selection.settings();
     *lighting = selection.lighting;
+    mission.bomber = selection.bomber;
 }
 
 #[derive(Component)]
@@ -176,7 +180,7 @@ fn menu_input(
     mut settings: ResMut<GameSettings>,
     mut lighting: ResMut<Lighting>,
     mut restart: MessageWriter<RestartRound>,
-    (mut hold, combat): (ResMut<TriggerHold>, Res<CombatKeys>),
+    (mut hold, combat, mut mission): (ResMut<TriggerHold>, Res<CombatKeys>, ResMut<MissionConfig>),
 ) {
     let rows = selection.rows();
     let cursor = rows.iter().position(|r| r.id == menu.cursor).unwrap_or(0);
@@ -205,6 +209,7 @@ fn menu_input(
         }
         Action::Start => {
             *settings = selection.settings();
+            mission.bomber = selection.bomber;
             *lighting = selection.lighting;
             storage::save(&selection.to_line());
             restart.write(RestartRound);

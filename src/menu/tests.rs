@@ -221,3 +221,39 @@ fn other_keys_held_at_start_do_not_block_the_weapons() {
     app.update();
     assert!(!app.world().resource::<TriggerHold>().is_holding());
 }
+
+#[test]
+fn choosing_protect_and_b17_in_the_menu_starts_a_protect_round_with_b17() {
+    use crate::{
+        ai::EnemyKind,
+        game_state::{GameMode, Mission, MissionConfig},
+    };
+
+    let mut app = game();
+    go_to(&mut app, RowId::Mode);
+    tap(&mut app, KeyCode::ArrowRight); // Protect
+    go_to(&mut app, RowId::Bomber);
+    tap(&mut app, KeyCode::ArrowRight); // B-17
+    tap(&mut app, KeyCode::Enter);
+    for _ in 0..3 {
+        app.update();
+    }
+    assert!(!menu(&app).open);
+    // The round that actually runs, not just the settings resource.
+    assert_eq!(app.world().resource::<Mission>().mode, GameMode::Protect);
+    assert_eq!(
+        app.world().resource::<MissionConfig>().bomber,
+        EnemyKind::B17
+    );
+    assert!(app.world().resource::<Round>().is_running());
+}
+
+#[test]
+fn the_bomber_row_shows_only_in_protect() {
+    let mut app = game();
+    let rows = |app: &App| app.world().resource::<MenuSelection>().rows();
+    assert!(!rows(&app).iter().any(|r| r.id == RowId::Bomber));
+    go_to(&mut app, RowId::Mode);
+    tap(&mut app, KeyCode::ArrowRight);
+    assert!(rows(&app).iter().any(|r| r.id == RowId::Bomber));
+}
