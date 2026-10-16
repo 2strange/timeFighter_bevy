@@ -45,16 +45,20 @@ pub enum CustomField {
     FlightSize,
     EnemySpeed,
     EnemyAccuracy,
+    Attackers,
+    LockTime,
     UnlimitedGun,
 }
 
 impl CustomField {
-    pub const ALL: [CustomField; 6] = [
+    pub const ALL: [CustomField; 8] = [
         CustomField::Missiles,
         CustomField::Enemies,
         CustomField::FlightSize,
         CustomField::EnemySpeed,
         CustomField::EnemyAccuracy,
+        CustomField::Attackers,
+        CustomField::LockTime,
         CustomField::UnlimitedGun,
     ];
 
@@ -65,6 +69,8 @@ impl CustomField {
             CustomField::FlightSize => "Flight size",
             CustomField::EnemySpeed => "Enemy speed",
             CustomField::EnemyAccuracy => "Enemy aim",
+            CustomField::Attackers => "Attacking at once",
+            CustomField::LockTime => "Missile lock time",
             CustomField::UnlimitedGun => "Unlimited gun",
         }
     }
@@ -76,6 +82,8 @@ impl CustomField {
             CustomField::FlightSize => "flight",
             CustomField::EnemySpeed => "speed",
             CustomField::EnemyAccuracy => "aim",
+            CustomField::Attackers => "attackers",
+            CustomField::LockTime => "lock",
             CustomField::UnlimitedGun => "gun",
         }
     }
@@ -88,6 +96,8 @@ impl CustomField {
             CustomField::FlightSize => &[1., 2., 3., 4., 5., 6.],
             CustomField::EnemySpeed => &[0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
             CustomField::EnemyAccuracy => &[0.25, 0.5, 0.7, 0.85, 1.0, 1.2, 1.5, 2.0],
+            CustomField::Attackers => &[1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12.],
+            CustomField::LockTime => &[0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
             CustomField::UnlimitedGun => &[0., 1.],
         }
     }
@@ -95,6 +105,7 @@ impl CustomField {
     fn step_label(self, value: f32) -> String {
         match self {
             CustomField::UnlimitedGun => if value > 0.5 { "On" } else { "Off" }.into(),
+            CustomField::LockTime => format!("{value:.1} s"),
             CustomField::EnemySpeed | CustomField::EnemyAccuracy => {
                 let number = format!("{value:.2}");
                 format!("{}x", number.trim_end_matches('0').trim_end_matches('.'))
@@ -110,6 +121,8 @@ impl CustomField {
             CustomField::FlightSize => params.flight_size as f32,
             CustomField::EnemySpeed => params.enemy_speed,
             CustomField::EnemyAccuracy => params.enemy_accuracy,
+            CustomField::Attackers => params.attackers as f32,
+            CustomField::LockTime => params.lock_time,
             CustomField::UnlimitedGun => f32::from(u8::from(params.unlimited_gun)),
         }
     }
@@ -121,6 +134,8 @@ impl CustomField {
             CustomField::FlightSize => params.flight_size = value.round() as u32,
             CustomField::EnemySpeed => params.enemy_speed = value,
             CustomField::EnemyAccuracy => params.enemy_accuracy = value,
+            CustomField::Attackers => params.attackers = value.round() as u32,
+            CustomField::LockTime => params.lock_time = value,
             CustomField::UnlimitedGun => params.unlimited_gun = value > 0.5,
         }
     }
@@ -436,6 +451,8 @@ mod tests {
                 CustomField::FlightSize => (1.0, 6.0),
                 CustomField::EnemySpeed => (0.5, 1.5),
                 CustomField::EnemyAccuracy => (0.25, 2.0),
+                CustomField::Attackers => (1.0, 12.0),
+                CustomField::LockTime => (0.2, 3.0),
                 CustomField::UnlimitedGun => (0.0, 1.0),
             };
             assert!(lo >= min && hi <= max, "{field:?}");

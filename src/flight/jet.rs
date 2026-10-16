@@ -155,11 +155,15 @@ mod tests {
             .unwrap()
     }
 
+    /// Meshes of the jet model below `root` (engine flames not counted).
     fn meshes_below(world: &World, root: Entity) -> usize {
         let mut count = 0;
         let mut stack = vec![root];
         while let Some(entity) = stack.pop() {
-            count += usize::from(world.get::<Mesh3d>(entity).is_some());
+            let flame = world
+                .get::<super::super::jet_fx::EngineFlame>(entity)
+                .is_some();
+            count += usize::from(world.get::<Mesh3d>(entity).is_some() && !flame);
             if let Some(children) = world.get::<Children>(entity) {
                 stack.extend(children.iter());
             }
