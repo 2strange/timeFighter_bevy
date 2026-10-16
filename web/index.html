@@ -133,10 +133,7 @@
         return bytes;
       }
 
-      let isReady = false;
       function ready() {
-        if (isReady) return;
-        isReady = true;
         play.disabled = false;
         play.textContent = 'START';
         status.textContent = 'Ready. Press Start or Enter.';
@@ -152,22 +149,18 @@
         const wasm = await download('./timefighter_bg.wasm');
         play.textContent = 'STARTING';
         status.textContent = 'Starting the engine…';
-        // The game starts behind this page, in its own menu, paused.
-        init({ module_or_path: wasm }).catch((error) => {
-          // Bevy hands control to the browser's event loop by throwing; that is not a failure.
+        // The game starts behind this page, in its own menu, paused. Bevy
+        // hands control to the browser's event loop by throwing; that
+        // exception means the game is running. Anything else is a failure.
+        try {
+          await init({ module_or_path: wasm });
+        } catch (error) {
           if (!String(error).includes('Using exceptions for control flow')) throw error;
-        });
-        // The canvas gets its size once the game runs.
-        const started = new MutationObserver(() => {
-          started.disconnect();
-          ready();
-        });
-        started.observe(canvas, { attributes: true });
-        // In case the canvas was sized before the observer was attached.
-        setTimeout(ready, 5000);
+        }
+        ready();
       } catch (error) {
         play.textContent = 'ERROR';
-        status.textContent = `The game could not be loaded (${error.message}). Reload the page to try again.`;
+        status.textContent = `The game could not be loaded (${error?.message ?? error}). Reload the page to try again.`;
       }
     </script>
   </body>
