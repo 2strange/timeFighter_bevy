@@ -87,9 +87,9 @@ impl EnemyStats {
 impl EnemyKind {
     pub fn stats(self) -> EnemyStats {
         match self {
-            // Arcade speeds: about
-            // a third of the jet's top speed, but a tighter turn than the
-            // jet at speed, so the player wins with energy, not by turning.
+            // Fighters. Arcade speeds: about a third of the jet's top speed,
+            // but a tighter turn than the jet at speed, so the player wins
+            // with energy, not by turning.
             EnemyKind::Spitfire => EnemyStats {
                 health: 50.0,
                 hitbox_radius: 5.5,
@@ -100,18 +100,23 @@ impl EnemyKind {
                 turn_rate: 0.75,
                 gun: GunSpec::WWII_GUNS,
             },
-            // A heavy bomber: slow, sluggish, tough (about 12 cannon hits
-            // or 2 missiles); its gun is the turrets'.
-            EnemyKind::Bf109K4 | EnemyKind::Me309 => EnemyStats {
+            // Second set: the Bf 109 a little slower than the Spitfire (it
+            // leads mixed pairs), the Me 309 about as fast, turning a bit
+            // wider.
+            EnemyKind::Bf109K4 => EnemyStats {
                 hitbox_radius: self.model().size().span() * 0.5,
+                min_speed: 110.0,
+                cruise_speed: 140.0,
+                max_speed: 165.0,
                 ..EnemyKind::Spitfire.stats()
             },
-            EnemyKind::He177 | EnemyKind::Me264 | EnemyKind::Ju390 | EnemyKind::Ju287 => {
-                EnemyStats {
-                    hitbox_radius: self.model().size().span() * 0.43,
-                    ..EnemyKind::Lancaster.stats()
-                }
-            }
+            EnemyKind::Me309 => EnemyStats {
+                hitbox_radius: self.model().size().span() * 0.5,
+                turn_rate: 0.7,
+                ..EnemyKind::Spitfire.stats()
+            },
+            // Heavy bombers: slow, sluggish, tough (about 12 cannon hits or
+            // 2 missiles); their gun is the turrets'.
             EnemyKind::Lancaster | EnemyKind::B17 => EnemyStats {
                 health: 200.0,
                 hitbox_radius: 13.0,
@@ -121,6 +126,21 @@ impl EnemyKind {
                 acceleration: 5.0,
                 turn_rate: 0.25,
                 gun: GunSpec::TURRET,
+            },
+            EnemyKind::He177 | EnemyKind::Me264 | EnemyKind::Ju287 => EnemyStats {
+                hitbox_radius: self.model().size().span() * 0.43,
+                ..EnemyKind::Lancaster.stats()
+            },
+            // The big one: twice an He 177's health, a little slower (it
+            // leads its flight, so the formation holds).
+            EnemyKind::Ju390 => EnemyStats {
+                health: 400.0,
+                hitbox_radius: self.model().size().span() * 0.43,
+                min_speed: 90.0,
+                cruise_speed: 105.0,
+                max_speed: 118.0,
+                turn_rate: 0.22,
+                ..EnemyKind::Lancaster.stats()
             },
         }
     }

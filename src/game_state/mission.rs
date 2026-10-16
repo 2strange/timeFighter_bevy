@@ -69,11 +69,11 @@ impl Formation {
     }
 }
 
-/// Enemies of one kind flying together.
+/// Enemies flying together, possibly of different kinds.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpawnGroup {
-    pub kind: EnemyKind,
-    pub count: u32,
+    /// The aircraft in formation order; the first leads.
+    pub members: Vec<EnemyKind>,
     /// Where the lead appears (m).
     pub lead: Vec3,
     /// Initial flight direction (horizontal is fine; normalised on spawn).
@@ -88,10 +88,14 @@ impl SpawnGroup {
     pub fn transforms(&self) -> impl Iterator<Item = Transform> + '_ {
         let heading = self.heading.normalize_or(Vec3::NEG_Z);
         let frame = Transform::from_translation(self.lead).looking_to(heading, Vec3::Y);
-        (0..self.count).map(move |i| {
+        (0..self.count()).map(move |i| {
             let position = frame.transform_point(self.formation.slot(i));
             Transform::from_translation(position).with_rotation(frame.rotation)
         })
+    }
+
+    pub fn count(&self) -> u32 {
+        self.members.len() as u32
     }
 }
 
@@ -103,7 +107,7 @@ pub struct WaveSpec {
 
 impl WaveSpec {
     pub fn enemy_count(&self) -> u32 {
-        self.groups.iter().map(|g| g.count).sum()
+        self.groups.iter().map(SpawnGroup::count).sum()
     }
 }
 
@@ -123,7 +127,7 @@ pub struct Mission {
 
 impl Default for Mission {
     fn default() -> Self {
-        Self::hunt(Difficulty::default())
+        Self::hunt(Difficulty::default(), &MissionConfig::default())
     }
 }
 
@@ -165,7 +169,7 @@ impl Mission {
     /// Mode 1, Hunt: Spitfire flights arriving one after another, each as
     /// the previous one is (nearly) gone. Size, count, pilots and tuning
     /// come from the difficulty.
-    pub fn hunt(difficulty: Difficulty) -> Self {
+    pub fn hunt(difficulty: Difficulty, config: &MissionConfig) -> Self {
         let params = difficulty.params().clamped();
         let flights = params.enemies.div_ceil(params.flight_size);
         let tuning = EnemyTuning {
@@ -195,8 +199,7 @@ impl Mission {
                         WaveTrigger::WhenEnemiesAtMost(params.flight_size / 4)
                     },
                     groups: vec![SpawnGroup {
-                        kind: EnemyKind::Spitfire,
-                        count,
+                        members: config.set.fighters(count),
                         lead,
                         heading,
                         formation: Formation::Vic { spacing: 45.0 },
@@ -218,15 +221,15 @@ impl Mission {
     /// The mission for the player's settings.
     pub fn from_settings(settings: &GameSettings, config: &MissionConfig) -> Self {
         match settings.mode {
-            GameMode::Hunt => Self::hunt(settings.difficulty),
-            GameMode::Protect => Self::protect(settings.difficulty, config.bomber),
+            GameMode::Hunt => Self::hunt(settings.difficulty, config),
+            GameMode::Protect => Self::protect(settings.difficulty, config),
         }
     }
 
     /// Mode 2, Protect: flights of four bombers, one after another (a fixed
     /// interval apart, or as soon as the sky is clear), each flying at the
     /// city centre from a different side and bombing it until shot down.
-    pub fn protect(difficulty: Difficulty, bomber: EnemyKind) -> Self {
+    pub fn protect(difficulty: Difficulty, config: &MissionConfig) -> Self {
         let params = difficulty.params().clamped();
         let tuning = EnemyTuning {
             speed: params.enemy_speed,
@@ -242,8 +245,7 @@ impl Mission {
                         WaveTrigger::AfterSecondsOrCleared(i as f32 * params.wave_interval)
                     },
                     groups: vec![SpawnGroup {
-                        kind: bomber,
-                        count: params.bombers_per_wave,
+                        members: config.set.bombers(params.bombers_per_wave, config.bomber),
                         lead,
                         heading,
                         formation: Formation::Vic { spacing: 60.0 },
