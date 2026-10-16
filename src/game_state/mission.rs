@@ -17,16 +17,19 @@ pub enum GameMode {
     /// Bomber flights attack the city centre; shoot them all down before
     /// too much of it is destroyed.
     Protect,
+    /// Both: every bomber flight comes with a fighter escort.
+    Battle,
 }
 
 impl GameMode {
     /// The modes that can be played (for menus).
-    pub const ALL: [GameMode; 2] = [GameMode::Hunt, GameMode::Protect];
+    pub const ALL: [GameMode; 3] = [GameMode::Hunt, GameMode::Protect, GameMode::Battle];
 
     pub fn display_name(self) -> &'static str {
         match self {
             GameMode::Hunt => "HUNT",
             GameMode::Protect => "PROTECT",
+            GameMode::Battle => "BATTLE",
         }
     }
 }
@@ -81,6 +84,10 @@ pub struct SpawnGroup {
     pub formation: Formation,
     pub skill: PilotSkill,
     pub tuning: EnemyTuning,
+    /// Fighters escorting the bomber group at this index of the same wave:
+    /// while waiting for an attack slot they circle the bombers instead of
+    /// a fixed holding point.
+    pub escorts: Option<usize>,
 }
 
 impl SpawnGroup {
@@ -205,6 +212,7 @@ impl Mission {
                         formation: Formation::Vic { spacing: 45.0 },
                         skill,
                         tuning,
+                        escorts: None,
                     }],
                 }
             })
@@ -223,6 +231,7 @@ impl Mission {
         match settings.mode {
             GameMode::Hunt => Self::hunt(settings.difficulty, config),
             GameMode::Protect => Self::protect(settings.difficulty, config),
+            GameMode::Battle => Self::battle(settings.difficulty, config),
         }
     }
 
@@ -251,6 +260,7 @@ impl Mission {
                         formation: Formation::Vic { spacing: 60.0 },
                         skill: PilotSkill::VETERAN,
                         tuning,
+                        escorts: None,
                     }],
                 }
             })
@@ -264,7 +274,46 @@ impl Mission {
         }
     }
 
+    /// Mode 3, Battle: Protect's bomber waves, each with an escort of
+    /// `flight_size` fighters that fight the player as in Hunt (attack
+    /// slots, sight). Won when everything is down; lost when the city
+    /// centre falls or the player is shot down.
+    pub fn battle(difficulty: Difficulty, config: &MissionConfig) -> Self {
+        let params = difficulty.params().clamped();
+        let mut mission = Self::protect(difficulty, config);
+        let waves = mission.waves.len() as u32;
+        for (i, wave) in mission.waves.iter_mut().enumerate() {
+            let bombers = wave.groups[0].clone();
+            let heading = bombers.heading.normalize_or(Vec3::NEG_Z);
+            let skill = match params.pilots {
+                PilotMix::Rookies => PilotSkill::ROOKIE,
+                PilotMix::Veterans => PilotSkill::VETERAN,
+                PilotMix::Mixed if i % 2 == 0 => PilotSkill::ROOKIE,
+                PilotMix::Mixed => PilotSkill::VETERAN,
+                PilotMix::RookiesThenVeterans if 2 * i < waves as usize => PilotSkill::ROOKIE,
+                PilotMix::RookiesThenVeterans => PilotSkill::VETERAN,
+            };
+            // The escort trails the bombers, a little higher.
+            wave.groups.push(SpawnGroup {
+                members: config.set.fighters(params.flight_size),
+                lead: bombers.lead - heading * ESCORT_TRAIL + Vec3::Y * ESCORT_ABOVE,
+                heading,
+                formation: Formation::Vic { spacing: 45.0 },
+                skill,
+                tuning: bombers.tuning,
+                escorts: Some(0),
+            });
+        }
+        mission.mode = GameMode::Battle;
+        mission
+    }
+
     pub fn enemy_count(&self) -> u32 {
         self.waves.iter().map(WaveSpec::enemy_count).sum()
     }
 }
+
+/// Where an escort enters relative to its bombers: this far behind (m) ...
+const ESCORT_TRAIL: f32 = 400.0;
+/// ... and this much higher (m).
+const ESCORT_ABOVE: f32 = 200.0;

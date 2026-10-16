@@ -388,6 +388,7 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
                     slot: slot as u32,
                     offset: group.formation.slot(slot as u32),
                     holding,
+                    escort: group.escorts.map(|b| (round.next_wave * 16 + b) as u32),
                 };
                 let kind = group.members[slot];
                 if kind.is_bomber() {

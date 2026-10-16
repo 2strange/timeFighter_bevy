@@ -96,10 +96,9 @@ fn choosing_with_arrows_and_enter_starts_a_round_with_those_settings() {
 }
 
 #[test]
-fn protect_can_be_chosen_and_greyed_out_modes_are_skipped() {
+fn protect_can_be_chosen_with_the_keys() {
     let mut app = game();
     go_to(&mut app, RowId::Mode);
-    tap(&mut app, KeyCode::ArrowRight);
     tap(&mut app, KeyCode::ArrowRight);
     assert_eq!(
         app.world().resource::<MenuSelection>().mode,
@@ -255,7 +254,7 @@ fn start_page_requests_pick_mode_and_level_by_name_or_index() {
     // Unknown values change nothing, but still start.
     let (selection, menu) = after_start_page(
         MenuSelection::default(),
-        Some("mode=battle;level=impossible"),
+        Some("mode=dogfight;level=impossible"),
     );
     assert_eq!(selection, MenuSelection::default());
     assert!(!menu.open);
@@ -305,4 +304,32 @@ fn autostarted_game_runs_without_menu_or_pause() {
         app.world().resource::<crate::game_state::Mission>().mode,
         crate::game_state::GameMode::Protect
     );
+}
+
+#[test]
+fn choosing_battle_in_the_menu_starts_a_battle_round() {
+    use crate::game_state::{GameMode, Mission};
+
+    let mut app = game();
+    go_to(&mut app, RowId::Mode);
+    tap(&mut app, KeyCode::ArrowRight);
+    tap(&mut app, KeyCode::ArrowRight); // Battle
+    tap(&mut app, KeyCode::Enter);
+    for _ in 0..3 {
+        app.update();
+    }
+    assert!(!menu(&app).open);
+    assert_eq!(app.world().resource::<Mission>().mode, GameMode::Battle);
+    assert!(app.world().resource::<Round>().is_running());
+}
+
+#[test]
+fn start_page_request_for_battle() {
+    let (selection, menu) =
+        after_start_page(MenuSelection::default(), Some("mode=battle;level=normal"));
+    assert_eq!(
+        selection.settings().mode,
+        crate::game_state::GameMode::Battle
+    );
+    assert!(!menu.open);
 }

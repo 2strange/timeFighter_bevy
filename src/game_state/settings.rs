@@ -160,6 +160,15 @@ impl Difficulty {
             (GameMode::Protect, Difficulty::Normal) => 16,
             (GameMode::Protect, Difficulty::Hard) => 12,
             (GameMode::Protect, Difficulty::Insane) => 12,
+            // Battle: bombers take two missiles, fighters one. Super Easy
+            // and Easy have enough (14 / 20 for 10 / 20 needed), Normal and
+            // up leave a share of the targets to the gun (24 of 30, 16 of
+            // 36, 16 of 48).
+            (GameMode::Battle, Difficulty::SuperEasy) => 14,
+            (GameMode::Battle, Difficulty::Easy) => 20,
+            (GameMode::Battle, Difficulty::Normal) => 24,
+            (GameMode::Battle, Difficulty::Hard) => 16,
+            (GameMode::Battle, Difficulty::Insane) => 16,
         };
         DifficultyParams { missiles, ..params }
     }

@@ -86,7 +86,7 @@
         <div class="choices" id="modes" role="group" aria-label="Mode">
           <button class="choice" type="button" data-mode="hunt">Hunt</button>
           <button class="choice" type="button" data-mode="protect">Protect</button>
-          <button class="choice" type="button" disabled title="Coming soon">Battle (coming soon)</button>
+          <button class="choice" type="button" data-mode="battle">Battle</button>
         </div>
         <p class="hint" id="mode-hint"></p>
 
@@ -170,6 +170,7 @@
       const MODE_HINTS = {
         hunt: 'Shoot down every fighter.',
         protect: 'Stop the bomber waves before they wreck the city centre.',
+        battle: 'Bombers with a fighter escort: protect the city and survive.',
       };
 
       function storage() {
@@ -194,7 +195,7 @@
       }
 
       const stored = readStored();
-      let mode = stored.get('mode') === 'protect' ? 'protect' : 'hunt';
+      let mode = ['protect', 'battle'].includes(stored.get('mode')) ? stored.get('mode') : 'hunt';
       let level = Number(stored.get('level') ?? 2);
       if (!(level >= 0 && level <= 5)) level = 2;
 

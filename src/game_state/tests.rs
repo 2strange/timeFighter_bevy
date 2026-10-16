@@ -927,3 +927,165 @@ fn a_second_set_protect_round_sends_a_ju_390_with_he_177s() {
     run_for(&mut app, 5.0);
     assert_eq!(round(&app).phase, RoundPhase::Running);
 }
+
+fn battle(difficulty: Difficulty) -> GameSettings {
+    GameSettings {
+        mode: GameMode::Battle,
+        difficulty,
+        ..default()
+    }
+}
+
+#[test]
+fn battle_waves_are_bombers_with_a_fighter_escort() {
+    use crate::{ai::EnemyKind, game_state::EnemySet};
+    let totals: Vec<u32> = Difficulty::PRESETS
+        .iter()
+        .map(|d| Mission::battle(*d, &MissionConfig::default()).enemy_count())
+        .collect();
+    // SE 1×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane 4×(4+4).
+    assert_eq!(totals, vec![6, 12, 18, 24, 32]);
+    for difficulty in Difficulty::PRESETS {
+        let params = difficulty.params();
+        let mission = Mission::battle(difficulty, &MissionConfig::default());
+        assert_eq!(mission.mode, GameMode::Battle);
+        assert_eq!(mission.city_loss, Some(params.city_loss));
+        for wave in &mission.waves {
+            let [bombers, escort] = &wave.groups[..] else {
+                panic!("two groups per wave");
+            };
+            assert!(bombers.members.iter().all(|k| k.is_bomber()));
+            assert_eq!(bombers.count(), params.bombers_per_wave);
+            assert!(escort.members.iter().all(|k| !k.is_bomber()));
+            assert_eq!(escort.count(), params.flight_size);
+            assert_eq!(escort.escorts, Some(0));
+        }
+    }
+    let second = Mission::battle(
+        Difficulty::Hard,
+        &MissionConfig {
+            set: EnemySet::Second,
+            ..default()
+        },
+    );
+    assert_eq!(second.waves[0].groups[0].members[0], EnemyKind::Ju390);
+    assert_eq!(
+        second.waves[0].groups[1].members,
+        vec![
+            EnemyKind::Bf109K4,
+            EnemyKind::Me309,
+            EnemyKind::Bf109K4,
+            EnemyKind::Me309
+        ]
+    );
+    assert!(GameMode::ALL.contains(&GameMode::Battle));
+}
+
+#[test]
+fn battle_missiles_follow_the_two_for_a_bomber_one_for_a_fighter_rule() {
+    let missiles: Vec<u32> = Difficulty::PRESETS
+        .iter()
+        .map(|d| d.params_for(GameMode::Battle).missiles)
+        .collect();
+    assert_eq!(missiles, vec![14, 20, 24, 16, 16]);
+}
+
+#[test]
+fn a_battle_round_is_won_when_everything_is_down() {
+    let (mut app, jet) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::SuperEasy),
+        true,
+    );
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 14);
+    let mut kinds: Vec<bool> = app
+        .world_mut()
+        .query::<&Enemy>()
+        .iter(app.world())
+        .map(|e| e.kind.is_bomber())
+        .collect();
+    kinds.sort();
+    assert_eq!(kinds, vec![false, false, true, true, true, true]);
+    // The escort knows its bombers.
+    let mut groups = app.world_mut().query::<(&Enemy, &crate::ai::FlightGroup)>();
+    let bomber_flight = groups
+        .iter(app.world())
+        .find(|(e, _)| e.kind.is_bomber())
+        .map(|(_, g)| g.id)
+        .unwrap();
+    assert!(
+        groups
+            .iter(app.world())
+            .filter(|(e, _)| !e.kind.is_bomber())
+            .all(|(_, g)| g.escort == Some(bomber_flight))
+    );
+    shoot_down_all(&mut app);
+    run_for(&mut app, 3.0);
+    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
+}
+
+#[test]
+fn a_battle_round_is_lost_with_the_city_or_the_jet() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Normal),
+        true,
+    );
+    app.world_mut()
+        .write_message(crate::world::damage::DamageArea {
+            point: Vec3::ZERO,
+            radius: 3_000.0,
+            strength: 1.0,
+        });
+    run_for(&mut app, 3.0);
+    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::CityDestroyed));
+
+    let (mut app, jet) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Normal),
+        true,
+    );
+    app.world_mut().write_message(Hit {
+        projectile: Entity::PLACEHOLDER,
+        target: jet,
+        point: Vec3::ZERO,
+        team: Team::Enemy,
+        weapon: Weapon::Gun,
+        damage: 1_000.0,
+    });
+    run_for(&mut app, 3.0);
+    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::ShotDown));
+}
+
+#[test]
+fn waiting_escorts_stay_with_their_bombers() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Hard),
+        true,
+    );
+    // Nobody attacks: the whole escort waits with the bombers.
+    app.insert_resource(crate::ai::AttackSlots { max: 0 });
+    run_for(&mut app, 40.0);
+    let mut leader = None;
+    let mut escorts = Vec::new();
+    let mut q = app
+        .world_mut()
+        .query::<(&Enemy, &crate::ai::FlightGroup, &Transform)>();
+    for (enemy, group, tf) in q.iter(app.world()) {
+        if enemy.kind.is_bomber() && group.slot == 0 {
+            leader = Some(tf.translation);
+        } else if !enemy.kind.is_bomber() {
+            escorts.push(tf.translation);
+        }
+    }
+    let leader = leader.expect("lead bomber");
+    assert_eq!(escorts.len(), 4);
+    for escort in escorts {
+        let distance = escort.distance(leader);
+        assert!(
+            distance < 1_500.0,
+            "escort {distance:.0} m from its bombers"
+        );
+    }
+}
