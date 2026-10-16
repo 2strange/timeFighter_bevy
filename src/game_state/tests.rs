@@ -575,3 +575,17 @@ fn a_round_starts_with_the_chosen_difficulty() {
         "unlimited gun"
     );
 }
+
+#[test]
+fn non_finite_custom_values_count_as_normal() {
+    let custom = Difficulty::Custom(crate::game_state::DifficultyParams {
+        enemy_speed: f32::NAN,
+        enemy_accuracy: f32::NEG_INFINITY,
+        ..default()
+    });
+    let params = custom.params().clamped();
+    assert_eq!((params.enemy_speed, params.enemy_accuracy), (1.0, 1.0));
+    let mission = Mission::hunt(custom);
+    let tuning = mission.waves[0].groups[0].tuning;
+    assert_eq!((tuning.speed, tuning.accuracy), (1.0, 1.0));
+}

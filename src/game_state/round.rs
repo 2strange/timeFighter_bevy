@@ -16,7 +16,7 @@ use crate::{
         FlightConfig, FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft,
     },
     physics::{CrashSweep, EnemyCrashed, PlayerCrashed, ProjectileHit},
-    world::Lighting,
+    world::{Lighting, LightingSystems},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,7 +146,8 @@ impl Plugin for RoundPlugin {
                     (restart, drop_stale_messages, start_round)
                         .chain()
                         .in_set(RoundSystems::Start),
-                    apply_lighting_setting,
+                    // Before the world applies the lighting, same frame.
+                    apply_lighting_setting.before(LightingSystems),
                     (count_events, spawn_waves, decide, advance_phase)
                         .chain()
                         .in_set(RoundSystems::Track),
