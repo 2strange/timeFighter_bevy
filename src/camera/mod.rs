@@ -1,6 +1,11 @@
-//! Chase camera behind the player's jet.
+//! Chase camera behind the player's jet, and the effects that make its
+//! speed visible.
+
+mod speed_fx;
 
 use bevy::prelude::*;
+
+pub use speed_fx::{SpeedFxConfig, shake};
 
 use crate::{
     flight::{FlightConfig, FlightState, FlightSystems, PlayerAircraft},
@@ -57,7 +62,9 @@ impl ChaseCameraConfig {
             look_at: Vec3::new(0.0, 3.0, -30.0),
             lag_base: 0.01,
             fov: 60_f32.to_radians(),
-            fov_speed_boost: 5_f32.to_radians(),
+            // Austin barely felt the difference between slow and fast with
+            // 5 degrees; 12 makes the ground rush past the edges at speed.
+            fov_speed_boost: 12_f32.to_radians(),
             far: match target {
                 Target::Web => WEB_CAMERA_FAR,
                 Target::Native => NATIVE_CAMERA_FAR,
@@ -67,11 +74,16 @@ impl ChaseCameraConfig {
 }
 
 impl ChaseCameraConfig {
-    /// Camera offset and vertical field of view for an airspeed.
-    pub fn framing(&self, flight: &FlightConfig, speed: f32) -> (Vec3, f32) {
+    /// 0 at minimum airspeed, 1 at top speed, smoothstepped.
+    pub fn speed_blend(&self, flight: &FlightConfig, speed: f32) -> f32 {
         let range = (flight.speed_max - flight.speed_min).max(f32::EPSILON);
         let x = ((speed - flight.speed_min) / range).clamp(0.0, 1.0);
-        let blend = x * x * (3.0 - 2.0 * x);
+        x * x * (3.0 - 2.0 * x)
+    }
+
+    /// Camera offset and vertical field of view for an airspeed.
+    pub fn framing(&self, flight: &FlightConfig, speed: f32) -> (Vec3, f32) {
+        let blend = self.speed_blend(flight, speed);
         (
             self.slow_offset.lerp(self.fast_offset, blend),
             self.fov + self.fov_speed_boost * blend,
@@ -96,6 +108,7 @@ pub struct ChaseCameraPlugin;
 impl Plugin for ChaseCameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChaseCameraConfig>()
+            .add_plugins(speed_fx::SpeedFxPlugin)
             .add_systems(Startup, spawn_camera)
             .add_systems(
                 Update,
