@@ -35,6 +35,8 @@ const HUD_DIM: Color = Color::srgba(0.72, 1.0, 0.78, 0.5);
 const DISABLED: Color = Color::srgba(0.6, 0.6, 0.6, 0.45);
 const CURSOR: Color = Color::srgb(1.0, 0.75, 0.2);
 const PANEL: Color = Color::srgba(0.03, 0.05, 0.07, 0.88);
+/// Rows with more choices than this show one value with arrows.
+const SPINNER_FROM: usize = 8;
 
 /// Whether the menu is showing, and the row the keyboard cursor is on.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
@@ -372,6 +374,46 @@ fn rebuild_menu(
                             ..default()
                         },
                     ));
+                    // Long value lists show as "< value >" instead of every step.
+                    if row.choices.len() > SPINNER_FROM {
+                        let arrow =
+                            |line: &mut ChildSpawnerCommands, text: &str, to: Option<usize>| {
+                                line.spawn((
+                                    MenuButton {
+                                        row: row.id,
+                                        index: to,
+                                        enabled: to.is_some(),
+                                    },
+                                    Node {
+                                        padding: UiRect::axes(px(8), px(3)),
+                                        ..default()
+                                    },
+                                ))
+                                .with_child(label(
+                                    text,
+                                    16.0,
+                                    if to.is_some() { HUD } else { DISABLED },
+                                ));
+                            };
+                        arrow(line, "<", row.step(-1));
+                        line.spawn((
+                            Node {
+                                min_width: px(70),
+                                justify_content: JustifyContent::Center,
+                                padding: UiRect::axes(px(8), px(3)),
+                                border: UiRect::all(px(1)),
+                                ..default()
+                            },
+                            BorderColor::all(HUD),
+                        ))
+                        .with_child(label(
+                            row.choices[row.selected].label.clone(),
+                            16.0,
+                            HUD,
+                        ));
+                        arrow(line, ">", row.step(1));
+                        return;
+                    }
                     for (index, choice) in row.choices.iter().enumerate() {
                         let selected = index == row.selected;
                         let color = if !choice.enabled {

@@ -9,7 +9,8 @@ use crate::{
     world::Lighting,
 };
 
-/// Game modes in the menu; only Hunt exists so far.
+/// Game modes in the menu. A mode can be picked once the game offers it in
+/// [`GameMode::ALL`]; the others show as "coming soon".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuMode {
     Hunt,
@@ -21,7 +22,8 @@ impl MenuMode {
     const ALL: [MenuMode; 3] = [MenuMode::Hunt, MenuMode::Protect, MenuMode::Battle];
 
     fn available(self) -> bool {
-        self == MenuMode::Hunt
+        self.game_mode()
+            .is_some_and(|mode| GameMode::ALL.contains(&mode))
     }
 
     fn label(self) -> &'static str {
@@ -32,8 +34,12 @@ impl MenuMode {
         }
     }
 
-    fn game_mode(self) -> GameMode {
-        GameMode::Hunt
+    fn game_mode(self) -> Option<GameMode> {
+        match self {
+            MenuMode::Hunt => Some(GameMode::Hunt),
+            MenuMode::Protect => Some(GameMode::Protect),
+            MenuMode::Battle => None,
+        }
     }
 }
 
@@ -48,10 +54,14 @@ pub enum CustomField {
     Attackers,
     LockTime,
     UnlimitedGun,
+    BomberWaves,
+    BombersPerWave,
+    WaveInterval,
+    CityLoss,
 }
 
 impl CustomField {
-    pub const ALL: [CustomField; 8] = [
+    pub const ALL: [CustomField; 12] = [
         CustomField::Missiles,
         CustomField::Enemies,
         CustomField::FlightSize,
@@ -60,7 +70,22 @@ impl CustomField {
         CustomField::Attackers,
         CustomField::LockTime,
         CustomField::UnlimitedGun,
+        CustomField::BomberWaves,
+        CustomField::BombersPerWave,
+        CustomField::WaveInterval,
+        CustomField::CityLoss,
     ];
+
+    /// Only meaningful with bombers (Protect).
+    fn protect_only(self) -> bool {
+        matches!(
+            self,
+            CustomField::BomberWaves
+                | CustomField::BombersPerWave
+                | CustomField::WaveInterval
+                | CustomField::CityLoss
+        )
+    }
 
     fn label(self) -> &'static str {
         match self {
@@ -72,6 +97,10 @@ impl CustomField {
             CustomField::Attackers => "Attacking at once",
             CustomField::LockTime => "Missile lock time",
             CustomField::UnlimitedGun => "Unlimited gun",
+            CustomField::BomberWaves => "Bomber waves",
+            CustomField::BombersPerWave => "Bombers per wave",
+            CustomField::WaveInterval => "Time between waves",
+            CustomField::CityLoss => "City lost at",
         }
     }
 
@@ -85,6 +114,10 @@ impl CustomField {
             CustomField::Attackers => "attackers",
             CustomField::LockTime => "lock",
             CustomField::UnlimitedGun => "gun",
+            CustomField::BomberWaves => "waves",
+            CustomField::BombersPerWave => "bombers",
+            CustomField::WaveInterval => "interval",
+            CustomField::CityLoss => "loss",
         }
     }
 
@@ -99,6 +132,13 @@ impl CustomField {
             CustomField::Attackers => &[1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12.],
             CustomField::LockTime => &[0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
             CustomField::UnlimitedGun => &[0., 1.],
+            CustomField::BomberWaves => &[1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12.],
+            CustomField::BombersPerWave => &[1., 2., 3., 4., 5., 6., 7., 8.],
+            CustomField::WaveInterval => &[
+                60., 70., 80., 90., 100., 110., 120., 130., 140., 150., 160., 170., 180., 190.,
+                200., 210., 220., 230., 240., 250., 260., 270., 280., 290., 300.,
+            ],
+            CustomField::CityLoss => &[0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6],
         }
     }
 
@@ -106,6 +146,8 @@ impl CustomField {
         match self {
             CustomField::UnlimitedGun => if value > 0.5 { "On" } else { "Off" }.into(),
             CustomField::LockTime => format!("{value:.1} s"),
+            CustomField::WaveInterval => format!("{value:.0} s"),
+            CustomField::CityLoss => format!("{:.0} %", value * 100.0),
             CustomField::EnemySpeed | CustomField::EnemyAccuracy => {
                 let number = format!("{value:.2}");
                 format!("{}x", number.trim_end_matches('0').trim_end_matches('.'))
@@ -124,6 +166,10 @@ impl CustomField {
             CustomField::Attackers => params.attackers as f32,
             CustomField::LockTime => params.lock_time,
             CustomField::UnlimitedGun => f32::from(u8::from(params.unlimited_gun)),
+            CustomField::BomberWaves => params.bomber_waves as f32,
+            CustomField::BombersPerWave => params.bombers_per_wave as f32,
+            CustomField::WaveInterval => params.wave_interval,
+            CustomField::CityLoss => params.city_loss,
         }
     }
 
@@ -137,6 +183,10 @@ impl CustomField {
             CustomField::Attackers => params.attackers = value.round() as u32,
             CustomField::LockTime => params.lock_time = value,
             CustomField::UnlimitedGun => params.unlimited_gun = value > 0.5,
+            CustomField::BomberWaves => params.bomber_waves = value.round() as u32,
+            CustomField::BombersPerWave => params.bombers_per_wave = value.round() as u32,
+            CustomField::WaveInterval => params.wave_interval = value,
+            CustomField::CityLoss => params.city_loss = value,
         }
     }
 
@@ -210,7 +260,7 @@ impl MenuSelection {
 
     pub fn settings(&self) -> GameSettings {
         GameSettings {
-            mode: self.mode.game_mode(),
+            mode: self.mode.game_mode().unwrap_or_default(),
             difficulty: self.difficulty(),
             lighting: self.lighting,
         }
@@ -250,7 +300,11 @@ impl MenuSelection {
             },
         ];
         if self.is_custom() {
-            rows.extend(CustomField::ALL.iter().map(|&field| {
+            let protect = self.mode == MenuMode::Protect;
+            let fields = CustomField::ALL
+                .iter()
+                .filter(|f| protect || !f.protect_only());
+            rows.extend(fields.map(|&field| {
                 Row {
                     id: RowId::Custom(field),
                     label: field.label().into(),
@@ -395,14 +449,59 @@ mod tests {
     }
 
     #[test]
-    fn greyed_out_modes_cannot_be_selected() {
+    fn modes_follow_what_the_game_offers() {
         let mut selection = MenuSelection::default();
-        assert!(!selection.select(RowId::Mode, 1));
+        // Protect is in GameMode::ALL, Battle is not (yet).
+        assert!(selection.select(RowId::Mode, 1));
+        assert_eq!(selection.settings().mode, GameMode::Protect);
         assert!(!selection.select(RowId::Mode, 2));
-        assert_eq!(selection.mode, MenuMode::Hunt);
+        assert_eq!(selection.mode, MenuMode::Protect);
         let rows = selection.rows();
-        assert!(!rows[0].choices[1].enabled && !rows[0].choices[2].enabled);
-        assert!(rows[0].choices[1].label.contains("coming soon"));
+        assert!(rows[0].choices[1].enabled && !rows[0].choices[2].enabled);
+        assert!(rows[0].choices[2].label.contains("coming soon"));
+        for mode in GameMode::ALL {
+            assert!(
+                MenuMode::ALL.iter().any(|m| m.game_mode() == Some(mode)),
+                "{mode:?} missing in the menu"
+            );
+        }
+    }
+
+    #[test]
+    fn bomber_values_show_only_in_protect() {
+        let mut selection = MenuSelection::default();
+        selection.select(RowId::Difficulty, CUSTOM_LEVEL);
+        let has = |s: &MenuSelection, f| s.rows().iter().any(|r| r.id == RowId::Custom(f));
+        assert!(!has(&selection, CustomField::BomberWaves));
+        assert!(has(&selection, CustomField::Missiles));
+
+        selection.select(RowId::Mode, 1);
+        for field in [
+            CustomField::BomberWaves,
+            CustomField::BombersPerWave,
+            CustomField::WaveInterval,
+            CustomField::CityLoss,
+        ] {
+            assert!(has(&selection, field), "{field:?}");
+        }
+        let interval = CustomField::WaveInterval
+            .steps()
+            .iter()
+            .position(|v| *v == 200.0)
+            .unwrap();
+        selection.select(RowId::Custom(CustomField::WaveInterval), interval);
+        let loss = CustomField::CityLoss
+            .steps()
+            .iter()
+            .position(|v| *v == 0.25)
+            .unwrap();
+        selection.select(RowId::Custom(CustomField::CityLoss), loss);
+        let Difficulty::Custom(params) = selection.settings().difficulty else {
+            panic!("custom expected");
+        };
+        assert_eq!((params.wave_interval, params.city_loss), (200.0, 0.25));
+        // Stored and read back.
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
     }
 
     #[test]
@@ -454,6 +553,10 @@ mod tests {
                 CustomField::Attackers => (1.0, 12.0),
                 CustomField::LockTime => (0.2, 3.0),
                 CustomField::UnlimitedGun => (0.0, 1.0),
+                CustomField::BomberWaves => (1.0, 12.0),
+                CustomField::BombersPerWave => (1.0, 8.0),
+                CustomField::WaveInterval => (60.0, 300.0),
+                CustomField::CityLoss => (0.1, 0.6),
             };
             assert!(lo >= min && hi <= max, "{field:?}");
             assert!(
