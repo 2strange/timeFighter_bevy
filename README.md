@@ -2,7 +2,7 @@
 
 A small arcade flight-combat game written in Rust with [Bevy](https://bevyengine.org), playable in the browser (WebAssembly).
 
-A modern jet fighter is pulled through a time vortex over the Bermuda Triangle and lands in the middle of a World War II bomber raid. Defend the city with machine guns, guided missiles and bombs.
+A modern jet takes off from its airbase, flies into a storm nobody forecast and, after one flash of lightning, comes out in a parallel timeline: the city nearby is under attack by a wave of propeller bombers. Defend it with the gun and guided missiles.
 
 **Status:** early development.
 

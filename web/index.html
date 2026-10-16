@@ -5,11 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>TimeFighter</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #9ebddb; overflow: hidden; }
+      :root {
+        --hud: #b8ffc7;
+        --hud-dim: rgba(184, 255, 199, 0.55);
+        --amber: #ffbf33;
+        --panel: rgba(6, 10, 14, 0.82);
+      }
+      html, body { margin: 0; height: 100%; background: #0b1218; overflow: hidden; }
+      body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--hud); }
       #game { display: block; width: 100%; height: 100%; outline: none; }
-      #loading {
-        position: absolute; inset: 0; display: grid; place-items: center;
-        font: 16px system-ui, sans-serif; color: #1b2a3a;
+
+      #start {
+        position: absolute; inset: 0; overflow-y: auto;
+        display: grid; place-items: center; padding: 16px; box-sizing: border-box;
+        background:
+          radial-gradient(ellipse at 50% 120%, rgba(255, 170, 90, 0.35), transparent 60%),
+          linear-gradient(180deg, #121b26 0%, #2a3442 55%, #5b4a46 100%);
+      }
+      #start.hidden { display: none; }
+      .card {
+        width: min(760px, 100%); padding: 28px 32px; box-sizing: border-box;
+        background: var(--panel); border: 1px solid var(--hud-dim);
+      }
+      h1 { margin: 0 0 4px; font-size: clamp(32px, 7vw, 56px); letter-spacing: 0.12em; color: var(--hud); }
+      .tagline { margin: 0 0 20px; color: var(--hud-dim); letter-spacing: 0.08em; text-transform: uppercase; font-size: 13px; }
+      .story { margin: 0 0 22px; color: #e8f2ea; }
+      h2 { margin: 18px 0 8px; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--hud-dim); }
+      .keys { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 0; font-size: 14px; }
+      .keys dt { color: var(--amber); white-space: nowrap; }
+      .keys dd { margin: 0; color: #dfe9e2; }
+      #play {
+        display: block; margin: 26px auto 8px; padding: 14px 56px;
+        font: 600 22px system-ui, sans-serif; letter-spacing: 0.2em;
+        color: #0b1218; background: var(--hud); border: none; cursor: pointer;
+      }
+      #play:disabled { background: var(--hud-dim); cursor: progress; }
+      #play:not(:disabled):hover, #play:not(:disabled):focus-visible { background: var(--amber); outline: none; }
+      .status { text-align: center; font-size: 13px; color: var(--hud-dim); min-height: 1.5em; }
+      .links { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: center; font-size: 13px; }
+      a { color: var(--hud); }
+      .note { margin-top: 10px; text-align: center; font-size: 12px; color: var(--hud-dim); }
+      @media (max-width: 520px) {
+        .card { padding: 20px 16px; }
+        .keys { grid-template-columns: 1fr; gap: 0 0; }
+        .keys dd { margin-bottom: 6px; }
       }
       #nav {
         position: absolute; right: 12px; bottom: 12px;
@@ -18,20 +57,118 @@
     </style>
   </head>
   <body>
-    <div id="loading">Loading…</div>
     <canvas id="game" tabindex="0"></canvas>
     <a id="nav" href="showroom.html">Aircraft showroom</a>
+
+    <div id="start">
+      <main class="card">
+        <h1>TIMEFIGHTER</h1>
+        <p class="tagline">Arcade air combat over a city in another timeline</p>
+        <p class="story">
+          A routine training sortie from your home airbase. A storm front that no
+          forecast saw coming, one blinding flash of lightning, and your jet
+          breaks out of the clouds into a parallel timeline. The city below looks
+          familiar, but your airbase is gone, the radio is only static, and a wave
+          of propeller bombers is heading for the rooftops. You are the only thing
+          in the sky that can stop them.
+        </p>
+
+        <h2>Controls</h2>
+        <dl class="keys">
+          <dt>W / S</dt><dd>pitch (W = nose down)</dd>
+          <dt>A / D</dt><dd>roll</dd>
+          <dt>Q / E or ← / →</dt><dd>yaw</dd>
+          <dt>↑ / ↓</dt><dd>throttle</dd>
+          <dt>Space / left mouse</dt><dd>gun</dd>
+          <dt>Right Shift / right mouse</dt><dd>missile (homes on a locked target)</dd>
+          <dt>Tab / right Alt (Option)</dt><dd>next target</dd>
+          <dt>Enter or R / M</dt><dd>fly again / menu, after a round</dd>
+          <dt>P / Esc</dt><dd>pause</dd>
+          <dt>I</dt><dd>key help in the game</dd>
+        </dl>
+
+        <button id="play" type="button" disabled>LOADING</button>
+        <div class="status" id="status" aria-live="polite">Loading the game…</div>
+
+        <div class="links">
+          <a href="showroom.html">Aircraft showroom</a>
+          <a href="assets/aircraft/CREDITS.md">Credits for the aircraft models</a>
+        </div>
+        <p class="note">Best on a desktop or laptop with a keyboard.</p>
+      </main>
+    </div>
+
     <script type="module">
       import init from './timefighter.js';
+
       const canvas = document.getElementById('game');
+      const start = document.getElementById('start');
+      const play = document.getElementById('play');
+      const status = document.getElementById('status');
       canvas.addEventListener('click', () => canvas.focus());
-      init().catch((error) => {
-        // Bevy hands control to the browser's event loop by throwing; that is not a failure.
-        if (!String(error).includes('Using exceptions for control flow')) throw error;
+
+      // Download the game while the player reads, with progress.
+      async function download(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`${url}: ${response.status}`);
+        const total = Number(response.headers.get('Content-Length')) || 0;
+        if (!response.body || !total) return response.arrayBuffer();
+        const reader = response.body.getReader();
+        const chunks = [];
+        let received = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          const percent = Math.min(99, Math.floor((received / total) * 100));
+          play.textContent = `LOADING ${percent} %`;
+        }
+        const bytes = new Uint8Array(received);
+        let offset = 0;
+        for (const chunk of chunks) {
+          bytes.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return bytes;
+      }
+
+      let isReady = false;
+      function ready() {
+        if (isReady) return;
+        isReady = true;
+        play.disabled = false;
+        play.textContent = 'START';
+        status.textContent = 'Ready. Press Start or Enter.';
+        play.focus();
+      }
+
+      play.addEventListener('click', () => {
+        start.classList.add('hidden');
+        canvas.focus();
       });
-      new MutationObserver(() => document.getElementById('loading')?.remove())
-        .observe(canvas, { attributes: true });
-      canvas.focus();
+
+      try {
+        const wasm = await download('./timefighter_bg.wasm');
+        play.textContent = 'STARTING';
+        status.textContent = 'Starting the engine…';
+        // The game starts behind this page, in its own menu, paused.
+        init({ module_or_path: wasm }).catch((error) => {
+          // Bevy hands control to the browser's event loop by throwing; that is not a failure.
+          if (!String(error).includes('Using exceptions for control flow')) throw error;
+        });
+        // The canvas gets its size once the game runs.
+        const started = new MutationObserver(() => {
+          started.disconnect();
+          ready();
+        });
+        started.observe(canvas, { attributes: true });
+        // In case the canvas was sized before the observer was attached.
+        setTimeout(ready, 5000);
+      } catch (error) {
+        play.textContent = 'ERROR';
+        status.textContent = `The game could not be loaded (${error.message}). Reload the page to try again.`;
+      }
     </script>
   </body>
 </html>
