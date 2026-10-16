@@ -17,6 +17,35 @@ use crate::physics::{AircraftSize, Layer, aircraft_body_sized};
 
 pub use showroom::{ShowroomPlugin, ShowroomView};
 
+/// A gun position on an aircraft (m, model frame: nose −Z, +Y up).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GunMount {
+    pub name: &'static str,
+    pub position: Vec3,
+}
+
+impl GunMount {
+    const fn new(name: &'static str, x: f32, y: f32, z: f32) -> Self {
+        Self {
+            name,
+            position: Vec3::new(x, y, z),
+        }
+    }
+}
+
+const B17_MOUNTS: [GunMount; 4] = [
+    GunMount::new("front_gun", 0.00, -0.79, -10.94),
+    GunMount::new("rear_gun", 0.01, -1.37, 10.93),
+    GunMount::new("top_turret", 0.00, 1.65, -6.24),
+    GunMount::new("ball_turret", 0.00, -1.97, -0.12),
+];
+
+const LANCASTER_MOUNTS: [GunMount; 3] = [
+    GunMount::new("front_turret", 0.00, -0.06, -9.82),
+    GunMount::new("rear_turret", 0.00, 0.47, 9.74),
+    GunMount::new("top_turret", 0.00, 1.55, 2.92),
+];
+
 /// Normalised aircraft models available in `assets/aircraft/`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AircraftModel {
@@ -25,15 +54,19 @@ pub enum AircraftModel {
     Tu2,
     F4uCorsair,
     Spitfire,
+    B17,
+    Lancaster,
 }
 
 impl AircraftModel {
-    pub const ALL: [AircraftModel; 5] = [
+    pub const ALL: [AircraftModel; 7] = [
         AircraftModel::F14Tomcat,
         AircraftModel::Mig29,
         AircraftModel::Tu2,
         AircraftModel::F4uCorsair,
         AircraftModel::Spitfire,
+        AircraftModel::B17,
+        AircraftModel::Lancaster,
     ];
 
     /// File name in `assets/aircraft/`, without extension. Matches the
@@ -45,6 +78,8 @@ impl AircraftModel {
             AircraftModel::Tu2 => "tupolev_tu_2",
             AircraftModel::F4uCorsair => "f4u_corsair",
             AircraftModel::Spitfire => "spitfire",
+            AircraftModel::B17 => "b17",
+            AircraftModel::Lancaster => "lancaster",
         }
     }
 
@@ -55,6 +90,8 @@ impl AircraftModel {
             AircraftModel::Tu2 => "Tu-2",
             AircraftModel::F4uCorsair => "F4U Corsair",
             AircraftModel::Spitfire => "Spitfire",
+            AircraftModel::B17 => "B-17",
+            AircraftModel::Lancaster => "Lancaster",
         }
     }
 
@@ -67,10 +104,23 @@ impl AircraftModel {
             AircraftModel::Tu2 => ([-9.40, -2.23, -6.90], [9.40, 1.72, 6.90]),
             AircraftModel::F4uCorsair => ([-5.35, -1.49, -5.10], [5.35, 2.31, 5.10]),
             AircraftModel::Spitfire => ([-4.91, -1.83, -4.56], [4.91, 1.62, 4.56]),
+            AircraftModel::B17 => ([-14.93, -2.38, -11.33], [15.31, 3.01, 11.33]),
+            AircraftModel::Lancaster => ([-15.23, -3.145, -10.56], [15.24, 2.44, 10.56]),
         };
         AircraftSize {
             min: Vec3::from_array(min),
             max: Vec3::from_array(max),
+        }
+    }
+
+    /// Gun positions of bombers (m, model frame), measured by the
+    /// normaliser in `assets/aircraft/mounts.json`; empty for fighters.
+    /// Front and rear come first.
+    pub fn gun_mounts(self) -> &'static [GunMount] {
+        match self {
+            AircraftModel::B17 => &B17_MOUNTS,
+            AircraftModel::Lancaster => &LANCASTER_MOUNTS,
+            _ => &[],
         }
     }
 

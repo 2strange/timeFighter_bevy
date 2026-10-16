@@ -14,10 +14,26 @@ use bevy::{
 
 use super::AircraftModel;
 
-/// Distance between neighbouring models along X (m).
-const SPACING: f32 = 26.0;
+/// Gap between the wing tips of neighbouring models (m).
+const GAP: f32 = 6.0;
 /// Floor top, just below the lowest model (origins sit on the fuselage axis).
-const FLOOR_Y: f32 = -2.5;
+const FLOOR_Y: f32 = -3.3;
+
+/// X position of each model's centre in the row, and the row's width.
+fn row_layout() -> (Vec<f32>, f32) {
+    let spans: Vec<f32> = AircraftModel::ALL.iter().map(|m| m.size().span()).collect();
+    let width = spans.iter().sum::<f32>() + GAP * (spans.len() as f32 - 1.0);
+    let mut left = -width / 2.0;
+    let centres = spans
+        .iter()
+        .map(|span| {
+            let centre = left + span / 2.0;
+            left += span + GAP;
+            centre
+        })
+        .collect();
+    (centres, width)
+}
 /// Orbit speed with keys (rad/s) and with the mouse (rad per pixel).
 const KEY_ORBIT: f32 = 1.0;
 const MOUSE_ORBIT: f32 = 0.005;
@@ -39,7 +55,7 @@ impl Default for ShowroomView {
         Self {
             yaw: 0.5,
             pitch: 0.35,
-            distance: 140.0,
+            distance: 230.0,
         }
     }
 }
@@ -116,7 +132,7 @@ fn orbit_camera(
     }
     view.yaw += yaw;
     view.pitch = (view.pitch + pitch).clamp(-0.2, 1.5);
-    view.distance = (view.distance * (1.0 + zoom.clamp(-0.5, 0.5))).clamp(15.0, 300.0);
+    view.distance = (view.distance * (1.0 + zoom.clamp(-0.5, 0.5))).clamp(15.0, 450.0);
     for mut transform in &mut camera {
         *transform = view.camera_transform();
     }
@@ -165,9 +181,12 @@ fn spawn_showroom(
         ));
     };
 
+    let (centres, width) = row_layout();
+    let edge = width / 2.0 + 12.0;
+
     // Floor.
     part(
-        Cuboid::new(180.0, 0.2, 60.0).mesh().build(),
+        Cuboid::new(2.0 * edge + 20.0, 0.2, 60.0).mesh().build(),
         Color::srgb(0.32, 0.34, 0.36),
         Vec3::new(0.0, FLOOR_Y - 0.1, 0.0),
     );
@@ -186,12 +205,12 @@ fn spawn_showroom(
         part(
             Cuboid::new(0.25, 0.25, 1.0).mesh().build(),
             color,
-            Vec3::new(-80.0, FLOOR_Y + 0.125, step),
+            Vec3::new(-edge, FLOOR_Y + 0.125, step),
         );
     }
 
     // Axis cross at the right end: +X red, +Y green, +Z blue, 6 m each.
-    let axes = Vec3::new(80.0, FLOOR_Y, 0.0);
+    let axes = Vec3::new(edge, FLOOR_Y, 0.0);
     part(
         Cuboid::new(6.0, 0.3, 0.3).mesh().build(),
         Color::srgb(0.9, 0.1, 0.1),
@@ -208,13 +227,26 @@ fn spawn_showroom(
         axes + Vec3::Z * 3.0,
     );
 
-    let first_x = -SPACING * (AircraftModel::ALL.len() as f32 - 1.0) / 2.0;
-    for (i, model) in AircraftModel::ALL.into_iter().enumerate() {
+    let mount_mesh = meshes.add(Sphere::new(0.45));
+    let mount_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.75, 0.2),
+        unlit: true,
+        ..default()
+    });
+    for (model, x) in AircraftModel::ALL.into_iter().zip(centres) {
         commands.spawn((
             Name::new(model.display_name()),
             model.scene(&assets),
-            Transform::from_translation(Vec3::X * (first_x + i as f32 * SPACING)),
+            Transform::from_translation(Vec3::X * x),
         ));
+        // Gun positions of the bombers, for checking by eye.
+        for mount in model.gun_mounts() {
+            commands.spawn((
+                Mesh3d(mount_mesh.clone()),
+                MeshMaterial3d(mount_material.clone()),
+                Transform::from_translation(Vec3::X * x + mount.position),
+            ));
+        }
     }
 }
 
@@ -229,6 +261,7 @@ fn spawn_help(mut commands: Commands) {
              Left to right: {}\n\
              Red/white bars: 10 m in 1 m steps\n\
              Axes: X red, Y green, +Z blue. Noses must point away from blue (-Z).\n\
+             Amber dots: gun positions of the bombers.\n\
              Drag to orbit, wheel to zoom   (keys: A/D, W/S, Q/E)",
             names.join("  |  ")
         )),

@@ -39,6 +39,67 @@
       "forward": "-X",
       "up": "+Y",
       "pose": "rest"
+    },
+    {
+      "name": "b17",
+      "source": "inbox/b17",
+      "length": 22.66,
+      "forward": "+X",
+      "up": "+Y",
+      "pose": "rest",
+      "target_triangles": 10000,
+      "max_texture": 512,
+      "mounts": [
+        {
+          "name": "front_gun",
+          "nodes": "metralleta_FACES01"
+        },
+        {
+          "name": "rear_gun",
+          "nodes": "/Object05(/|$)"
+        },
+        {
+          "name": "top_turret",
+          "nodes": "torretaarr_FACES01"
+        },
+        {
+          "name": "ball_turret",
+          "nodes": "/bola_FACES01"
+        }
+      ],
+      "drop_nodes": "rueda01|ruedaatras"
+    },
+    {
+      "name": "lancaster",
+      "source": "inbox/lancaster",
+      "length": 21.11,
+      "forward": "-X",
+      "up": "+Y",
+      "pose": "rest",
+      "drop_materials": "r1155|interior|boost|rpm|compass|_ai\\.|panel|smiths|_alt\\.|ASI",
+      "target_triangles": 10000,
+      "max_texture": 512,
+      "mounts": [
+        {
+          "name": "front_turret",
+          "materials": "^transparent$",
+          "pick": "front"
+        },
+        {
+          "name": "rear_turret",
+          "materials": "^transparent$",
+          "pick": "rear"
+        },
+        {
+          "name": "top_turret",
+          "materials": "^transparent$",
+          "pick": "top",
+          "z": [
+            -2.0,
+            8.0
+          ]
+        }
+      ]
     }
   ]
 }

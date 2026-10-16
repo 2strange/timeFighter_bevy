@@ -14,12 +14,44 @@
 // the real length in metres, and the source's forward/up axes ("+X", "-Z",
 // ...). "auto" lets the script guess and print its reasoning; pin the guess
 // in the manifest once it has been checked visually.
+//
+// Optional per entry, for detailed models that must become light enough to
+// fly in numbers:
+//   "drop_materials": regex  - remove primitives whose material matches
+//                              (e.g. cockpit interior, instruments)
+//   "drop_nodes": regex      - remove meshes below nodes whose name matches
+//   "target_triangles": n    - simplify (meshoptimizer) to about n triangles;
+//                              normals are dropped first so faces can merge
+//                              (the game computes flat normals, low-poly look)
+//   "max_texture": px        - downscale textures to at most px per side and
+//                              store them as PNG (the game decodes only PNG)
+//   "mounts": [{ "name", "nodes" | "materials", "pick" }]
+//                            - points of interest (gun turrets), measured in
+//                              the normalised model: the centre of the
+//                              matched geometry, or with "pick": "front" /
+//                              "rear" / "top" / "bottom" the centre of its
+//                              part within 1.5 m of that extreme; "z": [a, b]
+//                              limits the search to that length range (m,
+//                              nose at -Z). Written to mounts.json.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NodeIO, getBounds } from '@gltf-transform/core';
-import { clearNodeTransform, dedup, flatten, join, prune, transformMesh } from '@gltf-transform/functions';
+import {
+  clearNodeTransform,
+  dedup,
+  flatten,
+  join,
+  prune,
+  simplify,
+  textureCompress,
+  transformMesh,
+  weld,
+} from '@gltf-transform/functions';
+import { MeshoptSimplifier } from 'meshoptimizer';
+import sharp from 'sharp';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
@@ -36,6 +68,8 @@ const io = new NodeIO();
 await mkdir(outDir, { recursive: true });
 
 const credits = [];
+const mountsPath = path.join(outDir, 'mounts.json');
+const mounts = existsSync(mountsPath) ? JSON.parse(await readFile(mountsPath, 'utf8')) : {};
 for (const entry of manifest.aircraft) {
   if (args.only && args.only !== entry.name) continue;
   const source = path.join(sourceRoot, entry.source);
@@ -43,14 +77,18 @@ for (const entry of manifest.aircraft) {
   if (!ALLOWED_LICENSES.includes(license.license)) {
     fail(`${entry.name}: licence "${license.license}" is not allowed (${ALLOWED_LICENSES.join(', ')})`);
   }
-  credits.push({ ...license, file: `${entry.name}.glb` });
+  credits.push({ ...license, file: `${entry.name}.glb`, simplified: Boolean(entry.target_triangles) });
 
   const doc = await io.read(path.join(source, 'scene.gltf'));
   const report = await normalize(doc, entry);
   const out = path.join(outDir, `${entry.name}.glb`);
   await io.write(out, doc);
   console.log(formatReport(entry, report, out));
+  if (Object.keys(report.mounts).length) mounts[entry.name] = report.mounts;
+  else delete mounts[entry.name];
 }
+
+await writeFile(mountsPath, JSON.stringify(mounts, null, 2) + '\n');
 
 if (!args.only) {
   await writeFile(path.join(outDir, 'CREDITS.md'), formatCredits(credits));
@@ -63,6 +101,18 @@ async function normalize(doc, entry) {
 
   const pose = choosePose(doc, scene, entry);
   for (const animation of root.listAnimations()) animation.dispose();
+
+  // Remember each mesh node's ancestry, so mounts and drops can match the
+  // names of groups that flattening removes.
+  const paths = new Map();
+  const tag = (node, prefix) => {
+    const here = prefix ? `${prefix}/${node.getName()}` : node.getName();
+    paths.set(node, here);
+    node.listChildren().forEach((child) => tag(child, here));
+  };
+  scene.listChildren().forEach((child) => tag(child, ''));
+  const trianglesBefore = countTriangles(root);
+  dropParts(root, scene, paths, entry);
 
   // Bake every node transform into its mesh, then hang all meshes below one
   // clean root node.
@@ -81,6 +131,15 @@ async function normalize(doc, entry) {
   scene.addChild(modelRoot);
   await doc.transform(prune(), dedup());
 
+  // Mount geometry is picked before simplifying (small parts such as gun
+  // barrels may not survive it); the size is measured after, so the final
+  // length matches what is drawn.
+  const mountSources = collectMountPoints(meshNodes, paths, entry);
+  // Simplifying trims the two wing tips unevenly; the symmetry plane is
+  // taken from the full geometry.
+  const unsimplified = boundsOf(collectPositions(meshNodes));
+  if (entry.target_triangles) await simplifyTo(doc, entry.target_triangles);
+
   const positions = collectPositions(meshNodes);
   const before = boundsOf(positions);
   const axes = chooseAxes(positions, before, entry);
@@ -98,8 +157,10 @@ async function normalize(doc, entry) {
   const box = boundsOf(rotated);
   const noseCut = box.min[2] + 0.05 * (box.max[2] - box.min[2]);
   const nose = rotated.filter((p) => p[2] <= noseCut);
+  const symmetryX =
+    [unsimplified.min, unsimplified.max].reduce((sum, p) => sum + dot(r, p) * scale, 0) / 2;
   const centre = [
-    (box.min[0] + box.max[0]) / 2,
+    entry.target_triangles ? symmetryX : (box.min[0] + box.max[0]) / 2,
     nose.reduce((s, p) => s + p[1], 0) / nose.length,
     (box.min[2] + box.max[2]) / 2,
   ];
@@ -112,15 +173,120 @@ async function normalize(doc, entry) {
     -centre[0], -centre[1], -centre[2], 1,
   ];
   for (const mesh of root.listMeshes()) transformMesh(mesh, m);
+  const apply = (p) => [0, 1, 2].map((i) => m[i] * p[0] + m[4 + i] * p[1] + m[8 + i] * p[2] + m[12 + i]);
+  const mountPoints = measureMounts(mountSources, apply, entry);
 
   await doc.transform(join({ keepNamed: false }), prune(), dedup());
+  if (entry.max_texture) {
+    await doc.transform(
+      // PNG: the game only decodes PNG (no JPEG support compiled in).
+      textureCompress({
+        encoder: sharp,
+        targetFormat: 'png',
+        resize: [entry.max_texture, entry.max_texture],
+      }),
+    );
+  }
   const after = getBounds(scene);
   const counts = {
     meshes: root.listMeshes().length,
     primitives: root.listMeshes().reduce((s, mesh) => s + mesh.listPrimitives().length, 0),
     textures: root.listTextures().length,
+    trianglesBefore,
+    triangles: countTriangles(root),
   };
-  return { pose, axes, before, after, scale, counts };
+  return { pose, axes, before, after, scale, counts, mounts: mountPoints };
+}
+
+// --- Detail: dropping, simplifying, mounts ------------------------------------
+
+function countTriangles(root) {
+  let n = 0;
+  for (const mesh of root.listMeshes()) {
+    for (const prim of mesh.listPrimitives()) {
+      const indices = prim.getIndices();
+      n += Math.floor((indices ?? prim.getAttribute('POSITION')).getCount() / 3);
+    }
+  }
+  return n;
+}
+
+function dropParts(root, scene, paths, entry) {
+  const byMaterial = entry.drop_materials && new RegExp(entry.drop_materials);
+  const byNode = entry.drop_nodes && new RegExp(entry.drop_nodes);
+  if (byNode) {
+    scene.traverse((node) => {
+      if (node.getMesh() && byNode.test(paths.get(node) ?? '')) node.setMesh(null);
+    });
+  }
+  if (byMaterial) {
+    for (const mesh of root.listMeshes()) {
+      for (const prim of mesh.listPrimitives()) {
+        if (byMaterial.test(prim.getMaterial()?.getName() ?? '')) prim.dispose();
+      }
+    }
+  }
+}
+
+/// Simplifies until the model has at most about `target` triangles, raising
+/// the allowed error step by step so silhouettes keep what matters most.
+async function simplifyTo(doc, target) {
+  await MeshoptSimplifier.ready;
+  // Per-face normals keep neighbouring triangles from sharing vertices,
+  // which leaves the simplifier nothing to collapse.
+  for (const mesh of doc.getRoot().listMeshes()) {
+    for (const prim of mesh.listPrimitives()) prim.setAttribute('NORMAL', null);
+  }
+  await doc.transform(weld());
+  for (const error of [0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2]) {
+    const now = countTriangles(doc.getRoot());
+    if (now <= target * 1.1) return;
+    const ratio = Math.min(1, target / now);
+    await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error }), prune());
+  }
+}
+
+/// Source-space vertices of the geometry each mount names.
+function collectMountPoints(meshNodes, paths, entry) {
+  const result = [];
+  for (const spec of entry.mounts ?? []) {
+    const byNode = spec.nodes && new RegExp(spec.nodes);
+    const byMaterial = spec.materials && new RegExp(spec.materials);
+    const points = [];
+    for (const node of meshNodes) {
+      const mesh = node.getMesh();
+      if (!mesh) continue;
+      const nodeMatch = byNode && byNode.test(paths.get(node) ?? '');
+      for (const prim of mesh.listPrimitives()) {
+        const materialMatch = byMaterial && byMaterial.test(prim.getMaterial()?.getName() ?? '');
+        if (!nodeMatch && !materialMatch) continue;
+        const acc = prim.getAttribute('POSITION');
+        for (let i = 0; i < acc.getCount(); i++) points.push(acc.getElement(i, []));
+      }
+    }
+    if (!points.length) fail(`${entry.name}: mount "${spec.name}" matched no geometry`);
+    result.push({ spec, points });
+  }
+  return result;
+}
+
+/// Mount positions in the normalised model (`apply` maps source to model).
+function measureMounts(sources, apply, entry) {
+  const result = {};
+  for (const { spec, points: raw } of sources) {
+    let points = raw.map(apply);
+    if (spec.z) points = points.filter((p) => p[2] >= spec.z[0] && p[2] <= spec.z[1]);
+    if (!points.length) fail(`${entry.name}: mount "${spec.name}" has nothing in its z range`);
+    const axis = { front: [2, -1], rear: [2, 1], top: [1, 1], bottom: [1, -1] }[spec.pick];
+    if (axis) {
+      const [k, sign] = axis;
+      const extreme = Math.max(...points.map((p) => p[k] * sign));
+      points = points.filter((p) => extreme - p[k] * sign <= 1.5);
+    }
+    const box = boundsOf(points);
+    result[spec.name] = box.min.map((v, i) => Math.round(((v + box.max[i]) / 2) * 100) / 100);
+  }
+  return result;
 }
 
 // --- Pose -------------------------------------------------------------------
@@ -254,7 +420,7 @@ function asymmetry(positions, bounds, k) {
 function collectPositions(nodes) {
   const out = [];
   for (const node of nodes) {
-    for (const prim of node.getMesh().listPrimitives()) {
+    for (const prim of node.getMesh()?.listPrimitives() ?? []) {
       const acc = prim.getAttribute('POSITION');
       for (let i = 0; i < acc.getCount(); i++) out.push(acc.getElement(i, []));
     }
@@ -326,13 +492,17 @@ function formatReport(entry, report, out) {
     `   after:   ${dims(report.after)} m (X span x Y height x Z length)`,
     `   origin:  box min ${report.after.min.map((v) => v.toFixed(2)).join(', ')}  max ${report.after.max.map((v) => v.toFixed(2)).join(', ')}`,
     `   content: ${report.counts.meshes} meshes, ${report.counts.primitives} primitives, ${report.counts.textures} textures`,
+    `   triangles: ${report.counts.trianglesBefore} -> ${report.counts.triangles}`,
+    ...Object.entries(report.mounts).map(
+      ([name, p]) => `   mount:   ${name} at ${p.map((v) => v.toFixed(2)).join(', ')}`,
+    ),
   ];
   return lines.join('\n');
 }
 
 function formatCredits(credits) {
   const rows = credits.map(
-    (c) => `- **${c.file}**: "${c.title}" (${c.url}) by ${c.author}, licensed under ${c.license} (${c.licenseUrl}). Rescaled, reoriented and recentred.`,
+    (c) => `- **${c.file}**: "${c.title}" (${c.url}) by ${c.author}, licensed under ${c.license} (${c.licenseUrl}). Rescaled, reoriented and recentred${c.simplified ? '; simplified, interior and small parts reduced' : ''}.`,
   );
   return `# Aircraft model credits\n\nThe models in this folder are based on the following works:\n\n${rows.join('\n')}\n`;
 }

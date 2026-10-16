@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
+use bevy::prelude::Vec3;
+
 use super::AircraftModel;
 
 fn repo() -> &'static Path {
@@ -202,5 +204,76 @@ fn colliders_fill_but_do_not_exceed_the_models() {
         );
         // The fin reaches the top.
         assert!(max[1] >= 0.9 * size.max.y, "{model:?} fin too low");
+    }
+}
+
+#[test]
+fn gun_mounts_match_the_normaliser_output() {
+    let text = std::fs::read_to_string(repo().join("assets/aircraft/mounts.json")).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    for model in AircraftModel::ALL {
+        let stored = json.get(model.file_stem());
+        let mounts = model.gun_mounts();
+        assert_eq!(
+            stored.map_or(0, |m| m.as_object().unwrap().len()),
+            mounts.len(),
+            "{model:?}"
+        );
+        for mount in mounts {
+            let p = &stored.unwrap()[mount.name];
+            let p = Vec3::new(
+                p[0].as_f64().unwrap() as f32,
+                p[1].as_f64().unwrap() as f32,
+                p[2].as_f64().unwrap() as f32,
+            );
+            assert!(
+                p.distance(mount.position) < 0.02,
+                "{model:?} {}",
+                mount.name
+            );
+        }
+    }
+}
+
+#[test]
+fn bomber_mounts_sit_on_the_aircraft_front_and_rear() {
+    for model in [AircraftModel::B17, AircraftModel::Lancaster] {
+        let size = model.size();
+        let mounts = model.gun_mounts();
+        assert!(mounts.len() >= 2);
+        for mount in mounts {
+            let p = mount.position;
+            assert!(
+                p.cmpge(size.min).all() && p.cmple(size.max).all(),
+                "{model:?} {mount:?}"
+            );
+            assert!(
+                p.x.abs() < 0.5,
+                "{model:?} {} off the centre line",
+                mount.name
+            );
+        }
+        // Front gun near the nose, rear gun near the tail.
+        assert!(mounts[0].position.z < size.min.z + 2.0, "{model:?} front");
+        assert!(mounts[1].position.z > size.max.z - 2.0, "{model:?} rear");
+    }
+}
+
+#[test]
+fn bombers_are_light_enough_to_fly_in_numbers() {
+    for name in ["b17", "lancaster"] {
+        let bytes = std::fs::read(glb(name)).unwrap();
+        let gltf = gltf::Gltf::from_slice(&bytes).unwrap();
+        let triangles: usize = gltf
+            .meshes()
+            .flat_map(|m| m.primitives())
+            .map(|p| {
+                p.indices().map_or_else(
+                    || p.get(&gltf::Semantic::Positions).unwrap().count(),
+                    |i| i.count(),
+                ) / 3
+            })
+            .sum();
+        assert!(triangles <= 12_000, "{name}: {triangles} triangles");
     }
 }
