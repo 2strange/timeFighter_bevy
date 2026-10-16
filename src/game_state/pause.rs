@@ -19,11 +19,13 @@ pub struct Pause {
     /// Paused by the player (P / Esc) or because the window lost focus.
     /// Shows the pause screen and throttles rendering.
     pub player: bool,
+    /// The round is decided and the result screen shows.
+    pub round_over: bool,
 }
 
 impl Pause {
     pub fn is_paused(&self) -> bool {
-        self.player
+        self.player || self.round_over
     }
 }
 

@@ -2,10 +2,14 @@
 //!
 //! Conventions: 1 unit = 1 metre, +Y up, aircraft noses point along −Z.
 
+pub mod ai;
 pub mod aircraft;
+pub mod audio;
 pub mod camera;
+pub mod combat;
 pub mod flight;
 pub mod game_state;
+pub mod hud;
 pub mod physics;
 pub mod world;
 
@@ -31,6 +35,15 @@ impl Plugin for GamePlugin {
             game_state::PausePlugin,
             physics::PhysicsPlugin,
             world::WorldPlugin,
+        ))
+        .add_plugins((
+            combat::CombatPlugin,
+            combat::CombatVisualsPlugin,
+            ai::AiPlugin,
+            ai::EnemyVisualsPlugin,
+            game_state::RoundPlugin,
+            hud::HudPlugin,
+            audio::SoundHooksPlugin,
         ));
     }
 }
