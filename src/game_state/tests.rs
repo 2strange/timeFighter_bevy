@@ -5,18 +5,20 @@ use std::time::Duration;
 use bevy::{
     prelude::*,
     time::TimeUpdateStrategy,
+    transform::TransformPlugin,
     window::{WindowFocused, WindowOccluded},
 };
+use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use super::{Mission, Outcome, Pause, PausePlugin, RestartRound, Round, RoundPhase, RoundPlugin};
 use crate::{
     ai::{AiPlugin, Enemy},
     audio::{Sound, SoundCue, SoundHooksPlugin},
     combat::{
-        CombatConfig, CombatPlugin, Gun, Health, Hit, MissileRack, Projectile, Team, Trigger,
-        Weapon,
+        CombatConfig, CombatPlugin, Gun, Health, Hit, MissileRack, Munition, Team, Trigger, Weapon,
     },
     flight::{FlightConfig, FlightInput, FlightPlugin, FlightState, PlayerAircraft},
+    physics::{Layer, PhysicsPlugin, aircraft_body},
 };
 
 const FRAME: Duration = Duration::from_nanos(16_666_667);
@@ -25,6 +27,8 @@ fn app() -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
+        TransformPlugin,
+        PhysicsPlugin,
         FlightPlugin,
         CombatPlugin,
         AiPlugin,
@@ -39,6 +43,13 @@ fn app() -> (App, Entity) {
     let mut mission = Mission::hunt();
     mission.end_delay = 0.5;
     app.insert_resource(mission);
+    // Flat ground with its top at y = 0 (the city builds its own).
+    app.world_mut().spawn((
+        RigidBody::Fixed,
+        Collider::cuboid(20_000.0, 50.0, 20_000.0),
+        Layer::World.groups(),
+        Transform::from_xyz(0.0, -50.0, 0.0),
+    ));
     let cfg = FlightConfig::default();
     let jet = app
         .world_mut()
@@ -46,9 +57,13 @@ fn app() -> (App, Entity) {
             PlayerAircraft,
             FlightInput::default(),
             FlightState::new(&cfg),
+            aircraft_body(Layer::Player),
             cfg.spawn_transform(),
         ))
         .id();
+    app.finish();
+    // The first update only starts the clock; the round starts on the second.
+    app.update();
     app.update();
     (app, jet)
 }
@@ -160,8 +175,7 @@ fn victory_when_every_wave_is_shot_down() {
 #[test]
 fn crashing_into_the_ground_loses_the_round() {
     let (mut app, jet) = app();
-    // Nose down near the ground: the flight model stops the jet at its
-    // minimum altitude, which counts as a crash.
+    // Nose down near the ground: the physics reports the impact.
     *app.world_mut().get_mut::<Transform>(jet).unwrap() =
         Transform::from_xyz(0.0, 20.0, 0.0).with_rotation(Quat::from_rotation_x(-0.8));
     run_for(&mut app, 2.0);
@@ -224,13 +238,15 @@ fn restart_resets_round_player_and_enemies() {
     run_for(&mut app, 0.5);
     release(&mut app, KeyCode::Space);
     app.world_mut().get_mut::<Health>(jet).unwrap().current = 40.0;
-    *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_xyz(0.0, 2.0, 0.0);
+    *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_xyz(0.0, 0.5, 0.0);
     run_for(&mut app, 1.0);
     assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Crashed));
     assert!(round(&app).stats.gun_rounds > 0);
 
     // Restart keys only work on the result screen; Enter is one of them.
+    // The reset waits until game time runs again.
     press(&mut app, KeyCode::Enter);
+    app.update();
     app.update();
 
     let round = round(&app);
@@ -267,7 +283,7 @@ fn restart_resets_round_player_and_enemies() {
     );
     let leftovers = app
         .world_mut()
-        .query::<&Projectile>()
+        .query::<&Munition>()
         .iter(app.world())
         .count();
     assert_eq!(leftovers, 0, "old rounds and missiles removed");

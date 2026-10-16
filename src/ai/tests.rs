@@ -2,24 +2,37 @@
 
 use std::time::Duration;
 
-use bevy::{prelude::*, time::TimeUpdateStrategy};
+use bevy::{prelude::*, time::TimeUpdateStrategy, transform::TransformPlugin};
+use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use super::{AiConfig, AiPlugin, EnemyKind, EnemyPilot, ObstacleMap, PilotMode, enemy_bundle};
 use crate::{
-    combat::{CombatConfig, CombatPlugin, Destroyed, Health, LockOn, LockState, Team, Trigger},
+    combat::{
+        CombatConfig, CombatPlugin, DestroyCause, Destroyed, Health, LockOn, LockState, Team,
+        Trigger,
+    },
     flight::{FlightConfig, FlightInput, FlightPlugin, FlightState, PlayerAircraft},
+    physics::{Layer, PhysicsPlugin, aircraft_body},
     world::CityPlugin,
 };
 
 fn app(fps: f64, with_city: bool) -> App {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, FlightPlugin, CombatPlugin, AiPlugin))
-        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
-            1.0 / fps,
-        )));
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        PhysicsPlugin,
+        FlightPlugin,
+        CombatPlugin,
+        AiPlugin,
+    ))
+    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        1.0 / fps,
+    )));
     if with_city {
         app.add_plugins(CityPlugin);
     }
+    app.finish();
     app.update();
     app
 }
@@ -31,7 +44,13 @@ fn spawn_player(app: &mut App, transform: Transform, speed: f32, input: FlightIn
     state.velocity = transform.forward() * speed;
     let jet = app
         .world_mut()
-        .spawn((PlayerAircraft, input, state, transform))
+        .spawn((
+            PlayerAircraft,
+            input,
+            state,
+            aircraft_body(Layer::Player),
+            transform,
+        ))
         .id();
     app.update();
     jet
@@ -99,8 +118,8 @@ fn enemies_chasing_a_low_player_never_hit_ground_or_buildings() {
     let obstacles = app.world().resource::<ObstacleMap>().clone();
     assert!(obstacles.max_height() > 100.0, "city loaded");
 
-    // Low enough to fly between the towers (the interim player has no
-    // building collision), so pursuing it leads right into them.
+    // Low enough to fly between the towers (this test has no city
+    // colliders), so pursuing it leads right into them.
     let jet = spawn_player(
         &mut app,
         Transform::from_xyz(0.0, 60.0, 600.0),
@@ -263,4 +282,30 @@ fn breaking_spitfire_cannot_shake_a_missile_fired_from_its_six() {
     }
     assert!(broke, "the enemy noticed the missile and broke");
     assert!(killed_after.is_some(), "missile did not hit within 6 s");
+}
+
+#[test]
+fn enemy_flying_into_a_building_crashes() {
+    let mut app = app(60.0, false);
+    // A wall ahead, too close to climb over.
+    app.world_mut().spawn((
+        RigidBody::Fixed,
+        Collider::cuboid(300.0, 400.0, 10.0),
+        Layer::World.groups(),
+        Transform::from_xyz(0.0, 400.0, -150.0),
+    ));
+    let enemy = spawn_enemy(&mut app, Transform::from_xyz(0.0, 500.0, 0.0));
+    let mut crash = None;
+    for _ in 0..120 {
+        app.update();
+        crash = crash.or(app
+            .world()
+            .resource::<Messages<Destroyed>>()
+            .iter_current_update_messages()
+            .find(|d| d.entity == enemy)
+            .copied());
+    }
+    let crash = crash.expect("enemy did not crash");
+    assert_eq!(crash.cause, DestroyCause::Crash);
+    assert!(app.world().get_entity(enemy).is_err(), "wreck removed");
 }

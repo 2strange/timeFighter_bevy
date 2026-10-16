@@ -4,15 +4,17 @@
 use std::f32::consts::FRAC_PI_2;
 
 use bevy::{light::NotShadowCaster, prelude::*};
+use bevy_rapier3d::prelude::Velocity;
 
-use super::{Projectile, Team, Weapon};
+use super::{Missile, Munition, Team, Weapon, weapons::heading};
 
 pub struct CombatVisualsPlugin;
 
 impl Plugin for CombatVisualsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load_visuals)
-            .add_systems(PostUpdate, dress_projectiles);
+            .add_systems(PostUpdate, dress_projectiles)
+            .add_systems(Update, point_missiles);
     }
 }
 
@@ -61,18 +63,18 @@ fn load_visuals(
 fn dress_projectiles(
     mut commands: Commands,
     visuals: Option<Res<ProjectileVisuals>>,
-    added: Query<(Entity, &Projectile), Added<Projectile>>,
+    added: Query<(Entity, &Munition), Added<Munition>>,
 ) {
     let Some(visuals) = visuals else {
         return;
     };
     let along_nose = Quat::from_rotation_x(-FRAC_PI_2);
-    for (entity, projectile) in &added {
+    for (entity, munition) in &added {
         let mut entity = commands.entity(entity);
         entity.insert(Visibility::default());
-        match projectile.weapon {
+        match munition.weapon {
             Weapon::Gun => {
-                let material = match projectile.team {
+                let material = match munition.team {
                     Team::Player => visuals.player_tracer.clone(),
                     Team::Enemy => visuals.enemy_tracer.clone(),
                 };
@@ -83,21 +85,45 @@ fn dress_projectiles(
                 ));
             }
             Weapon::Missile => {
+                // The physics body keeps its launch rotation; the model
+                // turns with the flight path under a pivot.
                 entity.with_children(|missile| {
-                    missile.spawn((
-                        Mesh3d(visuals.missile_body.clone()),
-                        MeshMaterial3d(visuals.missile_paint.clone()),
-                        Transform::from_rotation(along_nose),
-                    ));
-                    // Exhaust flame behind the body, tip pointing back.
-                    missile.spawn((
-                        Mesh3d(visuals.flame.clone()),
-                        MeshMaterial3d(visuals.flame_glow.clone()),
-                        Transform::from_xyz(0.0, 0.0, 3.1)
-                            .with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
-                        NotShadowCaster,
-                    ));
+                    missile
+                        .spawn((MissileModel, Transform::default(), Visibility::default()))
+                        .with_children(|model| {
+                            model.spawn((
+                                Mesh3d(visuals.missile_body.clone()),
+                                MeshMaterial3d(visuals.missile_paint.clone()),
+                                Transform::from_rotation(along_nose),
+                            ));
+                            // Exhaust flame behind the body, tip pointing back.
+                            model.spawn((
+                                Mesh3d(visuals.flame.clone()),
+                                MeshMaterial3d(visuals.flame_glow.clone()),
+                                Transform::from_xyz(0.0, 0.0, 3.1)
+                                    .with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
+                                NotShadowCaster,
+                            ));
+                        });
                 });
+            }
+        }
+    }
+}
+
+/// Pivot of a missile's meshes, turned along its velocity every frame.
+#[derive(Component)]
+struct MissileModel;
+
+fn point_missiles(
+    missiles: Query<(&Velocity, &Transform, &Children), With<Missile>>,
+    mut models: Query<&mut Transform, (With<MissileModel>, Without<Missile>)>,
+) {
+    for (velocity, transform, children) in &missiles {
+        let local = transform.rotation.inverse() * heading(velocity.linear);
+        for child in children {
+            if let Ok(mut model) = models.get_mut(*child) {
+                model.rotation = local;
             }
         }
     }

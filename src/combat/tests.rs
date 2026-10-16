@@ -2,33 +2,56 @@
 
 use std::time::Duration;
 
-use bevy::{prelude::*, time::TimeUpdateStrategy};
+use bevy::{prelude::*, time::TimeUpdateStrategy, transform::TransformPlugin};
+use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use super::{
-    CombatConfig, CombatPlugin, DestroyCause, Destroyed, Gun, Health, Hit, Hitbox, LockOn,
-    LockState, MissileRack, Projectile, ShotFired, Team, Trigger, Velocity, Weapon,
+    AircraftVelocity, CombatConfig, CombatPlugin, DestroyCause, Destroyed, Gun, Health, Hit,
+    Hitbox, LockOn, LockState, MissileRack, Munition, ShotFired, Team, Trigger, Weapon,
     hits::sweep_hits_sphere,
 };
-use crate::flight::{FlightState, PlayerAircraft};
+use crate::{
+    ai::{EnemyKind, enemy_body},
+    flight::{FlightState, PlayerAircraft},
+    physics::{Layer, PhysicsPlugin, aircraft_body},
+};
 
 const FPS: f64 = 60.0;
 
 fn app() -> App {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, CombatPlugin))
+    app.add_plugins((MinimalPlugins, TransformPlugin, PhysicsPlugin, CombatPlugin))
         .init_resource::<ButtonInput<KeyCode>>()
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
             1.0 / FPS,
         )));
+    app.finish();
     app.update();
     app
+}
+
+/// A static world box (building, ground) on the world layer.
+fn spawn_world_box(app: &mut App, center: Vec3, half: Vec3) -> Entity {
+    app.world_mut()
+        .spawn((
+            RigidBody::Fixed,
+            Collider::cuboid(half.x, half.y, half.z),
+            Layer::World.groups(),
+            Transform::from_translation(center),
+        ))
+        .id()
 }
 
 /// A player jet at `transform`, armed on the next update.
 fn spawn_player(app: &mut App, transform: Transform) -> Entity {
     let jet = app
         .world_mut()
-        .spawn((PlayerAircraft, FlightState::default(), transform))
+        .spawn((
+            PlayerAircraft,
+            FlightState::default(),
+            aircraft_body(Layer::Player),
+            transform,
+        ))
         .id();
     app.update();
     jet
@@ -40,7 +63,8 @@ fn spawn_target(app: &mut App, position: Vec3) -> Entity {
             Team::Enemy,
             Health::full(50.0),
             Hitbox { radius: 5.5 },
-            Velocity::default(),
+            AircraftVelocity::default(),
+            enemy_body(EnemyKind::Spitfire),
             Transform::from_translation(position),
         ))
         .id()
@@ -190,6 +214,7 @@ fn gun_rounds_destroy_a_target_ahead_and_never_hit_their_own_side() {
             Team::Player,
             Health::full(50.0),
             Hitbox { radius: 5.5 },
+            aircraft_body(Layer::Player),
             Transform::from_xyz(0.0, 1_000.0, -200.0),
         ))
         .id();
@@ -237,7 +262,7 @@ struct Jink {
     t: f32,
 }
 
-fn jink(time: Res<Time>, mut targets: Query<(&mut Jink, &mut Transform, &mut Velocity)>) {
+fn jink(time: Res<Time>, mut targets: Query<(&mut Jink, &mut Transform, &mut AircraftVelocity)>) {
     let dt = time.delta_secs();
     for (mut jink, mut transform, mut velocity) in &mut targets {
         jink.t += dt;
@@ -322,7 +347,7 @@ fn unguided_missile_flies_straight_on() {
     launch_at(&mut app, jet, None);
     assert!(time_to_kill(&mut app, off_axis, 5.0).is_none());
 
-    let mut missiles = app.world_mut().query::<(&Projectile, &Transform)>();
+    let mut missiles = app.world_mut().query::<(&Munition, &Transform)>();
     let (projectile, transform) = missiles.single(app.world()).unwrap();
     assert_eq!(projectile.weapon, Weapon::Missile);
     assert!(
@@ -367,4 +392,51 @@ fn player_destroyed_by_hits_stays_in_the_world() {
     assert_eq!(destroyed.len(), 1);
     assert_eq!(destroyed[0].team, Team::Player);
     assert!(app.world().get::<Health>(jet).unwrap().is_dead());
+}
+
+#[test]
+fn buildings_stop_rounds_and_missiles() {
+    let mut app = app();
+    let jet = spawn_player(&mut app, high_up());
+    let enemy = spawn_target(&mut app, Vec3::new(0.0, 1_000.0, -600.0));
+    // A tower between the jet and the enemy.
+    spawn_world_box(
+        &mut app,
+        Vec3::new(0.0, 1_000.0, -300.0),
+        Vec3::new(40.0, 60.0, 20.0),
+    );
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Space);
+    launch_at(&mut app, jet, Some(enemy));
+    run_for(&mut app, 2.0);
+    assert_eq!(app.world().get::<Health>(enemy).unwrap().current, 50.0);
+}
+
+#[test]
+fn flying_into_the_world_destroys_the_player() {
+    let mut app = app();
+    let jet = spawn_player(&mut app, Transform::from_xyz(0.0, 30.0, 0.0));
+    spawn_world_box(
+        &mut app,
+        Vec3::new(0.0, -50.0, 0.0),
+        Vec3::new(500.0, 50.0, 500.0),
+    );
+    run_for(&mut app, 0.2);
+    assert!(!app.world().get::<Health>(jet).unwrap().is_dead());
+
+    // Down into the ground, as the flight model would move it.
+    app.world_mut()
+        .get_mut::<Transform>(jet)
+        .unwrap()
+        .translation
+        .y = 0.5;
+    let mut crashes = Vec::new();
+    for _ in 0..5 {
+        app.update();
+        crashes.extend(read::<Destroyed>(&app));
+    }
+    assert_eq!(crashes.len(), 1, "{crashes:?}");
+    assert_eq!(crashes[0].cause, DestroyCause::Crash);
+    assert_eq!(crashes[0].team, Team::Player);
 }

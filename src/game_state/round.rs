@@ -9,7 +9,7 @@ use super::{Mission, Pause, WaveTrigger};
 use crate::{
     ai::{Enemy, enemy_bundle},
     combat::{
-        CombatConfig, CombatSystems, DestroyCause, Destroyed, Hit, Projectile, ShotFired, Team,
+        CombatConfig, CombatSystems, DestroyCause, Destroyed, Hit, Munition, ShotFired, Team,
         Weapon, player_loadout,
     },
     flight::{FlightConfig, FlightState, PlayerAircraft},
@@ -152,14 +152,25 @@ fn restart(
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn start_round(
     mut commands: Commands,
+    time: Res<Time>,
     mut round: ResMut<Round>,
     combat: Res<CombatConfig>,
     flight: Option<Res<FlightConfig>>,
     pause: Option<ResMut<Pause>>,
-    leftovers: Query<Entity, Or<(With<Enemy>, With<Projectile>)>>,
+    leftovers: Query<Entity, Or<(With<Enemy>, With<Munition>)>>,
     mut player: Query<(Entity, &mut FlightState, &mut Transform), With<PlayerAircraft>>,
 ) {
     if round.phase != RoundPhase::Starting {
+        return;
+    }
+    if let Some(mut pause) = pause {
+        pause.round_over = false;
+    }
+    // Wait for a frame in which game time runs: in a frame with zero time
+    // step the physics does not step and writes the jet's old position back
+    // over the reset (on the result screen time stands still, and the very
+    // first frame has no time step either).
+    if time.delta_secs() <= 0.0 {
         return;
     }
     for entity in &leftovers {
@@ -176,9 +187,6 @@ fn start_round(
         phase: RoundPhase::Running,
         ..default()
     };
-    if let Some(mut pause) = pause {
-        pause.round_over = false;
-    }
 }
 
 fn count_events(

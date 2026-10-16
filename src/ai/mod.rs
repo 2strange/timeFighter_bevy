@@ -13,16 +13,20 @@ mod visuals;
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::{
+    ActiveCollisionTypes, ActiveEvents, Ccd, Collider, CollisionEvent, CollisionGroups, RigidBody,
+};
 
 pub use obstacles::ObstacleMap;
 pub use visuals::EnemyVisualsPlugin;
 
 use crate::{
     combat::{
-        CombatRng, CombatSystems, DestroyCause, Destroyed, Gun, GunSpec, Health, Hitbox, Missile,
-        Team, Trigger, Velocity,
+        AircraftVelocity, CombatRng, CombatSystems, DestroyCause, Destroyed, Gun, GunSpec, Health,
+        Hitbox, Missile, Team, Trigger,
     },
     flight::{FlightSystems, PlayerAircraft},
+    physics::Layer,
     world::CityLayout,
 };
 
@@ -185,7 +189,7 @@ pub struct EnemyPilot {
     pub burst_pause: f32,
 }
 
-/// Motion state of an enemy besides its `Transform` and [`Velocity`].
+/// Motion state of an enemy besides its `Transform` and [`AircraftVelocity`].
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct EnemyFlight {
     pub speed: f32,
@@ -209,10 +213,46 @@ pub fn enemy_bundle(kind: EnemyKind, transform: Transform) -> impl Bundle {
         Hitbox {
             radius: stats.hitbox_radius,
         },
-        Velocity(transform.forward() * stats.cruise_speed),
+        AircraftVelocity(transform.forward() * stats.cruise_speed),
         Gun::new(stats.gun, None),
         Trigger::default(),
+        enemy_body(kind),
         transform,
+    )
+}
+
+/// Kinematic collision body of an enemy, in its local frame (nose −Z), like
+/// the physics' `aircraft_body` but in the enemy's own size: the AI moves
+/// it, Rapier reports what it touches.
+pub fn enemy_body(kind: EnemyKind) -> impl Bundle {
+    let shape = match kind {
+        // 9.1 m long, 11.2 m span.
+        EnemyKind::Spitfire => Collider::compound(vec![
+            // Fuselage with spinner.
+            (Vec3::ZERO, Quat::IDENTITY, Collider::capsule_z(3.75, 0.8)),
+            // Wing.
+            (
+                Vec3::new(0.0, -0.35, -0.9),
+                Quat::IDENTITY,
+                Collider::cuboid(5.6, 0.2, 1.1),
+            ),
+            // Tailplane and fin.
+            (
+                Vec3::new(0.0, 0.5, 3.7),
+                Quat::IDENTITY,
+                Collider::cuboid(1.65, 0.8, 0.55),
+            ),
+        ]),
+    };
+    (
+        RigidBody::KinematicPositionBased,
+        shape,
+        Ccd::enabled(),
+        Layer::Enemy.groups(),
+        ActiveEvents::COLLISION_EVENTS,
+        // Kinematic bodies ignore static ones by default; crashes into the
+        // world must be reported.
+        ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_STATIC,
     )
 }
 
@@ -242,7 +282,8 @@ impl Plugin for AiPlugin {
                 )
                     .chain()
                     .in_set(AiSystems),
-            );
+            )
+            .add_systems(Update, enemy_crashes.in_set(CombatSystems::DetectHits));
     }
 }
 
@@ -256,14 +297,12 @@ struct PlayerView {
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn fly_enemies(
-    mut commands: Commands,
     cfg: Res<AiConfig>,
     time: Res<Time>,
     obstacles: Res<ObstacleMap>,
     mut rng: ResMut<CombatRng>,
-    mut destroyed: MessageWriter<Destroyed>,
     player: Query<
-        (&Transform, Option<&Velocity>, Option<&Health>),
+        (&Transform, Option<&AircraftVelocity>, Option<&Health>),
         (With<PlayerAircraft>, Without<Enemy>),
     >,
     missiles: Query<(&Missile, &Transform), Without<Enemy>>,
@@ -273,7 +312,7 @@ fn fly_enemies(
         &mut EnemyPilot,
         &mut EnemyFlight,
         &mut Transform,
-        &mut Velocity,
+        &mut AircraftVelocity,
         &mut Trigger,
     )>,
 ) {
@@ -327,16 +366,41 @@ fn fly_enemies(
             .looking_to(new_forward, Vec3::Y)
             .rotation
             * Quat::from_rotation_z(flight.bank);
+    }
+}
 
-        let ground = obstacles.height_at(transform.translation.x, transform.translation.z);
-        if transform.translation.y <= ground {
+/// An enemy touched the world (ground, water, building, bridge): crashed.
+/// Counts as a kill for the player.
+fn enemy_crashes(
+    mut commands: Commands,
+    mut collisions: MessageReader<CollisionEvent>,
+    enemies: Query<&Transform, With<Enemy>>,
+    groups: Query<&CollisionGroups>,
+    mut destroyed: MessageWriter<Destroyed>,
+) {
+    let mut crashed = Vec::new();
+    for event in collisions.read() {
+        let CollisionEvent::Started(a, b, _) = *event else {
+            continue;
+        };
+        for (enemy, obstacle) in [(a, b), (b, a)] {
+            let is_world = groups
+                .get(obstacle)
+                .is_ok_and(|g| g.memberships.contains(Layer::World.group()));
+            if !is_world || crashed.contains(&enemy) {
+                continue;
+            }
+            let Ok(transform) = enemies.get(enemy) else {
+                continue;
+            };
+            crashed.push(enemy);
             destroyed.write(Destroyed {
-                entity,
+                entity: enemy,
                 team: Team::Enemy,
                 position: transform.translation,
                 cause: DestroyCause::Crash,
             });
-            commands.entity(entity).despawn();
+            commands.entity(enemy).despawn();
         }
     }
 }

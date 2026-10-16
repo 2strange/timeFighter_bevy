@@ -17,6 +17,9 @@ pub struct GunSpec {
     /// Rounds leave this far ahead of the aircraft's origin (m), clear of
     /// its own nose.
     pub muzzle_offset: f32,
+    /// Collision radius of a round (m). A little larger than a real one:
+    /// arcade forgiveness.
+    pub radius: f32,
 }
 
 impl GunSpec {
@@ -28,6 +31,7 @@ impl GunSpec {
         damage: 10.0,
         lifetime: 1.5,
         muzzle_offset: 12.0,
+        radius: 0.5,
     };
 
     /// WWII fighter guns: slower rounds, wider scatter, little damage each.
@@ -38,6 +42,7 @@ impl GunSpec {
         damage: 3.0,
         lifetime: 1.4,
         muzzle_offset: 6.0,
+        radius: 0.4,
     };
 
     pub fn interval(&self) -> f32 {
@@ -60,8 +65,10 @@ pub struct MissileSpec {
     pub nav_gain: f32,
     /// Seconds before it self-destructs.
     pub lifetime: f32,
-    /// Detonates when the target's hitbox comes this close (m).
+    /// Detonates when an enemy's hitbox comes this close (m).
     pub fuse_radius: f32,
+    /// Collision radius of the missile body (m).
+    pub radius: f32,
     pub damage: f32,
     /// Leaves this far below and ahead of the jet's origin (m).
     pub launch_offset: Vec3,
@@ -93,11 +100,6 @@ pub struct CombatConfig {
     pub player_missiles: u32,
     pub missile: MissileSpec,
     pub lock: LockSpec,
-    /// INTERIM until the physics colliders report crashes: the player
-    /// crashes when touching the flight model's minimum altitude (3 m above
-    /// the ground plane). Buildings do not count yet, and flying low in the
-    /// sunken river channel is fatal.
-    pub ground_crash: bool,
 }
 
 impl Default for CombatConfig {
@@ -120,6 +122,7 @@ impl Default for CombatConfig {
                 nav_gain: 4.0,
                 lifetime: 8.0,
                 fuse_radius: 8.0,
+                radius: 0.3,
                 damage: 100.0,
                 launch_offset: Vec3::new(0.0, -2.0, -6.0),
                 reload: 0.6,
@@ -130,7 +133,6 @@ impl Default for CombatConfig {
                 time: 1.0,
                 hold_factor: 1.25,
             },
-            ground_crash: true,
         }
     }
 }

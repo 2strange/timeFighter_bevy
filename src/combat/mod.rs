@@ -3,11 +3,12 @@
 //! [`CombatPlugin`] is pure simulation and runs headless (`MinimalPlugins`).
 //! [`CombatVisualsPlugin`] adds meshes for tracers and missiles.
 //!
-//! Hit detection sits behind a narrow interface: whatever detects a hit
-//! writes a [`Hit`] message in [`CombatSystems::DetectHits`]; everything
-//! after that (damage, kills, statistics, sound, HUD feedback) only reads
-//! [`Hit`] and [`Destroyed`]. For now [`hits`] detects hits with swept
-//! spheres; the physics layer replaces it later without touching the rest.
+//! Hit detection sits behind a narrow interface: [`hits`] translates the
+//! physics layer's [`crate::physics::ProjectileHit`] and
+//! [`crate::physics::PlayerCrashed`] (plus the missiles' proximity fuses)
+//! into [`Hit`] and [`Destroyed`] messages in [`CombatSystems::DetectHits`];
+//! everything after that (damage, kills, statistics, sound, HUD feedback)
+//! only reads those two.
 
 mod config;
 pub mod hits;
@@ -24,9 +25,12 @@ pub use config::{CombatConfig, CombatKeys, GunSpec, LockSpec, MissileSpec};
 pub use lock::{LockOn, LockState, in_seeker_cone};
 pub use rng::CombatRng;
 pub use visuals::CombatVisualsPlugin;
-pub use weapons::{Gun, Missile, MissileRack, Projectile, Trigger, Weapon};
+pub use weapons::{Gun, Missile, MissileRack, Munition, Trigger, Weapon};
 
-use crate::flight::{FlightState, FlightSystems, PlayerAircraft};
+use crate::{
+    flight::{FlightState, FlightSystems, PlayerAircraft},
+    physics::{PlayerCrashed, ProjectileHit},
+};
 
 /// Side an aircraft or projectile fights on. Projectiles never hit their
 /// own side.
@@ -57,19 +61,19 @@ impl Health {
     }
 }
 
-/// Sphere around the aircraft's origin that projectiles can hit (m).
-/// Used by the interim hit detection; the physics layer brings its own
-/// collision shapes later.
+/// Rough size of an aircraft: a sphere around its origin (m). Missile
+/// proximity fuses go off within this plus their fuse radius. Direct hits
+/// come from the physics colliders.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct Hitbox {
     pub radius: f32,
 }
 
-/// World-space velocity (m/s) of anything that can shoot or be shot at.
-/// Weapons inherit it, missiles lead with it. The player's copy is taken
-/// from [`FlightState`] every frame; enemies write their own.
+/// World-space velocity (m/s) of an aircraft. Weapons inherit it, missiles
+/// lead with it. The player's copy is taken from [`FlightState`] every
+/// frame; enemies write their own. (Projectiles use Rapier's `Velocity`.)
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
-pub struct Velocity(pub Vec3);
+pub struct AircraftVelocity(pub Vec3);
 
 /// A projectile struck an aircraft.
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
@@ -124,9 +128,10 @@ pub enum CombatSystems {
     /// Guns and missile launches. Gated by the round (no firing on the
     /// result screen).
     Fire,
-    /// Guidance and projectile motion.
+    /// Missile guidance (the physics moves all projectiles).
     Move,
-    /// Writes [`Hit`] messages. The only stage that knows how hits are found.
+    /// Writes [`Hit`] and crash [`Destroyed`] messages. The only stage that
+    /// knows how hits are found.
     DetectHits,
     /// Applies damage, writes [`Destroyed`], removes the dead.
     Resolve,
@@ -143,6 +148,10 @@ impl Plugin for CombatPlugin {
             .add_message::<Hit>()
             .add_message::<Destroyed>()
             .add_message::<ShotFired>()
+            // Registered by the physics plugin too; here so the combat
+            // systems also run without it.
+            .add_message::<ProjectileHit>()
+            .add_message::<PlayerCrashed>()
             .configure_sets(
                 Update,
                 (
@@ -168,13 +177,14 @@ impl Plugin for CombatPlugin {
                         .in_set(CombatSystems::Input),
                     lock::update_lock.in_set(CombatSystems::Aim),
                     (weapons::fire_guns, weapons::launch_missiles).in_set(CombatSystems::Fire),
-                    (weapons::guide_missiles, weapons::move_projectiles)
-                        .chain()
-                        .in_set(CombatSystems::Move),
+                    weapons::guide_missiles.in_set(CombatSystems::Move),
                     (
-                        hits::detect_projectile_hits,
-                        hits::detect_player_ground_crash,
+                        hits::projectile_hits,
+                        hits::missile_fuses,
+                        hits::player_crashes,
+                        hits::remember_positions,
                     )
+                        .chain()
                         .in_set(CombatSystems::DetectHits),
                     hits::apply_hits.in_set(CombatSystems::Resolve),
                 ),
@@ -191,7 +201,7 @@ pub fn player_loadout(cfg: &CombatConfig) -> impl Bundle {
         Hitbox {
             radius: cfg.player_hitbox_radius,
         },
-        Velocity::default(),
+        AircraftVelocity::default(),
         Gun::new(cfg.player_gun, Some(cfg.player_gun_ammo)),
         MissileRack::new(cfg.missile, cfg.player_missiles),
         LockOn::default(),
@@ -210,7 +220,9 @@ fn arm_new_player(
     }
 }
 
-fn sync_player_velocity(mut player: Query<(&FlightState, &mut Velocity), With<PlayerAircraft>>) {
+fn sync_player_velocity(
+    mut player: Query<(&FlightState, &mut AircraftVelocity), With<PlayerAircraft>>,
+) {
     for (state, mut velocity) in &mut player {
         velocity.0 = state.velocity;
     }

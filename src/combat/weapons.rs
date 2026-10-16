@@ -1,14 +1,19 @@
-//! Guns, missile launches, guidance and projectile motion.
+//! Guns, missile launches and guidance. The physics layer moves the
+//! projectiles and reports what they hit.
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use super::{
-    CombatKeys, CombatRng, GunSpec, Health, LockOn, MissileSpec, ShotFired, Team, Velocity,
+    AircraftVelocity, CombatKeys, CombatRng, GunSpec, Health, LockOn, MissileSpec, ShotFired, Team,
 };
-use crate::flight::PlayerAircraft;
+use crate::{
+    flight::PlayerAircraft,
+    physics::{self, Layer, ProjectileSpent},
+};
 
 /// Longest time step integrated at once (s), as in the flight model: a
-/// hitch must not teleport projectiles through targets.
+/// hitch must not make weapons jump.
 const MAX_DT: f32 = 0.1;
 
 pub(super) fn frame_dt(time: &Time) -> f32 {
@@ -70,25 +75,22 @@ impl MissileRack {
     }
 }
 
-/// A round or missile in flight.
+/// Combat data of a round or missile, next to the physics' projectile
+/// components (body, collider, `Velocity`, lifetime).
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
-pub struct Projectile {
+pub struct Munition {
     pub shooter: Entity,
     pub team: Team,
     pub weapon: Weapon,
     pub damage: f32,
-    /// World velocity (m/s).
-    pub velocity: Vec3,
-    /// Position at the start of this frame's step; hit detection sweeps
-    /// from here to the current position, so fast rounds cannot tunnel.
-    pub previous: Vec3,
-    pub age: f32,
-    pub lifetime: f32,
     /// Extra reach of a proximity fuse (m); 0 for gun rounds.
     pub fuse_radius: f32,
+    /// Position at the previous frame's check; the fuse sweeps from here
+    /// to the current position, so a fast missile cannot fly past.
+    pub last_position: Vec3,
 }
 
-/// Guidance state of a missile (on top of its [`Projectile`]).
+/// Guidance state of a missile (on top of its [`Munition`]).
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct Missile {
     pub spec: MissileSpec,
@@ -107,6 +109,13 @@ const SEEKER_LIMIT: f32 = 100.0 * std::f32::consts::PI / 180.0;
 /// towards the target instead of using proportional navigation, which is
 /// only meant for small corrections.
 const PURSUIT_ANGLE: f32 = 50.0 * std::f32::consts::PI / 180.0;
+
+fn projectile_layer(team: Team) -> Layer {
+    match team {
+        Team::Player => Layer::PlayerProjectile,
+        Team::Enemy => Layer::EnemyProjectile,
+    }
+}
 
 pub(super) fn player_trigger(
     keys: Option<Res<ButtonInput<KeyCode>>>,
@@ -147,7 +156,7 @@ pub(super) fn fire_guns(
         &Trigger,
         &Team,
         &Transform,
-        Option<&Velocity>,
+        Option<&AircraftVelocity>,
     )>,
 ) {
     let dt = frame_dt(&time);
@@ -172,19 +181,22 @@ pub(super) fn fire_guns(
             let direction = rng.in_cone(forward, gun.spec.spread);
             let position = transform.translation + forward * gun.spec.muzzle_offset;
             let round_velocity = base_velocity + direction * gun.spec.muzzle_speed;
-            commands.spawn(projectile_bundle(
-                Projectile {
+            commands.spawn((
+                physics::projectile(
+                    Transform::from_translation(position).with_rotation(heading(round_velocity)),
+                    round_velocity,
+                    gun.spec.radius,
+                    projectile_layer(*team),
+                    gun.spec.lifetime,
+                ),
+                Munition {
                     shooter,
                     team: *team,
                     weapon: Weapon::Gun,
                     damage: gun.spec.damage,
-                    velocity: round_velocity,
-                    previous: position,
-                    age: 0.0,
-                    lifetime: gun.spec.lifetime,
                     fuse_radius: 0.0,
+                    last_position: position,
                 },
-                position,
             ));
             shots.write(ShotFired {
                 shooter,
@@ -207,7 +219,7 @@ pub(super) fn launch_missiles(
         &mut Trigger,
         &Team,
         &Transform,
-        Option<&Velocity>,
+        Option<&AircraftVelocity>,
         Option<&LockOn>,
     )>,
 ) {
@@ -226,20 +238,21 @@ pub(super) fn launch_missiles(
         let speed = base_velocity.dot(forward).max(0.0) + rack.spec.launch_kick;
         let position = transform.transform_point(rack.spec.launch_offset);
         commands.spawn((
-            projectile_bundle(
-                Projectile {
-                    shooter,
-                    team: *team,
-                    weapon: Weapon::Missile,
-                    damage: rack.spec.damage,
-                    velocity: forward * speed,
-                    previous: position,
-                    age: 0.0,
-                    lifetime: rack.spec.lifetime,
-                    fuse_radius: rack.spec.fuse_radius,
-                },
-                position,
+            physics::projectile(
+                Transform::from_translation(position).with_rotation(heading(forward)),
+                forward * speed,
+                rack.spec.radius,
+                projectile_layer(*team),
+                rack.spec.lifetime,
             ),
+            Munition {
+                shooter,
+                team: *team,
+                weapon: Weapon::Missile,
+                damage: rack.spec.damage,
+                fuse_radius: rack.spec.fuse_radius,
+                last_position: position,
+            },
             Missile {
                 spec: rack.spec,
                 target: lock.and_then(LockOn::locked_target),
@@ -255,14 +268,8 @@ pub(super) fn launch_missiles(
     }
 }
 
-fn projectile_bundle(projectile: Projectile, position: Vec3) -> impl Bundle {
-    let transform =
-        Transform::from_translation(position).with_rotation(heading(projectile.velocity));
-    (projectile, transform)
-}
-
 /// Rotation that points −Z along `velocity`.
-pub(super) fn heading(velocity: Vec3) -> Quat {
+pub fn heading(velocity: Vec3) -> Quat {
     let Some(dir) = velocity.try_normalize() else {
         return Quat::IDENTITY;
     };
@@ -276,17 +283,18 @@ pub(super) fn heading(velocity: Vec3) -> Quat {
 
 /// Proportional navigation light: turn so that the line of sight to the
 /// target stops rotating, limited to the missile's lateral acceleration.
+/// Steers by writing the projectile's `Velocity`; the physics moves it.
 #[allow(clippy::type_complexity)]
 pub(super) fn guide_missiles(
     time: Res<Time>,
-    mut missiles: Query<(&mut Missile, &mut Projectile, &Transform)>,
-    targets: Query<(&Transform, Option<&Velocity>, Option<&Health>), Without<Projectile>>,
+    mut missiles: Query<(&mut Missile, &mut Velocity, &Transform), Without<ProjectileSpent>>,
+    targets: Query<(&Transform, Option<&AircraftVelocity>, Option<&Health>), Without<Missile>>,
 ) {
     let dt = frame_dt(&time);
-    for (mut missile, mut projectile, transform) in &mut missiles {
+    for (mut missile, mut velocity, transform) in &mut missiles {
         missile.speed = (missile.speed + missile.spec.boost * dt).min(missile.spec.max_speed);
-        let dir = projectile
-            .velocity
+        let dir = velocity
+            .linear
             .try_normalize()
             .unwrap_or_else(|| transform.forward().as_vec3());
 
@@ -314,7 +322,7 @@ pub(super) fn guide_missiles(
         let new_dir = (dir * missile.speed + accel * dt)
             .try_normalize()
             .unwrap_or(dir);
-        projectile.velocity = new_dir * missile.speed;
+        velocity.linear = new_dir * missile.speed;
     }
 }
 
@@ -344,24 +352,5 @@ fn steering(
         lateral.normalize_or_zero() * spec.max_lateral_accel
     } else {
         lateral.clamp_length_max(spec.max_lateral_accel)
-    }
-}
-
-pub(super) fn move_projectiles(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut projectiles: Query<(Entity, &mut Projectile, &mut Transform)>,
-) {
-    let dt = frame_dt(&time);
-    for (entity, mut projectile, mut transform) in &mut projectiles {
-        projectile.previous = transform.translation;
-        transform.translation += projectile.velocity * dt;
-        transform.rotation = heading(projectile.velocity);
-        projectile.age += dt;
-        // Interim: the flat ground stops everything. Buildings come with
-        // the physics layer.
-        if projectile.age > projectile.lifetime || transform.translation.y <= 0.0 {
-            commands.entity(entity).despawn();
-        }
     }
 }
