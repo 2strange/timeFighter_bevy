@@ -304,7 +304,9 @@ impl MenuSelection {
             let bombers = matches!(self.mode, MenuMode::Protect | MenuMode::Battle);
             let fields = CustomField::ALL
                 .iter()
-                .filter(|f| bombers || !f.bombers_only());
+                .filter(|f| bombers || !f.bombers_only())
+                // Battle's total comes from its waves (bombers plus escort).
+                .filter(|f| !(self.mode == MenuMode::Battle && **f == CustomField::Enemies));
             rows.extend(fields.map(|&field| {
                 Row {
                     id: RowId::Custom(field),
@@ -519,6 +521,8 @@ mod tests {
         let has = |s: &MenuSelection, f| s.rows().iter().any(|r| r.id == RowId::Custom(f));
         assert!(has(&selection, CustomField::BomberWaves));
         assert!(has(&selection, CustomField::FlightSize));
+        // The enemy total follows from the waves in Battle.
+        assert!(!has(&selection, CustomField::Enemies));
         // Custom starts from Normal's values for Battle.
         assert_eq!(
             selection.custom.missiles,
