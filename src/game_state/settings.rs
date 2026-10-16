@@ -143,3 +143,17 @@ impl Default for DifficultyParams {
         }
     }
 }
+
+impl DifficultyParams {
+    /// The same within sane limits (a custom level can hold anything).
+    pub fn clamped(self) -> Self {
+        Self {
+            missiles: self.missiles.min(99),
+            enemies: self.enemies.clamp(1, 48),
+            flight_size: self.flight_size.clamp(1, 8),
+            enemy_speed: self.enemy_speed.clamp(0.3, 2.0),
+            enemy_accuracy: self.enemy_accuracy.clamp(0.1, 3.0),
+            ..self
+        }
+    }
+}

@@ -99,6 +99,8 @@ pub struct CombatConfig {
     pub player_hitbox_radius: f32,
     pub player_gun: GunSpec,
     pub player_gun_ammo: u32,
+    /// The gun never runs dry (a difficulty option).
+    pub player_gun_unlimited: bool,
     pub player_missiles: u32,
     pub missile: MissileSpec,
     pub lock: LockSpec,
@@ -112,6 +114,7 @@ impl Default for CombatConfig {
             player_gun: GunSpec::JET_CANNON,
             // 30 s of continuous fire.
             player_gun_ammo: 600,
+            player_gun_unlimited: false,
             player_missiles: 6,
             missile: MissileSpec {
                 launch_kick: 40.0,

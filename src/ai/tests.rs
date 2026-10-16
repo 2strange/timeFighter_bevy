@@ -6,7 +6,8 @@ use bevy::{prelude::*, time::TimeUpdateStrategy, transform::TransformPlugin};
 use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use super::{
-    AiConfig, AiPlugin, EnemyKind, EnemyPilot, ObstacleMap, PilotMode, PilotSkill, enemy_bundle,
+    AiConfig, AiPlugin, EnemyKind, EnemyPilot, EnemyTuning, ObstacleMap, PilotMode, PilotSkill,
+    enemy_bundle,
 };
 use crate::{
     combat::{
@@ -70,6 +71,7 @@ fn spawn_enemy(app: &mut App, transform: Transform) -> Entity {
         .spawn(enemy_bundle(
             EnemyKind::Spitfire,
             PilotSkill::VETERAN,
+            EnemyTuning::default(),
             transform,
         ))
         .id()
@@ -356,6 +358,7 @@ fn rookies_take_longer_than_veterans_to_break() {
             .spawn(enemy_bundle(
                 EnemyKind::Spitfire,
                 skill,
+                EnemyTuning::default(),
                 Transform::from_xyz(0.0, 800.0, -400.0),
             ))
             .id();
@@ -375,4 +378,156 @@ fn rookies_take_longer_than_veterans_to_break() {
         rookie >= PilotSkill::ROOKIE.reaction - 0.02,
         "rookie after {rookie} s"
     );
+}
+
+#[test]
+fn collision_course_is_detected_and_escaped() {
+    let cfg = AiConfig::default();
+    let skill = PilotSkill::VETERAN;
+    let me = (Vec3::new(0.0, 800.0, 0.0), Vec3::NEG_Z * 150.0);
+    let escape = |other: Vec3, velocity: Vec3| {
+        super::collision_escape_for(
+            &cfg,
+            &skill,
+            me.0,
+            me.1,
+            std::iter::once((other, velocity, true)),
+        )
+    };
+    // Head-on, 1 km apart, closing at 400 m/s: steer away.
+    let head_on = escape(Vec3::new(0.0, 800.0, -1_000.0), Vec3::Z * 250.0).expect("escape");
+    assert!(
+        head_on.dot(Vec3::NEG_Z) < 0.95,
+        "turns off the line: {head_on:?}"
+    );
+    // Same course, offset 200 m: no threat.
+    assert!(escape(Vec3::new(200.0, 800.0, -300.0), Vec3::NEG_Z * 150.0).is_none());
+    // Head-on but far away (closest approach in 10 s): not yet.
+    assert!(escape(Vec3::new(0.0, 800.0, -4_000.0), Vec3::Z * 250.0).is_none());
+    // Diverging: never.
+    assert!(escape(Vec3::new(0.0, 800.0, 100.0), Vec3::Z * 250.0).is_none());
+}
+
+/// Collisions involving the player (rammings) in the last update.
+fn rammings(app: &App) -> usize {
+    let world = app.world();
+    world
+        .resource::<Messages<crate::physics::PlayerCrashed>>()
+        .iter_current_update_messages()
+        .count()
+        + world
+            .resource::<Messages<crate::physics::EnemyCrashed>>()
+            .iter_current_update_messages()
+            .count()
+}
+
+/// Runs the bait scenario and returns (rammings, closest enemy-enemy pass).
+fn bait_scenario(input: FlightInput, enemies: &[Transform], seconds: u32) -> (usize, f32) {
+    let mut app = app(60.0, false);
+    app.world_mut().resource_mut::<CombatConfig>().player_health = f32::MAX;
+    app.update();
+    spawn_player(&mut app, Transform::from_xyz(0.0, 800.0, 0.0), 250.0, input);
+    for (i, transform) in enemies.iter().enumerate() {
+        let skill = if i % 2 == 0 {
+            PilotSkill::VETERAN
+        } else {
+            PilotSkill::ROOKIE
+        };
+        app.world_mut().spawn(enemy_bundle(
+            EnemyKind::Spitfire,
+            skill,
+            EnemyTuning::default(),
+            *transform,
+        ));
+    }
+    let mut rams = 0;
+    let mut closest = f32::INFINITY;
+    for _ in 0..(seconds * 60) {
+        app.update();
+        rams += rammings(&app);
+        let positions: Vec<Vec3> = app
+            .world_mut()
+            .query_filtered::<&Transform, With<super::Enemy>>()
+            .iter(app.world())
+            .map(|t| t.translation)
+            .collect();
+        for (i, a) in positions.iter().enumerate() {
+            for b in &positions[i + 1..] {
+                closest = closest.min(a.distance(*b));
+            }
+        }
+    }
+    (rams, closest)
+}
+
+#[test]
+fn enemies_never_ram_a_player_flying_straight_into_them() {
+    // Spitfires head-on in the jet's path and right behind it.
+    let mut enemies = Vec::new();
+    for (i, x) in [-30.0, 0.0, 25.0, 60.0].into_iter().enumerate() {
+        enemies.push(
+            Transform::from_xyz(x, 800.0 + 10.0 * i as f32, -2_500.0 - 400.0 * i as f32)
+                .looking_to(Vec3::Z, Vec3::Y),
+        );
+    }
+    for x in [-40.0, 40.0] {
+        enemies.push(Transform::from_xyz(x, 800.0, 600.0).looking_to(Vec3::NEG_Z, Vec3::Y));
+    }
+    let (rams, closest) = bait_scenario(FlightInput::default(), &enemies, 30);
+    assert_eq!(rams, 0, "rammings");
+    assert!(
+        closest > 15.0,
+        "enemies came within {closest:.0} m of each other"
+    );
+}
+
+#[test]
+fn enemies_never_ram_a_circling_player_in_a_minute() {
+    let enemies: Vec<Transform> = (0..8)
+        .map(|i| {
+            let angle = i as f32 * std::f32::consts::TAU / 8.0;
+            let position = Vec3::new(
+                angle.cos() * 2_000.0,
+                700.0 + 40.0 * i as f32,
+                angle.sin() * 2_000.0,
+            );
+            Transform::from_translation(position)
+                .looking_at(Vec3::new(0.0, position.y, 0.0), Vec3::Y)
+        })
+        .collect();
+    let input = FlightInput {
+        yaw: 0.15,
+        ..default()
+    };
+    let (rams, closest) = bait_scenario(input, &enemies, 60);
+    assert_eq!(rams, 0, "rammings");
+    assert!(
+        closest > 15.0,
+        "enemies came within {closest:.0} m of each other"
+    );
+}
+
+#[test]
+fn slower_difficulty_slows_the_enemies() {
+    let mut app = app(60.0, false);
+    let tuned = |app: &mut App, speed: f32| {
+        app.world_mut()
+            .spawn(enemy_bundle(
+                EnemyKind::Spitfire,
+                PilotSkill::VETERAN,
+                EnemyTuning {
+                    speed,
+                    accuracy: 1.0,
+                },
+                Transform::from_xyz(0.0, 900.0, 0.0),
+            ))
+            .id()
+    };
+    let slow = tuned(&mut app, 0.8);
+    for _ in 0..(20 * 60) {
+        app.update();
+    }
+    let speed = app.world().get::<super::EnemyFlight>(slow).unwrap().speed;
+    let max = EnemyKind::Spitfire.stats().max_speed;
+    assert!(speed <= max * 0.8 + 0.01, "speed {speed} m/s");
 }

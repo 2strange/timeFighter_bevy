@@ -51,6 +51,22 @@ pub struct EnemyStats {
     pub gun: GunSpec,
 }
 
+impl EnemyStats {
+    /// With the difficulty's factors applied.
+    pub fn tuned(self, tuning: EnemyTuning) -> Self {
+        Self {
+            min_speed: self.min_speed * tuning.speed,
+            cruise_speed: self.cruise_speed * tuning.speed,
+            max_speed: self.max_speed * tuning.speed,
+            gun: GunSpec {
+                spread: self.gun.spread / tuning.accuracy.max(0.01),
+                ..self.gun
+            },
+            ..self
+        }
+    }
+}
+
 impl EnemyKind {
     pub fn stats(self) -> EnemyStats {
         match self {
@@ -116,6 +132,12 @@ pub struct AiConfig {
     pub player_aim_cone: f32,
     /// A missile homing on the enemy is noticed within this distance (m).
     pub missile_warning: f32,
+    /// Collision avoidance looks this far ahead (s).
+    pub collision_horizon: f32,
+    /// Closest pass (m) enemies keep between each other.
+    pub formation_min_pass: f32,
+    /// How long one avoidance manoeuvre is held (s).
+    pub avoid_time: f32,
     /// Head-on pass closer than this (m) makes the pilot extend ...
     pub overshoot_range: f32,
     /// ... for this long (s) before turning back in.
@@ -146,6 +168,9 @@ impl Default for AiConfig {
             tail_cone: 40_f32.to_radians(),
             player_aim_cone: 12_f32.to_radians(),
             missile_warning: 1_800.0,
+            collision_horizon: 3.0,
+            formation_min_pass: 30.0,
+            avoid_time: 1.2,
             overshoot_range: 150.0,
             extend_time: 2.5,
 
@@ -185,6 +210,12 @@ pub struct PilotSkill {
     pub break_time: (f32, f32),
     /// Share of the aircraft type's turn rate the pilot uses.
     pub turn_rate: f32,
+    /// Collision avoidance: the pilot steers clear when another aircraft
+    /// would pass closer than this (m) ...
+    pub min_pass: f32,
+    /// ... and is already within this distance (m) or less than
+    /// [`AiConfig::collision_horizon`] away from the closest approach.
+    pub avoid_distance: f32,
 }
 
 impl PilotSkill {
@@ -194,6 +225,8 @@ impl PilotSkill {
         break_cooldown: 4.0,
         break_time: (1.2, 2.2),
         turn_rate: 0.85,
+        min_pass: 80.0,
+        avoid_distance: 300.0,
     };
 
     /// Breaks at once and often: the original behaviour.
@@ -202,6 +235,9 @@ impl PilotSkill {
         break_cooldown: 2.0,
         break_time: (1.8, 3.2),
         turn_rate: 1.0,
+        // Passes closer, but still never on purpose into anyone.
+        min_pass: 50.0,
+        avoid_distance: 250.0,
     };
 }
 
@@ -226,6 +262,26 @@ pub struct EnemyPilot {
     pub burst_left: f32,
     /// Time until the next burst may start (s).
     pub burst_pause: f32,
+    /// Collision avoidance under way: escape direction and time left (s).
+    pub avoiding: Option<(Vec3, f32)>,
+}
+
+/// Per-round factors on an enemy, from the difficulty.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct EnemyTuning {
+    /// Factor on all speeds.
+    pub speed: f32,
+    /// Factor on gun accuracy: the gun's scatter is divided by it.
+    pub accuracy: f32,
+}
+
+impl Default for EnemyTuning {
+    fn default() -> Self {
+        Self {
+            speed: 1.0,
+            accuracy: 1.0,
+        }
+    }
 }
 
 /// Motion state of an enemy besides its `Transform` and [`AircraftVelocity`].
@@ -238,8 +294,13 @@ pub struct EnemyFlight {
 
 /// Everything an enemy of `kind` flown with `skill` needs, at `transform`
 /// (nose along −Z).
-pub fn enemy_bundle(kind: EnemyKind, skill: PilotSkill, transform: Transform) -> impl Bundle {
-    let stats = kind.stats();
+pub fn enemy_bundle(
+    kind: EnemyKind,
+    skill: PilotSkill,
+    tuning: EnemyTuning,
+    transform: Transform,
+) -> impl Bundle {
+    let stats = kind.stats().tuned(tuning);
     (
         Name::new(format!("Enemy {}", kind.display_name())),
         Enemy { kind },
@@ -257,6 +318,7 @@ pub fn enemy_bundle(kind: EnemyKind, skill: PilotSkill, transform: Transform) ->
         AircraftVelocity(transform.forward() * stats.cruise_speed),
         Gun::new(stats.gun, None),
         Trigger::default(),
+        tuning,
         kind.model().body(Layer::Enemy),
         transform,
     )
@@ -314,6 +376,7 @@ fn fly_enemies(
     mut enemies: Query<(
         Entity,
         &Enemy,
+        Option<&EnemyTuning>,
         &mut EnemyPilot,
         &mut EnemyFlight,
         &mut Transform,
@@ -335,10 +398,33 @@ fn fly_enemies(
             forward: tf.forward().as_vec3(),
         });
 
-    for (entity, enemy, mut pilot, mut flight, mut transform, mut velocity, mut trigger) in
+    // Everyone's position and velocity at the start of the frame, for
+    // collision avoidance.
+    let traffic: Vec<Traffic> = player
+        .map(|p| Traffic {
+            entity: None,
+            position: p.position,
+            velocity: p.velocity,
+        })
+        .into_iter()
+        .chain(
+            enemies
+                .iter()
+                .map(|(entity, _, _, _, _, tf, velocity, _)| Traffic {
+                    entity: Some(entity),
+                    position: tf.translation,
+                    velocity: velocity.0,
+                }),
+        )
+        .collect();
+
+    for (entity, enemy, tuning, mut pilot, mut flight, mut transform, mut velocity, mut trigger) in
         &mut enemies
     {
-        let stats = enemy.kind.stats();
+        let stats = enemy
+            .kind
+            .stats()
+            .tuned(tuning.copied().unwrap_or_default());
         let position = transform.translation;
         let forward = transform.forward().as_vec3();
         let incoming = missiles
@@ -347,9 +433,21 @@ fn fly_enemies(
             .map(|(_, tf)| tf.translation)
             .find(|m| m.distance(position) < cfg.missile_warning);
 
-        let decision = think(
+        let mut decision = think(
             &cfg, &stats, &mut pilot, &mut rng, position, forward, player, incoming, dt,
         );
+        // Nobody rams on purpose: a collision course beats everything but
+        // the ground.
+        if let Some(escape) =
+            collision_escape(&cfg, &pilot.skill, entity, position, velocity.0, &traffic)
+        {
+            pilot.avoiding = Some((escape, cfg.avoid_time));
+        }
+        if let Some((escape, left)) = pilot.avoiding {
+            decision.direction = escape;
+            decision.fire = false;
+            pilot.avoiding = (left - dt > 0.0).then_some((escape, left - dt));
+        }
         trigger.gun = decision.fire;
 
         let desired = keep_in_arena(&cfg, position, decision.direction);
@@ -373,6 +471,73 @@ fn fly_enemies(
             .rotation
             * Quat::from_rotation_z(flight.bank);
     }
+}
+
+/// Another aircraft as seen for collision avoidance.
+#[derive(Clone, Copy)]
+struct Traffic {
+    /// `None` for the player.
+    entity: Option<Entity>,
+    position: Vec3,
+    velocity: Vec3,
+}
+
+/// If this aircraft is on a collision course, the direction to steer away:
+/// for the most urgent other aircraft whose closest approach (assuming
+/// both fly straight) comes nearer than the pilot's minimum pass, within
+/// the look-ahead time or the avoidance distance.
+pub(crate) fn collision_escape_for(
+    cfg: &AiConfig,
+    skill: &PilotSkill,
+    position: Vec3,
+    velocity: Vec3,
+    others: impl Iterator<Item = (Vec3, Vec3, bool)>,
+) -> Option<Vec3> {
+    let mut most_urgent: Option<(f32, Vec3)> = None;
+    for (other_position, other_velocity, is_player) in others {
+        let r = other_position - position;
+        let v = other_velocity - velocity;
+        let closing = r.dot(v) < 0.0;
+        if !closing {
+            continue;
+        }
+        let t = (-r.dot(v) / v.length_squared().max(1e-3)).max(0.0);
+        let miss = r + v * t;
+        let min_pass = if is_player {
+            skill.min_pass
+        } else {
+            cfg.formation_min_pass
+        };
+        let near = r.length() < skill.avoid_distance || t < cfg.collision_horizon;
+        if miss.length() >= min_pass || !near {
+            continue;
+        }
+        if most_urgent.is_none_or(|(urgent, _)| t < urgent) {
+            // Away from where the other will be at the closest approach;
+            // dead ahead, pull up and to the right.
+            let away = (-miss).try_normalize().unwrap_or_else(|| {
+                (Vec3::Y + velocity.normalize_or_zero().cross(Vec3::Y)).normalize()
+            });
+            let ahead = velocity.normalize_or_zero();
+            most_urgent = Some((t, (away + ahead * 0.3).normalize_or(away)));
+        }
+    }
+    most_urgent.map(|(_, escape)| escape)
+}
+
+fn collision_escape(
+    cfg: &AiConfig,
+    skill: &PilotSkill,
+    me: Entity,
+    position: Vec3,
+    velocity: Vec3,
+    traffic: &[Traffic],
+) -> Option<Vec3> {
+    let others = traffic
+        .iter()
+        .filter(|t| t.entity != Some(me))
+        .map(|t| (t.position, t.velocity, t.entity.is_none()));
+    collision_escape_for(cfg, skill, position, velocity, others)
 }
 
 struct Decision {

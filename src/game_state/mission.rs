@@ -6,7 +6,8 @@
 
 use bevy::prelude::*;
 
-use crate::ai::{EnemyKind, PilotSkill};
+use super::{Difficulty, GameSettings, PilotMix};
+use crate::ai::{EnemyKind, EnemyTuning, PilotSkill};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum GameMode {
@@ -70,6 +71,7 @@ pub struct SpawnGroup {
     pub heading: Vec3,
     pub formation: Formation,
     pub skill: PilotSkill,
+    pub tuning: EnemyTuning,
 }
 
 impl SpawnGroup {
@@ -96,10 +98,11 @@ impl WaveSpec {
     }
 }
 
-/// The round to play: mode, waves and pacing.
+/// The round to play: mode, difficulty, waves and pacing.
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct Mission {
     pub mode: GameMode,
+    pub difficulty: Difficulty,
     pub waves: Vec<WaveSpec>,
     /// Seconds between the deciding moment (last kill, own crash) and the
     /// result screen, so the end can be seen.
@@ -108,47 +111,85 @@ pub struct Mission {
 
 impl Default for Mission {
     fn default() -> Self {
-        Self::hunt()
+        Self::hunt(Difficulty::default())
     }
 }
 
+/// Where flights enter, in turn: lead position and heading. The player
+/// starts at z = +800 m flying along −Z, so the first comes head-on from
+/// the city, the next ones from the flanks and from deep behind it.
+const ENTRY_POINTS: [(Vec3, Vec3); 6] = [
+    (Vec3::new(0.0, 700.0, -2_800.0), Vec3::Z),
+    (Vec3::new(-3_200.0, 900.0, -600.0), Vec3::X),
+    (Vec3::new(3_200.0, 800.0, -1_500.0), Vec3::NEG_X),
+    (Vec3::new(0.0, 1_100.0, -4_200.0), Vec3::Z),
+    (
+        Vec3::new(-2_400.0, 750.0, -3_200.0),
+        Vec3::new(0.6, 0.0, 0.8),
+    ),
+    (
+        Vec3::new(2_400.0, 1_000.0, -3_400.0),
+        Vec3::new(-0.6, 0.0, 0.8),
+    ),
+];
+
 impl Mission {
-    /// Mode 1: two flights of four Spitfires. The first, rookies, comes
-    /// head-on from the city (the player starts at z = +800 m flying along
-    /// −Z); the second, veterans, from the flank once the first is nearly
-    /// gone. The fight gets harder as it goes on.
-    pub fn hunt() -> Self {
-        let spitfires = |count, lead: Vec3, heading: Vec3, skill| SpawnGroup {
-            kind: EnemyKind::Spitfire,
-            count,
-            lead,
-            heading,
-            formation: Formation::Vic { spacing: 45.0 },
-            skill,
+    /// Mode 1, Hunt: Spitfire flights arriving one after another, each as
+    /// the previous one is (nearly) gone. Size, count, pilots and tuning
+    /// come from the difficulty.
+    pub fn hunt(difficulty: Difficulty) -> Self {
+        let params = difficulty.params().clamped();
+        let flights = params.enemies.div_ceil(params.flight_size);
+        let tuning = EnemyTuning {
+            speed: params.enemy_speed,
+            accuracy: params.enemy_accuracy,
         };
+        let waves = (0..flights)
+            .map(|i| {
+                let count = params
+                    .flight_size
+                    .min(params.enemies - i * params.flight_size);
+                let (lead, heading) = ENTRY_POINTS[i as usize % ENTRY_POINTS.len()];
+                let skill = match params.pilots {
+                    PilotMix::Rookies => PilotSkill::ROOKIE,
+                    PilotMix::Veterans => PilotSkill::VETERAN,
+                    PilotMix::Mixed if i % 2 == 0 => PilotSkill::ROOKIE,
+                    PilotMix::Mixed => PilotSkill::VETERAN,
+                    PilotMix::RookiesThenVeterans if 2 * i < flights => PilotSkill::ROOKIE,
+                    PilotMix::RookiesThenVeterans => PilotSkill::VETERAN,
+                };
+                WaveSpec {
+                    trigger: if i == 0 {
+                        WaveTrigger::AtStart
+                    } else {
+                        // Four-ship flights come when one is left, pairs
+                        // when the previous pair is gone.
+                        WaveTrigger::WhenEnemiesAtMost(params.flight_size / 4)
+                    },
+                    groups: vec![SpawnGroup {
+                        kind: EnemyKind::Spitfire,
+                        count,
+                        lead,
+                        heading,
+                        formation: Formation::Vic { spacing: 45.0 },
+                        skill,
+                        tuning,
+                    }],
+                }
+            })
+            .collect();
         Self {
             mode: GameMode::Hunt,
-            waves: vec![
-                WaveSpec {
-                    trigger: WaveTrigger::AtStart,
-                    groups: vec![spitfires(
-                        4,
-                        Vec3::new(0.0, 700.0, -2_800.0),
-                        Vec3::Z,
-                        PilotSkill::ROOKIE,
-                    )],
-                },
-                WaveSpec {
-                    trigger: WaveTrigger::WhenEnemiesAtMost(1),
-                    groups: vec![spitfires(
-                        4,
-                        Vec3::new(-3_200.0, 900.0, -600.0),
-                        Vec3::X,
-                        PilotSkill::VETERAN,
-                    )],
-                },
-            ],
+            difficulty,
+            waves,
             end_delay: 1.5,
+        }
+    }
+
+    /// The mission for the player's settings.
+    pub fn from_settings(settings: &GameSettings) -> Self {
+        match settings.mode {
+            GameMode::Hunt => Self::hunt(settings.difficulty),
         }
     }
 
