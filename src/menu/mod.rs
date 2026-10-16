@@ -23,7 +23,7 @@ pub use selection::{CustomField, MenuMode, MenuSelection, RowId};
 use crate::{
     flight::{KeyHelpAppExt, KeyHelpSection},
     game_state::{GameSettings, Pause, RestartRound, Round, RoundPhase},
-    world::Lighting,
+    world::{Lighting, LightingSystems},
 };
 
 /// Opens the menu from the result screen.
@@ -69,7 +69,10 @@ impl Plugin for MenuPlugin {
                 Update,
                 (
                     open_from_result_screen,
-                    menu_input.run_if(|menu: Res<Menu>| menu.open),
+                    menu_input
+                        .run_if(|menu: Res<Menu>| menu.open)
+                        // The light preview applies in the same frame.
+                        .before(LightingSystems),
                     sync_pause,
                     rebuild_menu,
                     show_result_button,
