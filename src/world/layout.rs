@@ -307,6 +307,13 @@ impl CityConfig {
         Ok(())
     }
 
+    /// Downtown radius in metres around the centre (0, 0), e.g. for aiming
+    /// bombers. Zone borders are ragged by `zone_noise`, so a few downtown
+    /// blocks reach a little beyond it.
+    pub fn downtown_radius_m(&self) -> f32 {
+        self.downtown_radius * self.city_radius
+    }
+
     /// Corridor width of a street class.
     pub fn width(&self, class: StreetClass) -> f32 {
         match class {

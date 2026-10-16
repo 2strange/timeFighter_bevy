@@ -358,3 +358,14 @@ fn smoke_and_craters_appear_and_go_with_repair() {
     assert_eq!(count(&mut app, "Smoke column"), 0);
     assert_eq!(count(&mut app, "Crater"), 0);
 }
+
+#[test]
+fn downtown_lies_around_the_centre_within_its_radius() {
+    let layout = city();
+    let r = layout.config.downtown_radius_m();
+    assert!((800.0..1_000.0).contains(&r), "{r}");
+    let slack = layout.config.zone_noise * layout.config.city_radius;
+    for b in layout.buildings.iter().filter(|b| b.zone == Zone::Downtown) {
+        assert!(b.parts[0].center.xz().length() < r + slack + 200.0);
+    }
+}
