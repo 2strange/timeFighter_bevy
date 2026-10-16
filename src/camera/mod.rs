@@ -33,8 +33,8 @@ pub struct ChaseCameraConfig {
     pub fov_speed_boost: f32,
     /// Far clipping plane (m). On the web it sits just behind the fog's
     /// visibility, so frustum culling skips what the fog hides anyway (the
-    /// web build has no per-chunk visibility ranges). The day fog (9 km)
-    /// reaches farther than the evening fog (7 km), so it sets the limit.
+    /// web build has no per-chunk visibility ranges); see
+    /// `world::max_fog_visibility`.
     pub far: f32,
 }
 
@@ -169,9 +169,11 @@ mod tests {
         let native = ChaseCameraConfig::for_target(Target::Native);
         assert_eq!(web.far, WEB_CAMERA_FAR);
         assert_eq!(native.far, NATIVE_CAMERA_FAR);
-        // Behind the farthest fog (day, 9 km visibility), so nothing the fog
+        // Behind the farthest fog of any lighting preset, so nothing the fog
         // still shows is clipped; native keeps its long range.
-        assert!(web.far > 9_000.0 && web.far < native.far);
+        let fog = crate::world::max_fog_visibility();
+        assert!(web.far > fog && web.far < native.far);
+        assert!(native.far > fog);
         // Everything else is the same on both targets.
         assert_eq!(
             ChaseCameraConfig { far: 0.0, ..web },

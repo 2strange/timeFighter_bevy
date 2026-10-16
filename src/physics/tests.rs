@@ -184,6 +184,25 @@ fn bullet_at_1000_m_s_hits_a_10_m_enemy() {
 }
 
 #[test]
+fn fast_projectiles_keep_their_speed() {
+    // Rapier caps speeds at 400 m/s unless told otherwise.
+    let mut app = app(30);
+    let shot = fire(
+        &mut app,
+        Vec3::ZERO,
+        Vec3::new(0.0, 0.0, -1_000.0),
+        0.05,
+        Layer::PlayerProjectile,
+    );
+    run(&mut app, 0.5);
+    let z = app.world().get::<Transform>(shot).unwrap().translation.z;
+    assert!(
+        (z + 500.0).abs() < 40.0,
+        "after 0.5 s at 1,000 m/s: z = {z}"
+    );
+}
+
+#[test]
 fn hit_projectile_is_readable_for_one_frame_then_gone() {
     let mut app = app(60);
     spawn_box(

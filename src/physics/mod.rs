@@ -25,6 +25,9 @@ use crate::flight::PlayerAircraft;
 /// runs in slow motion instead of letting things jump.
 const MAX_STEP: f32 = 0.1;
 
+/// Highest speed of any body (m/s), well above the fastest projectile.
+pub const MAX_SPEED: f32 = 2_000.0;
+
 pub struct PhysicsPlugin;
 
 impl Plugin for PhysicsPlugin {
@@ -32,10 +35,13 @@ impl Plugin for PhysicsPlugin {
         let mut init = RapierContextInitialization::default();
         if let RapierContextInitialization::InitializeDefaultRapierContext {
             rapier_configuration,
+            integration_parameters,
             ..
         } = &mut init
         {
             rapier_configuration.gravity = Vec3::ZERO;
+            // Rapier caps speeds at 400 m/s by default; bullets fly faster.
+            integration_parameters.normalized_max_linear_velocity = MAX_SPEED;
         }
 
         #[cfg(feature = "physics-debug")]
