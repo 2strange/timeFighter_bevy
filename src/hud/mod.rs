@@ -28,8 +28,8 @@ use crate::{
     game_state::{Mission, Round, RoundPhase, RoundSystems},
 };
 
-const HUD: Color = Color::srgba(0.72, 1.0, 0.78, 0.92);
-const HUD_DIM: Color = Color::srgba(0.72, 1.0, 0.78, 0.45);
+const HUD: Color = Color::srgba(0.72, 1.0, 0.78, 0.78);
+const HUD_DIM: Color = Color::srgba(0.72, 1.0, 0.78, 0.32);
 const TRACKING: Color = Color::srgb(1.0, 0.75, 0.2);
 const ALERT: Color = Color::srgb(1.0, 0.25, 0.2);
 
@@ -40,15 +40,19 @@ const RETICLE_RANGE: f32 = 800.0;
 const EDGE_MARGIN: f32 = 28.0;
 const MARKER_SIZE: f32 = 30.0;
 /// Gun cross: overall size and the open gap in its centre (px).
-const CROSS_SIZE: f32 = 40.0;
-const CROSS_GAP: f32 = 12.0;
-const LINE: f32 = 2.0;
+const CROSS_SIZE: f32 = 34.0;
+const CROSS_GAP: f32 = 10.0;
+const LINE: f32 = 1.5;
 /// Pitch ladder: rung spacing, how far from the current pitch rungs show
 /// (degrees), rung length (px) and the distance its points are placed at.
 const LADDER_STEP: i32 = 10;
 const LADDER_SHOWN: f32 = 25.0;
-const RUNG_WIDTH: f32 = 240.0;
-const RUNG_GAP: f32 = 70.0;
+/// Rung length as a share of the screen width: the horizon about a third,
+/// the other rungs a quarter. Their centre gap leaves the gun cross free.
+const HORIZON_WIDTH: f32 = 0.33;
+const RUNG_WIDTH: f32 = 0.25;
+/// Gap in the middle of a rung, as a share of its length.
+const RUNG_GAP: f32 = 0.3;
 const LADDER_RANGE: f32 = 1_000.0;
 const PIPPER_SIZE: f32 = 12.0;
 /// The lead pipper considers targets up to this far off the nose (rad).
@@ -306,7 +310,7 @@ fn spawn_hud(mut commands: Commands, keys: Res<CombatKeys>) {
                     position_type: PositionType::Absolute,
                     width: px(PIPPER_SIZE),
                     height: px(PIPPER_SIZE),
-                    border: UiRect::all(px(2)),
+                    border: UiRect::all(px(LINE)),
                     border_radius: BorderRadius::MAX,
                     ..default()
                 },
@@ -485,7 +489,7 @@ fn sync_markers(
                     position_type: PositionType::Absolute,
                     width: px(MARKER_SIZE),
                     height: px(MARKER_SIZE),
-                    border: UiRect::all(px(2)),
+                    border: UiRect::all(px(LINE)),
                     justify_content: JustifyContent::Center,
                     ..default()
                 },
@@ -628,18 +632,12 @@ fn place_reticle_and_markers(
 }
 
 fn spawn_rung(hud: &mut ChildSpawnerCommands, pitch: i32) {
-    let horizon = pitch == 0;
-    let width = if horizon {
-        RUNG_WIDTH * 1.5
-    } else {
-        RUNG_WIDTH
-    };
-    let half = (width - RUNG_GAP) / 2.0;
+    // Width is set per frame from the screen size; parts are shares of it.
+    let half = percent((1.0 - RUNG_GAP) / 2.0 * 100.0);
     hud.spawn((
         Rung { pitch },
         Node {
             position_type: PositionType::Absolute,
-            width: px(width),
             height: px(LINE),
             justify_content: JustifyContent::SpaceBetween,
             ..default()
@@ -651,18 +649,17 @@ fn spawn_rung(hud: &mut ChildSpawnerCommands, pitch: i32) {
         for side in [-1.0, 1.0] {
             // Above the horizon solid lines, below dashed (as in real HUDs).
             rung.spawn(Node {
-                width: px(half),
+                width: half,
                 height: px(LINE),
                 justify_content: JustifyContent::SpaceBetween,
                 ..default()
             })
             .with_children(|segment| {
-                let dashes = if pitch < 0 { 3 } else { 1 };
-                let dash = if pitch < 0 { half / 5.0 } else { half };
+                let (dashes, dash) = if pitch < 0 { (3, 20.0) } else { (1, 100.0) };
                 for _ in 0..dashes {
                     segment.spawn((
                         Node {
-                            width: px(dash),
+                            width: percent(dash),
                             height: px(LINE),
                             ..default()
                         },
@@ -670,19 +667,21 @@ fn spawn_rung(hud: &mut ChildSpawnerCommands, pitch: i32) {
                     ));
                 }
             });
-            if !horizon {
-                // Pitch number at the outer end.
+            if pitch != 0 {
+                // Pitch number just outside the outer end.
                 let mut label = Node {
                     position_type: PositionType::Absolute,
-                    top: px(-9.0),
+                    top: px(-8.0),
                     ..default()
                 };
                 if side < 0.0 {
-                    label.right = px(width + 6.0);
+                    label.right = percent(100);
+                    label.margin = UiRect::right(px(5));
                 } else {
-                    label.left = px(width + 6.0);
+                    label.left = percent(100);
+                    label.margin = UiRect::left(px(5));
                 }
-                rung.spawn((label, text(&pitch.abs().to_string(), 13.0, HUD_DIM)));
+                rung.spawn((label, text(&pitch.abs().to_string(), 12.0, HUD_DIM)));
             }
         }
     });
@@ -729,15 +728,17 @@ fn place_ladder(
             )?;
             let viewport = camera.logical_viewport_size()?;
             (centre.cmpge(Vec2::ZERO).all() && centre.cmple(viewport).all())
-                .then_some((centre, angle))
+                .then_some((centre, angle, viewport.x))
         });
         match placed {
-            Some((centre, angle)) => {
-                let width = if rung.pitch == 0 {
-                    RUNG_WIDTH * 1.5
+            Some((centre, angle, viewport_width)) => {
+                let share = if rung.pitch == 0 {
+                    HORIZON_WIDTH
                 } else {
                     RUNG_WIDTH
                 };
+                let width = viewport_width * share;
+                node.width = px(width);
                 node.left = px(centre.x - width / 2.0);
                 node.top = px(centre.y - LINE / 2.0);
                 transform.rotation = Rot2::radians(angle);
