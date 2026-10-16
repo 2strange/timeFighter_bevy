@@ -6,6 +6,13 @@ A modern jet fighter is pulled through a time vortex over the Bermuda Triangle a
 
 **Status:** early development.
 
+## Start menu
+
+The game opens in a start menu: mode (Hunt; Protect and Battle are coming),
+difficulty from Super Easy to Insane or Custom (missiles, enemies, flight
+size, enemy speed and aim, unlimited gun), and day or evening light. Arrow
+keys and Enter or the mouse; the browser remembers the choice.
+
 ## Controls
 
 | Key | Action |
@@ -18,6 +25,7 @@ A modern jet fighter is pulled through a time vortex over the Bermuda Triangle a
 | Right Shift / right mouse button | missile (homes on a locked target) |
 | Tab or Right Alt (Option) | next target (also automatic after a missile launch) |
 | Enter or R | fly again after the round is over |
+| M | back to the start menu after a round |
 | P / Esc | pause (also when the window loses focus) |
 | I | show / hide the key help (shown for a few seconds when a round starts) |
 
