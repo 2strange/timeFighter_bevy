@@ -21,6 +21,12 @@ pub struct ChaseCameraConfig {
 }
 
 impl Default for ChaseCameraConfig {
+    // Starting values, to be tuned on test flights. The prototype's offset
+    // (8 m up, 20 m back) suited a differently scaled model; for a 19 m jet
+    // the camera sits about two jet lengths behind, high enough to see over
+    // the canopy, and looks at a point 30 m ahead so the nose stays below the
+    // screen centre. The pullback adds 12.5 m at top speed, so speed reads as
+    // the jet pulling away a little instead of just the ground rushing by.
     fn default() -> Self {
         Self {
             offset: Vec3::new(0.0, 7.0, 34.0),

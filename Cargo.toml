@@ -17,7 +17,6 @@ bevy = { version = "=0.20.0", default-features = false, features = [
   "multi_threaded",
   "bevy_asset",
   "bevy_log",
-  "bevy_state",
   "bevy_winit",
   "x11",
   "webgl2",

@@ -50,6 +50,8 @@ pub fn step(
     transform: &mut Transform,
     dt: f32,
 ) {
+    // Clamp kept from the prototype (0.1 s): a hitch or a background tab
+    // must not teleport the jet. Below 10 fps the game runs in slow motion.
     let dt = dt.clamp(0.0, cfg.max_dt);
 
     state.roll_rate = axis_rate(
