@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use super::{Mission, Pause, WaveTrigger};
+use super::{GameSettings, Mission, Pause, WaveTrigger};
 use crate::{
     ai::{Enemy, enemy_bundle},
     combat::{
@@ -125,7 +125,8 @@ impl Plugin for RoundPlugin {
             "Enter / R",
             "fly again after a round",
         );
-        app.init_resource::<Mission>()
+        app.init_resource::<GameSettings>()
+            .init_resource::<Mission>()
             .init_resource::<Round>()
             .add_message::<RestartRound>()
             .configure_sets(Update, CombatSystems::Fire.run_if(weapons_free))
