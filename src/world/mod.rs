@@ -338,25 +338,31 @@ fn spawn_ground(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let (water, land): (Vec<_>, Vec<_>) = meshes::ground_quads(&layout)
-        .into_iter()
-        .partition(meshes::GroundQuad::is_water);
-    // Land and water are disjoint quads in the same plane: two materials,
-    // still no overlap.
-    let surfaces = [("Ground", land, 0.95, 0.5), ("River", water, 0.12, 0.6)];
-    for (name, quads, roughness, reflectance) in surfaces {
-        if quads.is_empty() {
+    let quads = meshes::ground_quads(&layout);
+    let depth = layout.config.river.as_ref().map_or(0.0, |r| r.water_depth);
+    let walls = meshes::quay_walls(&layout, &quads);
+    let (water, land): (Vec<_>, Vec<_>) = quads.into_iter().partition(meshes::GroundQuad::is_water);
+    // Land at street level with the quay walls; water sunk to its level in
+    // its own glossy material. Nothing shares a plane, so nothing z-fights.
+    let mut land_mesh = meshes::ground_mesh_data(&land, 0.0);
+    land_mesh.extend(meshes::quay_wall_mesh_data(&walls, depth));
+    let surfaces = [
+        ("Ground", land_mesh, 0.95, 0.5),
+        ("River", meshes::ground_mesh_data(&water, -depth), 0.12, 0.6),
+    ];
+    for (name, data, roughness, reflectance) in surfaces {
+        if data.is_empty() {
             continue;
         }
         commands.spawn((
             Name::new(name),
-            Mesh3d(meshes.add(meshes::ground_mesh_data(&quads).into_mesh())),
+            Mesh3d(meshes.add(data.into_mesh())),
             MeshMaterial3d(materials.add(StandardMaterial {
                 perceptual_roughness: roughness,
                 reflectance,
                 ..default()
             })),
-            // Flat ground never shadows anything.
+            // Flat ground never shadows anything worth the cost.
             NotShadowCaster,
         ));
     }

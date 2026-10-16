@@ -83,9 +83,22 @@ pub struct RiverConfig {
     pub east_x: f32,
     /// Paved quay along each bank, inside the river's block gap.
     pub quay_width: f32,
-    /// Free height between water and bridge deck: enough to fly under.
-    pub bridge_clearance: f32,
+    /// Water level below the streets; the quays drop to it as vertical walls.
+    pub water_depth: f32,
+    /// Bridge deck surface above street level.
+    pub deck_height: f32,
     pub deck_thickness: f32,
+    /// Length of the access ramp at each end of a bridge, inside its span.
+    pub ramp_length: f32,
+}
+
+impl RiverConfig {
+    /// Smallest free height between water and any bridge part: the flat
+    /// deck's underside sits `deck_height - deck_thickness` above the street
+    /// and the ramps' undersides never go below street level.
+    pub fn clearance(&self) -> f32 {
+        self.water_depth + (self.deck_height - self.deck_thickness).min(0.0)
+    }
 }
 
 impl Default for RiverConfig {
@@ -99,8 +112,12 @@ impl Default for RiverConfig {
             west_x: -1_800.0,
             east_x: 3_000.0,
             quay_width: 10.0,
-            bridge_clearance: 20.0,
-            deck_thickness: 3.0,
+            // Water 20 m down, decks 3 m up: ≥ 20 m to fly under every
+            // bridge (21.5 m under the flat middle), ramps ~9 % steep.
+            water_depth: 20.0,
+            deck_height: 3.0,
+            deck_thickness: 1.5,
+            ramp_length: 35.0,
         }
     }
 }
@@ -240,17 +257,35 @@ impl CityConfig {
         if let Some(river) = &self.river {
             for (name, v) in [
                 ("quay_width", river.quay_width),
-                ("bridge_clearance", river.bridge_clearance),
+                ("water_depth", river.water_depth),
+                ("deck_height", river.deck_height),
                 ("deck_thickness", river.deck_thickness),
+                ("ramp_length", river.ramp_length),
             ] {
                 if !(v.is_finite() && v > 0.0) {
                     return Err(format!("river {name} must be a positive number, got {v}"));
                 }
             }
+            if river.deck_thickness > river.deck_height {
+                return Err(format!(
+                    "deck_thickness {} exceeds deck_height {}: the deck would hang below the street",
+                    river.deck_thickness, river.deck_height
+                ));
+            }
             if 2.0 * river.quay_width >= self.block_min {
                 return Err(format!(
                     "river quays ({} m each) leave no water in a {} m block",
                     river.quay_width, self.block_min
+                ));
+            }
+            // Even the shortest bridge keeps 10 m of flat deck between its
+            // ramps, and the ramps reach past the quays over the water.
+            if 2.0 * river.ramp_length + 10.0 > self.block_min
+                || river.ramp_length <= river.quay_width
+            {
+                return Err(format!(
+                    "ramp_length {} must exceed the quay ({} m) and fit twice into a {} m block",
+                    river.ramp_length, river.quay_width, self.block_min
                 ));
             }
             if !(river.west_x < river.stem_x && river.stem_x < river.east_x) {
@@ -364,6 +399,16 @@ pub enum Roof {
         ridge_along_x: bool,
         height: f32,
     },
+    /// Bridge ramp instead of a box: a slab whose top rises from the box
+    /// bottom at the low end to the box top at the high end, `thickness`
+    /// thick at the high end and tapering to an edge at the low end (so its
+    /// underside never drops below the box bottom).
+    Ramp {
+        along_x: bool,
+        /// Rises towards +x / +z.
+        up_positive: bool,
+        thickness: f32,
+    },
 }
 
 /// A box-shaped piece of a building. The visual shape fills the box exactly
@@ -382,6 +427,43 @@ pub struct Part {
 }
 
 impl Part {
+    /// Collision boxes `(centre, half extents)` covering this part. A ramp
+    /// becomes a short staircase of boxes that encloses the slab.
+    pub fn collision_boxes(&self) -> Vec<(Vec3, Vec3)> {
+        let Roof::Ramp {
+            along_x,
+            up_positive,
+            thickness,
+        } = self.roof
+        else {
+            return vec![(self.center, self.half_size)];
+        };
+        const STEPS: usize = 4;
+        let (lo, hi) = (self.min(), self.max());
+        let rise = hi.y - lo.y;
+        let axis = if along_x { 0 } else { 2 };
+        let length = hi[axis] - lo[axis];
+        (0..STEPS)
+            .map(|i| {
+                // Fractions of the run, counted from the low end.
+                let (f0, f1) = (i as f32 / STEPS as f32, (i + 1) as f32 / STEPS as f32);
+                let top = lo.y + rise * f1;
+                let bottom = lo.y + (rise - thickness).max(0.0) * f0;
+                let (a, b) = if up_positive {
+                    (lo[axis] + length * f0, lo[axis] + length * f1)
+                } else {
+                    (hi[axis] - length * f1, hi[axis] - length * f0)
+                };
+                let (mut min, mut max) = (lo, hi);
+                min[axis] = a;
+                max[axis] = b;
+                min.y = bottom;
+                max.y = top;
+                ((min + max) / 2.0, (max - min) / 2.0)
+            })
+            .collect()
+    }
+
     pub fn min(&self) -> Vec3 {
         self.center - self.half_size
     }
@@ -415,7 +497,7 @@ pub struct Building {
 impl Building {
     /// Collision boxes for physics: `(centre, half extents)` per part.
     pub fn collision_boxes(&self) -> impl Iterator<Item = (Vec3, Vec3)> + '_ {
-        self.parts.iter().map(|p| (p.center, p.half_size))
+        self.parts.iter().flat_map(Part::collision_boxes)
     }
 
     /// Axis-aligned bounds of all parts.
@@ -439,7 +521,15 @@ pub struct Bridge {
     pub axis: usize,
     pub line: usize,
     pub gap: usize,
+    /// Flat deck first, then the two ramps, then the parapets.
     pub parts: Vec<Part>,
+}
+
+impl Bridge {
+    /// Collision boxes for physics, ramps as staircases.
+    pub fn collision_boxes(&self) -> impl Iterator<Item = (Vec3, Vec3)> + '_ {
+        self.parts.iter().flat_map(Part::collision_boxes)
+    }
 }
 
 /// Farmland at the city edge: a yard with buildings next to a striped field.
@@ -774,6 +864,14 @@ impl CityLayout {
                 } => {
                     h.usize(1 + usize::from(ridge_along_x));
                     h.f32s(&[height]);
+                }
+                Roof::Ramp {
+                    along_x,
+                    up_positive,
+                    thickness,
+                } => {
+                    h.usize(3 + usize::from(along_x) + 2 * usize::from(up_positive));
+                    h.f32s(&[thickness]);
                 }
             }
             h.f32s(&p.wall_color);

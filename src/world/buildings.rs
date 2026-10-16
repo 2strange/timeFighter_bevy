@@ -414,9 +414,11 @@ const CONCRETE: [f32; 3] = [0.66, 0.65, 0.62];
 const DECK_ASPHALT: [f32; 3] = [0.30, 0.31, 0.33];
 
 /// Bridge carrying a street corridor `across` (coordinates on `axis`) over
-/// the river gap `span` (coordinates on the other axis): a deck high enough
-/// to fly under, parapets, and abutments on the quays. No ramps; at arcade
-/// speed the abutments read as the bridgeheads.
+/// the sunken river gap `span` (coordinates on the other axis): a flat deck
+/// `deck_height` above the streets with a ramp up from street level at each
+/// end, and parapets along the deck. Ramps start flush at the gap edge, so
+/// the street runs straight onto the bridge; nothing reaches down to the
+/// water, so the whole channel stays open to fly through.
 pub(super) fn bridge_parts(
     axis: usize,
     across: (f32, f32),
@@ -424,52 +426,50 @@ pub(super) fn bridge_parts(
     river: &RiverConfig,
 ) -> Vec<Part> {
     let rect = |a: (f32, f32), s: (f32, f32)| axis_rect(axis, a, s);
-    let quay = river.quay_width;
-    let deck_y = river.bridge_clearance;
+    let (h, t, run) = (river.deck_height, river.deck_thickness, river.ramp_length);
     let mut deck = part(
-        rect(across, span),
-        deck_y,
-        river.deck_thickness,
+        rect(across, (span.0 + run, span.1 - run)),
+        h - t,
+        t,
         Facade::Plain,
         CONCRETE,
         DECK_ASPHALT,
     );
     deck.underside = true;
-    let top = deck_y + river.deck_thickness;
-    let parapet = 0.8;
+    // Ramps run along the span, i.e. along the axis the street points to.
+    let along_x = axis == 1;
+    let ramp = |range: (f32, f32), up_positive: bool| Part {
+        roof: Roof::Ramp {
+            along_x,
+            up_positive,
+            thickness: t,
+        },
+        underside: true,
+        ..part(
+            rect(across, range),
+            0.0,
+            h,
+            Facade::Plain,
+            CONCRETE,
+            DECK_ASPHALT,
+        )
+    };
+    let parapet = |a: (f32, f32)| {
+        part(
+            rect(a, (span.0 + run, span.1 - run)),
+            h,
+            1.2,
+            Facade::Plain,
+            CONCRETE,
+            CONCRETE,
+        )
+    };
+    let w = 0.8;
     vec![
         deck,
-        part(
-            rect((across.0, across.0 + parapet), span),
-            top,
-            1.2,
-            Facade::Plain,
-            CONCRETE,
-            CONCRETE,
-        ),
-        part(
-            rect((across.1 - parapet, across.1), span),
-            top,
-            1.2,
-            Facade::Plain,
-            CONCRETE,
-            CONCRETE,
-        ),
-        part(
-            rect(across, (span.0, span.0 + quay)),
-            0.0,
-            deck_y,
-            Facade::Plain,
-            CONCRETE,
-            CONCRETE,
-        ),
-        part(
-            rect(across, (span.1 - quay, span.1)),
-            0.0,
-            deck_y,
-            Facade::Plain,
-            CONCRETE,
-            CONCRETE,
-        ),
+        ramp((span.0, span.0 + run), true),
+        ramp((span.1 - run, span.1), false),
+        parapet((across.0, across.0 + w)),
+        parapet((across.1 - w, across.1)),
     ]
 }

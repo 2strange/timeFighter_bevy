@@ -30,6 +30,7 @@ pub const MEADOW: [f32; 3] = [0.42, 0.54, 0.30];
 const YARD: [f32; 3] = [0.55, 0.49, 0.40];
 pub const WATER: [f32; 3] = [0.20, 0.33, 0.42];
 const QUAY: [f32; 3] = [0.62, 0.60, 0.56];
+const QUAY_WALL: [f32; 3] = [0.50, 0.48, 0.45];
 const PATCHES: [[f32; 3]; 4] = [
     [0.40, 0.52, 0.29],
     [0.45, 0.55, 0.31],
@@ -235,6 +236,166 @@ fn river_surface(layout: &CityLayout, p: Vec2) -> [f32; 3] {
     }
 }
 
+/// Whether `p` shows open water (sunken), as opposed to quay or land.
+pub fn is_water_at(layout: &CityLayout, p: Vec2) -> bool {
+    layout.on_river(p) && river_surface(layout, p) == WATER
+}
+
+/// Vertical quay wall from the water up to street level.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct QuayWall {
+    /// 0: the wall lies in the plane x = `at`; 1: in the plane z = `at`.
+    pub axis: usize,
+    pub at: f32,
+    /// Extent along the other horizontal axis.
+    pub from: f32,
+    pub to: f32,
+    /// Whether the water lies on the + side (the wall faces +x / +z).
+    pub water_positive: bool,
+}
+
+/// Walls along every edge where open water meets quay or land: each water
+/// quad edge minus the parts shared with a neighbouring water quad. Edges
+/// at the ground border are left open.
+pub fn quay_walls(layout: &CityLayout, quads: &[GroundQuad]) -> Vec<QuayWall> {
+    type Edges = (Vec<(f32, f32)>, Vec<(f32, f32)>);
+    let mut edges: BTreeMap<(usize, u32), Edges> = BTreeMap::new();
+    for q in quads.iter().filter(|q| q.is_water()) {
+        let r = q.rect;
+        for (axis, lo, hi, span) in [
+            (0, r.min.x, r.max.x, (r.min.y, r.max.y)),
+            (1, r.min.y, r.max.y, (r.min.x, r.max.x)),
+        ] {
+            // Water lies on the + side of the low edge, the − side of the high.
+            edges.entry((axis, lo.to_bits())).or_default().0.push(span);
+            edges.entry((axis, hi.to_bits())).or_default().1.push(span);
+        }
+    }
+    let edge = layout.config.ground_half_extent;
+    let mut walls = Vec::new();
+    for ((axis, bits), (pos, neg)) in edges {
+        let at = f32::from_bits(bits);
+        if at.abs() >= edge {
+            continue;
+        }
+        let (pos, neg) = (merge_spans(pos), merge_spans(neg));
+        for (from, to) in subtract_spans(&pos, &neg) {
+            walls.push(QuayWall {
+                axis,
+                at,
+                from,
+                to,
+                water_positive: true,
+            });
+        }
+        for (from, to) in subtract_spans(&neg, &pos) {
+            walls.push(QuayWall {
+                axis,
+                at,
+                from,
+                to,
+                water_positive: false,
+            });
+        }
+    }
+    walls
+}
+
+/// Sorted, merged union of 1-D spans.
+fn merge_spans(mut spans: Vec<(f32, f32)>) -> Vec<(f32, f32)> {
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f32, f32)> = Vec::with_capacity(spans.len());
+    for (a, b) in spans {
+        match out.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    out
+}
+
+/// `a` minus `b`, both sorted and merged.
+fn subtract_spans(a: &[(f32, f32)], b: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let mut out = Vec::new();
+    for &(mut lo, hi) in a {
+        for &(blo, bhi) in b {
+            if bhi <= lo || blo >= hi {
+                continue;
+            }
+            if blo > lo {
+                out.push((lo, blo));
+            }
+            lo = lo.max(bhi);
+            if lo >= hi {
+                break;
+            }
+        }
+        if lo < hi {
+            out.push((lo, hi));
+        }
+    }
+    out
+}
+
+/// Quay walls as quads facing the water, from `-depth` up to 0.
+pub fn quay_wall_mesh_data(walls: &[QuayWall], depth: f32) -> MeshData {
+    let mut data = MeshData::default();
+    for w in walls {
+        let corner = |s: f32, y: f32| {
+            if w.axis == 0 {
+                Vec3::new(w.at, y, s)
+            } else {
+                Vec3::new(s, y, w.at)
+            }
+        };
+        let verts = [
+            corner(w.from, -depth),
+            corner(w.to, -depth),
+            corner(w.to, 0.0),
+            corner(w.from, 0.0),
+        ];
+        let mut toward_water = Vec3::ZERO;
+        toward_water[if w.axis == 0 { 0 } else { 2 }] = if w.water_positive { 1.0 } else { -1.0 };
+        let land_side = (verts[0] + verts[2]) / 2.0 - toward_water;
+        data.polygon_facing_out(&verts, land_side, QUAY_WALL);
+    }
+    data
+}
+
+/// Land surface for the physics colliders: the ground minus open water, as
+/// few rectangles as possible (x, z). Together with a water plane at
+/// `-water_depth` they make the ground solid, including the quay walls.
+pub fn land_rects(layout: &CityLayout, quads: &[GroundQuad]) -> Vec<Rect> {
+    let edge = layout.config.ground_half_extent;
+    let mut breaks: [Vec<f32>; 2] = [vec![-edge, edge], vec![-edge, edge]];
+    for q in quads.iter().filter(|q| q.is_water()) {
+        breaks[0].extend([q.rect.min.x, q.rect.max.x]);
+        breaks[1].extend([q.rect.min.y, q.rect.max.y]);
+    }
+    for b in &mut breaks {
+        b.sort_by(f32::total_cmp);
+        b.dedup();
+    }
+    let mut rects = Vec::new();
+    for zw in breaks[1].windows(2) {
+        let mut run: Option<(f32, f32)> = None;
+        for xw in breaks[0].windows(2) {
+            let centre = Vec2::new((xw[0] + xw[1]) / 2.0, (zw[0] + zw[1]) / 2.0);
+            if is_water_at(layout, centre) {
+                if let Some((x0, x1)) = run.take() {
+                    rects.push(Rect::new(x0, zw[0], x1, zw[1]));
+                }
+            } else {
+                run = Some(run.map_or((xw[0], xw[1]), |(x0, _)| (x0, xw[1])));
+            }
+        }
+        if let Some((x0, x1)) = run {
+            rects.push(Rect::new(x0, zw[0], x1, zw[1]));
+        }
+    }
+    rects
+}
+
 /// Meadow near the city, a patchwork of fields further out for a sense of
 /// speed when flying low over open land.
 fn countryside(layout: &CityLayout, p: Vec2) -> [f32; 3] {
@@ -302,6 +463,20 @@ pub struct MeshData {
 }
 
 impl MeshData {
+    /// Like `polygon`, but flips the winding if needed so the face points
+    /// away from `inside`.
+    fn polygon_facing_out(&mut self, verts: &[Vec3], inside: Vec3, srgb: [f32; 3]) {
+        let normal = (verts[1] - verts[0]).cross(verts[2] - verts[0]);
+        let centroid = verts.iter().sum::<Vec3>() / verts.len() as f32;
+        let uvs = vec![Vec2::ZERO; verts.len()];
+        if normal.dot(centroid - inside) >= 0.0 {
+            self.polygon(verts, &uvs, srgb);
+        } else {
+            let reversed: Vec<Vec3> = verts.iter().rev().copied().collect();
+            self.polygon(&reversed, &uvs, srgb);
+        }
+    }
+
     /// Adds a convex planar polygon given counter-clockwise as seen from its
     /// front; the normal follows from that winding.
     pub fn polygon(&mut self, verts: &[Vec3], uvs: &[Vec2], srgb: [f32; 3]) {
@@ -329,6 +504,16 @@ impl MeshData {
         self.indices.is_empty()
     }
 
+    pub fn extend(&mut self, other: MeshData) {
+        let base = self.positions.len() as u32;
+        self.positions.extend(other.positions);
+        self.normals.extend(other.normals);
+        self.uvs.extend(other.uvs);
+        self.colors.extend(other.colors);
+        self.indices
+            .extend(other.indices.into_iter().map(|i| i + base));
+    }
+
     pub fn into_mesh(self) -> Mesh {
         // Render-world only: the CPU copy is dropped after upload; the bounds
         // for frustum culling are computed when the positions are inserted.
@@ -344,16 +529,17 @@ impl MeshData {
     }
 }
 
-pub fn ground_mesh_data(quads: &[GroundQuad]) -> MeshData {
+/// Flat quads at height `y` (0 for land, minus the water depth for water).
+pub fn ground_mesh_data(quads: &[GroundQuad], y: f32) -> MeshData {
     let mut data = MeshData::default();
     for q in quads {
         let (a, b) = (q.rect.min, q.rect.max);
         // Counter-clockwise seen from above: the normal points up.
         let verts = [
-            Vec3::new(a.x, 0.0, a.y),
-            Vec3::new(a.x, 0.0, b.y),
-            Vec3::new(b.x, 0.0, b.y),
-            Vec3::new(b.x, 0.0, a.y),
+            Vec3::new(a.x, y, a.y),
+            Vec3::new(a.x, y, b.y),
+            Vec3::new(b.x, y, b.y),
+            Vec3::new(b.x, y, a.y),
         ];
         data.polygon(&verts, &[Vec2::ZERO; 4], q.color);
     }
@@ -428,6 +614,20 @@ fn add_part(part: &Part, meshes: &mut [MeshData; 3]) {
             ridge_along_x,
             height,
         } => (height, ridge_along_x),
+        Roof::Ramp {
+            along_x,
+            up_positive,
+            thickness,
+        } => {
+            add_ramp(
+                part,
+                along_x,
+                up_positive,
+                thickness,
+                &mut meshes[Surface::Plain as usize],
+            );
+            return;
+        }
     };
     let eave = hi.y - roof_height;
 
@@ -491,4 +691,36 @@ fn add_part(part: &Part, meshes: &mut [MeshData; 3]) {
             part.wall_color,
         );
     }
+}
+
+/// Wedge-shaped ramp slab (see `Roof::Ramp`): top from the low edge up to
+/// the deck, underside from the same edge up to the deck's underside.
+fn add_ramp(part: &Part, along_x: bool, up_positive: bool, thickness: f32, mesh: &mut MeshData) {
+    let (lo, hi) = (part.min(), part.max());
+    let (run, across) = if along_x { (0, 2) } else { (2, 0) };
+    let (low, high) = if up_positive {
+        (lo[run], hi[run])
+    } else {
+        (hi[run], lo[run])
+    };
+    let at = |s: f32, c: f32, y: f32| {
+        let mut v = Vec3::ZERO;
+        v[run] = s;
+        v[across] = c;
+        v.y = y;
+        v
+    };
+    let (c0, c1) = (lo[across], hi[across]);
+    let (a0, a1) = (at(low, c0, lo.y), at(low, c1, lo.y));
+    let (t0, t1) = (at(high, c0, hi.y), at(high, c1, hi.y));
+    let (b0, b1) = (
+        at(high, c0, hi.y - thickness),
+        at(high, c1, hi.y - thickness),
+    );
+    let inside = (a0 + a1 + t0 + t1 + b0 + b1) / 6.0;
+    mesh.polygon_facing_out(&[a0, a1, t1, t0], inside, part.roof_color);
+    mesh.polygon_facing_out(&[a0, a1, b1, b0], inside, part.wall_color);
+    mesh.polygon_facing_out(&[t0, t1, b1, b0], inside, part.wall_color);
+    mesh.polygon_facing_out(&[a0, t0, b0], inside, part.wall_color);
+    mesh.polygon_facing_out(&[a1, t1, b1], inside, part.wall_color);
 }

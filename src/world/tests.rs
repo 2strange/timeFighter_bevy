@@ -5,7 +5,7 @@ use bevy::{math::Rect, prelude::*};
 use super::{
     CityPlugin, Lighting, Target, WEB_CAMERA_FAR, WorldRenderConfig,
     layout::{
-        Bridge, BuildingKind, CityConfig, CityLayout, MAX_LINES_PER_SIDE, RiverConfig, Roof,
+        Bridge, BuildingKind, CityConfig, CityLayout, MAX_LINES_PER_SIDE, Part, RiverConfig, Roof,
         StreetClass, Zone, street_lines,
     },
     max_fog_visibility,
@@ -307,7 +307,7 @@ fn ground_is_one_flat_layer_without_gaps_or_overlaps() {
             .all(|q| q.rect.width() > 0.0 && q.rect.height() > 0.0)
     );
 
-    let data = meshes::ground_mesh_data(&quads);
+    let data = meshes::ground_mesh_data(&quads, 0.0);
     assert!(
         data.positions.iter().all(|p| p[1] == 0.0),
         "ground not flat"
@@ -434,7 +434,7 @@ fn city_plugin_inserts_the_layout_headless() {
 /// Fixed fingerprint of the default city. If a deliberate generator change
 /// moves it, update the constant; if it differs between native and WASM,
 /// the generator is not platform-independent.
-const DEFAULT_CITY_FINGERPRINT: u64 = 0xcea3_7e18_ab72_c89c;
+const DEFAULT_CITY_FINGERPRINT: u64 = 0xe9f3_530b_02cc_7bab;
 
 #[test]
 fn default_city_matches_golden_fingerprint() {
@@ -615,7 +615,12 @@ fn city_stays_within_render_budget() {
     let chunks = meshes::building_meshes(&layout);
     let tris: usize = chunks.values().map(|d| d.triangle_count()).sum();
     let verts: usize = chunks.values().map(|d| d.positions.len()).sum();
-    let ground = meshes::ground_mesh_data(&meshes::ground_quads(&layout));
+    let quads = meshes::ground_quads(&layout);
+    let mut ground = meshes::ground_mesh_data(&quads, 0.0);
+    ground.extend(meshes::quay_wall_mesh_data(
+        &meshes::quay_walls(&layout, &quads),
+        20.0,
+    ));
     let per_surface = |s: Surface| chunks.keys().filter(|k| k.1 == s).count();
     let zones = [Zone::Downtown, Zone::Midtown, Zone::Suburb, Zone::Rural]
         .map(|z| layout.buildings.iter().filter(|b| b.zone == z).count());
@@ -728,25 +733,53 @@ fn every_paved_street_across_the_river_has_one_bridge() {
     for b in &layout.bridges {
         let deck = b.parts[0];
         assert!(deck.underside);
-        assert!(
-            deck.min().y >= cfg.bridge_clearance - 1e-3,
-            "too low to fly under"
-        );
-        // The deck spans the whole river gap, water and quays.
-        let span = layout.gap_range(1 - b.axis, b.gap);
-        let (lo, hi) = if b.axis == 0 {
-            (deck.min().z, deck.max().z)
-        } else {
-            (deck.min().x, deck.max().x)
-        };
-        assert!((lo - span.0).abs() < 1e-3 && (hi - span.1).abs() < 1e-3);
-        // Under the deck: open water between the abutments.
-        let under = Vec2::new(deck.center.x, deck.center.z);
-        assert!(layout.on_river(under));
+        // Deck surface ~3 m above the street.
+        assert!((deck.max().y - cfg.deck_height).abs() < 1e-3);
+        // Nothing hangs below street level: the channel stays open, at least
+        // `clearance()` above the water.
         for p in &b.parts {
             assert!(p.half_size.min_element() > 0.0);
-            assert!(p.min().y >= -1e-3);
+            assert!(p.min().y >= -1e-3, "bridge part below street level");
+            for (c, h) in p.collision_boxes() {
+                assert!(c.y - h.y >= -1e-3);
+            }
         }
+        assert!(cfg.clearance() >= 20.0);
+        // A ramp at each end: flush with the street at the gap edge, up to
+        // the deck at the other end; the three pieces span the whole gap.
+        let span = layout.gap_range(1 - b.axis, b.gap);
+        let run = |p: &Part| {
+            if b.axis == 0 {
+                (p.min().z, p.max().z)
+            } else {
+                (p.min().x, p.max().x)
+            }
+        };
+        let (r0, r1) = (b.parts[1], b.parts[2]);
+        for (ramp, edge, up) in [(r0, span.0, true), (r1, span.1, false)] {
+            let Roof::Ramp {
+                up_positive,
+                along_x,
+                ..
+            } = ramp.roof
+            else {
+                panic!("bridge part 1/2 is not a ramp");
+            };
+            assert_eq!(up_positive, up);
+            assert_eq!(along_x, b.axis == 1);
+            assert_eq!(ramp.min().y, 0.0);
+            assert!((ramp.max().y - cfg.deck_height).abs() < 1e-3);
+            let (lo, hi) = run(&ramp);
+            assert!((if up { lo } else { hi } - edge).abs() < 1e-3);
+            assert!((hi - lo - cfg.ramp_length).abs() < 1e-3);
+        }
+        assert!((run(&r0).1 - run(&deck).0).abs() < 1e-3);
+        assert!((run(&deck).1 - run(&r1).0).abs() < 1e-3);
+        // Under the deck: open water.
+        assert!(meshes::is_water_at(
+            &layout,
+            Vec2::new(deck.center.x, deck.center.z)
+        ));
     }
 }
 
@@ -794,7 +827,19 @@ fn bridge_faces_point_outwards() {
                 for t in data.indices.chunks(3) {
                     let [p0, p1, p2] = [0, 1, 2].map(|k| Vec3::from(data.positions[t[k] as usize]));
                     let n = (p1 - p0).cross(p2 - p0);
-                    assert!(n.dot((p0 + p1 + p2) / 3.0 - part.center) > 0.0);
+                    // Box centre for boxes; for a ramp wedge the box centre
+                    // lies on its top face, so use the wedge's own centroid.
+                    let inside = if matches!(part.roof, Roof::Ramp { .. }) {
+                        let all = &data.positions;
+                        all.iter().map(|&p| Vec3::from(p)).sum::<Vec3>() / all.len() as f32
+                    } else {
+                        part.center
+                    };
+                    assert!(
+                        n.dot((p0 + p1 + p2) / 3.0 - inside) > 0.0,
+                        "{:?}",
+                        part.roof
+                    );
                 }
             }
         }
@@ -837,9 +882,23 @@ fn invalid_river_configs_are_rejected() {
             },
         ),
         (
-            "bridge_clearance",
+            "water_depth",
             RiverConfig {
-                bridge_clearance: 0.0,
+                water_depth: 0.0,
+                ..river.clone()
+            },
+        ),
+        (
+            "hang below the street",
+            RiverConfig {
+                deck_thickness: 4.0,
+                ..river.clone()
+            },
+        ),
+        (
+            "fit twice",
+            RiverConfig {
+                ramp_length: 60.0,
                 ..river.clone()
             },
         ),
@@ -904,4 +963,150 @@ fn fingerprint_covers_bridge_details() {
     let mut changed = layout.clone();
     changed.bridges[0].parts.pop();
     assert_ne!(changed.fingerprint(), layout.fingerprint());
+}
+
+#[test]
+fn sunken_river_is_walled_in_without_gaps() {
+    let layout = city();
+    let depth = layout.config.river.as_ref().unwrap().water_depth;
+    let quads = meshes::ground_quads(&layout);
+    let walls = meshes::quay_walls(&layout, &quads);
+    assert!(!walls.is_empty());
+    // Water mesh sits at the water level, below the quays at 0.
+    let water: Vec<_> = quads.iter().copied().filter(|q| q.is_water()).collect();
+    let mesh = meshes::ground_mesh_data(&water, -depth);
+    assert!(mesh.positions.iter().all(|p| p[1] == -depth));
+
+    // Walk every water quad edge in 1 m steps; wherever land or quay lies
+    // just outside, a wall facing the water must cover that point.
+    let edge = layout.config.ground_half_extent;
+    let covered = |axis: usize, at: f32, s: f32, water_positive: bool| {
+        walls.iter().any(|w| {
+            w.axis == axis
+                && w.at == at
+                && w.water_positive == water_positive
+                && w.from <= s
+                && s <= w.to
+        })
+    };
+    let mut checked = 0;
+    for q in &water {
+        let r = q.rect;
+        let sides = [
+            (0, r.min.x, (r.min.y, r.max.y), true),
+            (0, r.max.x, (r.min.y, r.max.y), false),
+            (1, r.min.y, (r.min.x, r.max.x), true),
+            (1, r.max.y, (r.min.x, r.max.x), false),
+        ];
+        for (axis, at, (a, b), water_positive) in sides {
+            if at.abs() >= edge {
+                continue;
+            }
+            let outward = if water_positive { -0.01 } else { 0.01 };
+            let mut s = a + 0.5;
+            while s < b {
+                let outside = if axis == 0 {
+                    Vec2::new(at + outward, s)
+                } else {
+                    Vec2::new(s, at + outward)
+                };
+                if !meshes::is_water_at(&layout, outside) {
+                    assert!(
+                        covered(axis, at, s, water_positive),
+                        "gap in quay wall at {outside}"
+                    );
+                    checked += 1;
+                }
+                s += 1.0;
+            }
+        }
+    }
+    assert!(checked > 10_000, "only {checked} wall samples");
+    // And no wall stands between two stretches of water.
+    for w in &walls {
+        let mid = (w.from + w.to) / 2.0;
+        let probe = |d: f32| {
+            if w.axis == 0 {
+                Vec2::new(w.at + d, mid)
+            } else {
+                Vec2::new(mid, w.at + d)
+            }
+        };
+        let (water_side, land_side) = if w.water_positive {
+            (0.01, -0.01)
+        } else {
+            (-0.01, 0.01)
+        };
+        assert!(meshes::is_water_at(&layout, probe(water_side)));
+        assert!(!meshes::is_water_at(&layout, probe(land_side)));
+    }
+}
+
+#[test]
+fn land_rects_and_water_partition_the_ground() {
+    let layout = city();
+    let quads = meshes::ground_quads(&layout);
+    let land = meshes::land_rects(&layout, &quads);
+    let water: Vec<Rect> = quads
+        .iter()
+        .filter(|q| q.is_water())
+        .map(|q| q.rect)
+        .collect();
+    let area = |rs: &[Rect]| -> f64 {
+        rs.iter()
+            .map(|r| f64::from(r.width()) * f64::from(r.height()))
+            .sum()
+    };
+    let edge = f64::from(2.0 * layout.config.ground_half_extent);
+    let rel = (area(&land) + area(&water) - edge * edge).abs() / (edge * edge);
+    assert!(rel < 1e-6, "land + water off by {rel}");
+    for l in &land {
+        for w in &water {
+            assert!(
+                l.intersect(*w).is_empty(),
+                "land box {l:?} over water {w:?}"
+            );
+        }
+    }
+    // Few enough to be cheap static colliders.
+    assert!(land.len() < 2_000, "{} land rects", land.len());
+}
+
+#[test]
+fn ramp_collision_steps_enclose_the_ramp() {
+    let layout = city();
+    let ramp = layout.bridges[0].parts[1];
+    let Roof::Ramp {
+        along_x,
+        up_positive,
+        thickness,
+    } = ramp.roof
+    else {
+        panic!("not a ramp");
+    };
+    let boxes = ramp.collision_boxes();
+    let (lo, hi) = (ramp.min(), ramp.max());
+    let axis = if along_x { 0 } else { 2 };
+    let rise = hi.y - lo.y;
+    for i in 0..=20 {
+        let f = i as f32 / 20.0;
+        let run = if up_positive {
+            lo[axis] + f * (hi[axis] - lo[axis])
+        } else {
+            hi[axis] - f * (hi[axis] - lo[axis])
+        };
+        let top = lo.y + rise * f;
+        let bottom = lo.y + (rise - thickness) * f;
+        for y in [bottom, (bottom + top) / 2.0, top] {
+            let mut p = ramp.center;
+            p[axis] = run;
+            p.y = y;
+            assert!(
+                boxes
+                    .iter()
+                    .any(|(c, h)| ((p - *c).abs() - *h).max_element() <= 1e-3),
+                "ramp point {p} outside its collision steps"
+            );
+        }
+    }
 }
