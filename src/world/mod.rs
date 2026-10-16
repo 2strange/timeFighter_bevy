@@ -50,6 +50,9 @@ pub struct WorldRenderConfig {
     /// Shadows are drawn up to this distance from the camera (m). Shadow
     /// passes re-draw every caster per cascade, so this is the main lever.
     pub shadow_distance: f32,
+    /// Shadow cascades of the sun. WebGL2 supports only one (Bevy ignores
+    /// the rest and warns), native builds use more for sharper near shadows.
+    pub shadow_cascades: usize,
     /// Building chunks fade out between these distances from the camera to
     /// the chunk centre (m); just short of where the day fog (9 km
     /// visibility) has swallowed them anyway.
@@ -58,9 +61,22 @@ pub struct WorldRenderConfig {
 
 impl Default for WorldRenderConfig {
     fn default() -> Self {
-        Self {
-            shadow_distance: 1_500.0,
-            draw_fade: 7_500.0..8_000.0,
+        // A single 2048² cascade spreads its texels over the whole shadow
+        // distance: ~0.5 m per texel at 1 km, enough for building-sized
+        // shadows. Farther reach would make them visibly blocky, so the web
+        // build trades range for sharpness; native keeps 1.5 km in 3 cascades.
+        if cfg!(target_arch = "wasm32") {
+            Self {
+                shadow_distance: 1_000.0,
+                shadow_cascades: 1,
+                draw_fade: 7_500.0..8_000.0,
+            }
+        } else {
+            Self {
+                shadow_distance: 1_500.0,
+                shadow_cascades: 3,
+                draw_fade: 7_500.0..8_000.0,
+            }
         }
     }
 }
@@ -75,6 +91,13 @@ impl WorldRenderConfig {
                 "shadow_distance must exceed {} m, got {}",
                 Self::FIRST_CASCADE,
                 self.shadow_distance
+            ));
+        }
+        let max_cascades = if cfg!(target_arch = "wasm32") { 1 } else { 4 };
+        if !(1..=max_cascades).contains(&self.shadow_cascades) {
+            return Err(format!(
+                "shadow_cascades must be 1..={max_cascades} on this target, got {}",
+                self.shadow_cascades
             ));
         }
         let (a, b) = (self.draw_fade.start, self.draw_fade.end);
@@ -232,7 +255,7 @@ fn spawn_sun(mut commands: Commands, render: Res<WorldRenderConfig>) {
         },
         Transform::default().looking_to(day.sun_direction, Vec3::Y),
         CascadeShadowConfigBuilder {
-            num_cascades: 3,
+            num_cascades: render.shadow_cascades,
             first_cascade_far_bound: WorldRenderConfig::FIRST_CASCADE,
             maximum_distance: render.shadow_distance,
             ..default()

@@ -504,6 +504,22 @@ fn render_config_is_valid_and_rejects_nonsense() {
     let cfg = WorldRenderConfig::default();
     assert_eq!(cfg.validate(), Ok(()));
     assert!(cfg.shadow_distance <= 1_500.0);
+    assert!(
+        WorldRenderConfig {
+            shadow_cascades: 0,
+            ..cfg.clone()
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        WorldRenderConfig {
+            shadow_cascades: 5,
+            ..cfg.clone()
+        }
+        .validate()
+        .is_err()
+    );
     // Chunks must fade out before the day fog (9 km visibility) ends.
     assert!(cfg.draw_fade.end <= 9_000.0);
     let range = cfg.chunk_visibility();
