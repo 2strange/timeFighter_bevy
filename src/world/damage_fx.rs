@@ -60,10 +60,12 @@ struct FxAssets {
 
 /// Chunks that currently show ruins (rebuilt on repair) and a spawn counter.
 #[derive(Resource, Default)]
-struct FxState {
+pub(super) struct FxState {
     ruined_chunks: BTreeSet<(i32, i32)>,
-    /// Chunks waiting for their rebuild.
-    pending: BTreeSet<(i32, i32)>,
+    /// Chunks waiting for their rebuild (after damage or a repair).
+    pub(super) pending: BTreeSet<(i32, i32)>,
+    /// Chunks rebuilt in the last frame.
+    pub(super) rebuilt_last: usize,
     serial: u64,
 }
 
@@ -75,7 +77,15 @@ impl Plugin for DamageFxPlugin {
             .add_systems(Startup, load_fx_assets)
             .add_systems(
                 Update,
-                (rebuild_chunks, spawn_smoke, spawn_craters, repair_fx).after(CityDamageSystems),
+                (
+                    // A repair queues its chunks first, so they share the
+                    // per-frame rebuild budget with fresh damage.
+                    repair_fx.before(rebuild_chunks),
+                    rebuild_chunks,
+                    spawn_smoke,
+                    spawn_craters,
+                )
+                    .after(CityDamageSystems),
             )
             .add_systems(Update, rise_smoke);
     }
@@ -123,6 +133,7 @@ fn rebuild_chunks(
         .map_while(|_| state.pending.pop_first())
         .collect();
     if dirty.is_empty() {
+        state.rebuilt_last = 0;
         return;
     }
     let started = Instant::now();
@@ -132,7 +143,11 @@ fn rebuild_chunks(
         dirty.len(),
         started.elapsed().as_secs_f64() * 1e3
     );
-    state.ruined_chunks.extend(dirty);
+    state.rebuilt_last = dirty.len();
+    // Chunks rebuilt intact (after a repair) need no repair later.
+    if damage.destroyed_count() > 0 {
+        state.ruined_chunks.extend(dirty);
+    }
 }
 
 fn rebuild(
@@ -260,24 +275,23 @@ fn spawn_craters(
 
 type DamageFx = Or<(With<SmokeColumn>, With<Crater>)>;
 
-/// New round: intact chunks again, no smoke, no craters.
-#[allow(clippy::too_many_arguments)]
+/// New round: no smoke, no craters, and the ruined chunks queued for an
+/// intact rebuild. The rebuild shares the per-frame budget instead of
+/// rebuilding everything at once: after a heavy raid that is 20+ chunks,
+/// tens of milliseconds in the browser, which would stall the first frame
+/// of the new round. Spread out, the ruins vanish within a few frames while
+/// the player is still kilometres away at the start position.
 fn repair_fx(
     mut commands: Commands,
-    layout: Res<CityLayout>,
-    damage: Res<CityDamage>,
     mut repairs: MessageReader<RepairCity>,
     mut state: ResMut<FxState>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut chunks: Query<(&CityChunk, &Mesh3d, &mut Visibility)>,
     fx: Query<Entity, DamageFx>,
 ) {
     if repairs.read().count() == 0 {
         return;
     }
-    state.pending.clear();
-    let dirty = std::mem::take(&mut state.ruined_chunks);
-    rebuild(&layout, &damage.destroyed, &dirty, &mut meshes, &mut chunks);
+    let ruined = std::mem::take(&mut state.ruined_chunks);
+    state.pending.extend(ruined);
     for entity in &fx {
         commands.entity(entity).despawn();
     }
