@@ -112,9 +112,9 @@ impl Default for RiverConfig {
             west_x: -1_800.0,
             east_x: 3_000.0,
             quay_width: 10.0,
-            // Water 20 m down, decks 3 m up: ≥ 20 m to fly under every
-            // bridge (21.5 m under the flat middle), ramps ~9 % steep.
-            water_depth: 20.0,
+            // Water 25 m down, decks 3 m up: ≥ 25 m to fly under every
+            // bridge (26.5 m under the flat middle), ramps ~9 % steep.
+            water_depth: 25.0,
             deck_height: 3.0,
             deck_thickness: 1.5,
             ramp_length: 35.0,
