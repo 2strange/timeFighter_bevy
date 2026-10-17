@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>TimeFighter – arcade air combat in your browser</title>
     <meta name="description" content="Free arcade dogfighter in your browser: one F-14 Tomcat, thrown into a parallel timeline, against waves of propeller fighters and bombers over a living city." />
     <link rel="canonical" href="https://timefighter.trendgegner.com/" />
@@ -12,6 +12,12 @@
     <meta name="tf-leaderboard" content="https://timefighter-api.trendgegner.com" />
     <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png" />
+    <!-- Installable as an app (full screen, landscape); no service worker. -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TimeFighter" />
     <!-- Share preview (WhatsApp, Signal, Telegram, Slack, ...): rendered by tools/render-aircraft. -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="TimeFighter" />
@@ -56,7 +62,14 @@
       }
       html, body { margin: 0; height: 100%; background: #0b1218; overflow: hidden; }
       body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
-      #game { display: block; width: 100%; height: 100%; outline: none; }
+      /* No scrolling or zooming by touch on the game. */
+      #game { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+      .home-hint {
+        margin: 0 0 14px; padding: 8px 12px; font-size: 13px; color: var(--ink);
+        border: 1px solid var(--amber); display: flex; gap: 10px; align-items: center;
+      }
+      .home-hint[hidden] { display: none; }
+      .home-hint button { margin-left: auto; background: none; border: none; color: var(--hud); font-size: 16px; }
 
       #start {
         position: absolute; inset: 0; overflow-y: auto;
@@ -220,6 +233,11 @@
           <p id="hof-note"></p>
         </details>
 
+        <p class="home-hint" id="home-hint" hidden>
+          For full screen: tap Share, then “Add to Home Screen”, and start the game from there.
+          <button type="button" aria-label="Close">✕</button>
+        </p>
+
         <button id="play" type="button" disabled>LOADING</button>
         <div class="status" id="status" aria-live="polite">Loading the game…</div>
 
@@ -261,6 +279,7 @@
 
     <script type="module">
       import { hallOfFame, pumpOutbox } from './leaderboard.js';
+      import { homeScreenHint, startTouch } from './mobile.js';
       // scripts/build-web.sh writes hashed names here, so script and
       // WebAssembly always come from the same build.
       const GAME_JS = './timefighter.js';
@@ -399,8 +418,12 @@
         play.focus();
       }
 
+      homeScreenHint(document.getElementById('home-hint'));
+
       play.addEventListener('click', async () => {
         if (!module) return;
+        // Phones: motion access, full screen and landscape need this tap.
+        startTouch();
         play.disabled = true;
         play.textContent = 'STARTING';
         handOver();

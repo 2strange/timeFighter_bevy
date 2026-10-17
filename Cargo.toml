@@ -83,5 +83,13 @@ bevy = { version = "=0.20.0", default-features = false, features = [
   "wav",
   "vorbis",
 ] }
-# Reading the page URL (game or showroom). Same version Bevy already uses.
-web-sys = { version = "=0.3.106", features = ["Window", "Location", "Storage"] }
+# Reading the page URL (game or showroom), local storage, the touch
+# overlay's state on <html> and the pixel ratio. Same version Bevy already uses.
+web-sys = { version = "=0.3.106", features = [
+  "Window",
+  "Location",
+  "Storage",
+  "Document",
+  "Element",
+  "MediaQueryList",
+] }

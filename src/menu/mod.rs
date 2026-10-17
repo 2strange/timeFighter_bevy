@@ -199,12 +199,22 @@ struct ResultMenuButton;
 #[derive(SystemParam)]
 struct Pointer<'w, 's> {
     mouse: Option<Res<'w, ButtonInput<MouseButton>>>,
+    touches: Option<Res<'w, Touches>>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
 }
 
 impl Pointer<'_, '_> {
-    /// The cursor in physical pixels, if the left button went down this frame.
+    /// Where the left button or a finger went down this frame, in
+    /// physical pixels.
     fn click(&self) -> Option<Vec2> {
+        let window = self.windows.single().ok()?;
+        if let Some(touch) = self
+            .touches
+            .as_ref()
+            .and_then(|t| t.iter_just_pressed().next())
+        {
+            return Some(touch.position() * window.scale_factor());
+        }
         let pressed = self
             .mouse
             .as_ref()
@@ -212,7 +222,7 @@ impl Pointer<'_, '_> {
         if !pressed {
             return None;
         }
-        self.windows.single().ok()?.physical_cursor_position()
+        window.physical_cursor_position()
     }
 }
 

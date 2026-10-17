@@ -244,5 +244,54 @@
         "format": "png"
       }
     ]
+  },
+  "icon-512": {
+    "width": 512,
+    "height": 512,
+    "format": "png",
+    "fov": 24,
+    "margin": 0.84,
+    "view": {
+      "yaw": 180,
+      "pitch": 80
+    },
+    "light": {
+      "dir": [
+        -0.3,
+        1.0,
+        0.2
+      ],
+      "color": [
+        1.45,
+        1.25,
+        1.05
+      ],
+      "ambient": 0.55,
+      "sky": [
+        0.9,
+        0.9,
+        1.05
+      ]
+    },
+    "background": "icon-bg.svg",
+    "aircraft": [
+      {
+        "model": "f14_tomcat",
+        "at": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -45
+      }
+    ],
+    "also": [
+      {
+        "name": "icon-192",
+        "width": 192,
+        "height": 192,
+        "format": "png"
+      }
+    ]
   }
 }
