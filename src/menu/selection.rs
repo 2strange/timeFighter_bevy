@@ -174,10 +174,10 @@ impl CustomField {
     /// Values offered, within the ranges the round accepts.
     fn steps(self) -> &'static [f32] {
         match self {
-            // Includes every level's count in every mode (e.g. 8, 16, 24).
+            // Includes every level's count in every mode (e.g. 9, 22, 34).
             CustomField::Missiles => &[
-                0., 2., 4., 6., 8., 10., 12., 14., 16., 20., 24., 28., 32., 36., 40., 50., 60.,
-                80., 100.,
+                0., 2., 4., 6., 8., 9., 10., 12., 14., 16., 18., 20., 22., 24., 28., 30., 32., 34.,
+                36., 40., 50., 60., 80., 100.,
             ],
             CustomField::Enemies => &[1., 2., 4., 6., 8., 10., 12., 16., 20., 24.],
             CustomField::FlightSize => &[1., 2., 3., 4., 5., 6.],
@@ -923,7 +923,10 @@ mod tests {
         let mut selection = MenuSelection::default();
         selection.select(RowId::Difficulty, 0); // Super Easy
         selection.select(RowId::Difficulty, CUSTOM_LEVEL);
-        assert_eq!(selection.custom, Difficulty::SuperEasy.params());
+        assert_eq!(
+            selection.custom,
+            Difficulty::SuperEasy.params_for(GameMode::Hunt)
+        );
         assert!(
             selection
                 .rows()
@@ -950,7 +953,10 @@ mod tests {
             panic!("custom expected");
         };
         assert_eq!(params.enemies, 6);
-        assert_eq!(params.missiles, Difficulty::SuperEasy.params().missiles);
+        assert_eq!(
+            params.missiles,
+            Difficulty::SuperEasy.params_for(GameMode::Hunt).missiles
+        );
     }
 
     #[test]

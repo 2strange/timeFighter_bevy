@@ -3,8 +3,8 @@
 use bevy::prelude::*;
 
 use super::{
-    ALERT, HUD, HealthBar, MissileBox, Rung, TRACKING, TargetMarker, edge_point, format_time,
-    gun_target, health_tint, outcome_title, selected_target,
+    ALERT, HUD, HealthBar, MissileBox, Rung, SoundSwitch, SpeakerStrike, SpeakerWave, TRACKING,
+    TargetMarker, edge_point, format_time, gun_target, health_tint, outcome_title, selected_target,
 };
 use crate::{GamePlugin, ai::Enemy, test_support::headless_app};
 
@@ -195,4 +195,36 @@ fn every_marker_carries_a_health_bar_and_own_missiles_get_a_box() {
     app.update();
     app.update();
     assert!(boxes(&mut app).is_empty(), "gone with its missile");
+}
+
+#[test]
+fn the_speaker_top_left_shows_whether_there_is_sound() {
+    let mut app = headless_app(GamePlugin);
+    app.update();
+    let count = |app: &mut App| {
+        app.world_mut()
+            .query::<&SoundSwitch>()
+            .iter(app.world())
+            .count()
+    };
+    assert_eq!(count(&mut app), 1);
+    let shown = |app: &mut App| {
+        let waves = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<SpeakerWave>>()
+            .iter(app.world())
+            .all(|v| *v != Visibility::Hidden);
+        let strike = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<SpeakerStrike>>()
+            .iter(app.world())
+            .all(|v| *v != Visibility::Hidden);
+        (waves, strike)
+    };
+    assert_eq!(shown(&mut app), (true, false), "on: waves, no line");
+    app.world_mut()
+        .resource_mut::<crate::audio::SoundSettings>()
+        .enabled = false;
+    app.update();
+    assert_eq!(shown(&mut app), (false, true), "off: struck through");
 }

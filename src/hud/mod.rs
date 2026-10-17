@@ -14,19 +14,26 @@ mod layout;
 #[cfg(test)]
 mod tests;
 
-use bevy::{platform::collections::HashSet, prelude::*};
+use bevy::{
+    input::InputSystems,
+    platform::collections::HashSet,
+    prelude::*,
+    ui::{ComputedNode, UiGlobalTransform},
+    window::PrimaryWindow,
+};
 
 pub use layout::{edge_point, format_time, gun_target, outcome_title};
 
 use crate::{
     ai::Enemy,
+    audio::{AudioUnlocked, SOUND_TOGGLE_KEY, SoundSettings},
     camera::{CameraSystems, ChaseCamera},
     combat::{
         AircraftVelocity, CombatConfig, CombatKeys, Destroyed, GoingDown, Gun, Health, Hit, LockOn,
         LockState, Missile, MissileRack, Munition, Team, gun_lead, in_seeker_cone, key_labels,
     },
     flight::{FlightState, PlayerAircraft},
-    game_state::{Mission, Round, RoundPhase, RoundSystems},
+    game_state::{Mission, Pause, Round, RoundPhase, RoundSystems},
     world::damage::CityHealth,
 };
 
@@ -66,6 +73,9 @@ const HEALTH_BAR_GAP: f32 = 4.0;
 /// never taken for an enemy.
 const MISSILE_BOX: f32 = 10.0;
 const MISSILE_GREY: Color = Color::srgba(0.8, 0.8, 0.8, 0.55);
+/// The sound switch top left: a loudspeaker this big (px).
+const SPEAKER_WIDTH: f32 = 22.0;
+const SPEAKER_HEIGHT: f32 = 18.0;
 /// The lead pipper considers targets up to this far off the nose (rad).
 const PIPPER_CONE: f32 = 30.0 * std::f32::consts::PI / 180.0;
 
@@ -75,6 +85,9 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Feedback>()
             .add_systems(Startup, spawn_hud)
+            // Before the weapons read the mouse: a click on the switch is
+            // not a burst.
+            .add_systems(PreUpdate, click_sound_switch.after(InputSystems))
             .add_systems(
                 Update,
                 (
@@ -88,6 +101,7 @@ impl Plugin for HudPlugin {
                     place_ladder,
                     place_pipper,
                     update_result_screen,
+                    show_sound_switch,
                 )
                     .chain()
                     .after(CameraSystems)
@@ -156,6 +170,23 @@ struct HealthBar;
 /// The bar's fill: as wide as the health left.
 #[derive(Component)]
 struct HealthFill;
+
+/// The loudspeaker top left: shows whether there is sound, and a click
+/// switches it like the toggle key.
+#[derive(Component)]
+struct SoundSwitch;
+
+/// The speaker's body and cone.
+#[derive(Component)]
+struct SpeakerPart;
+
+/// The sound waves in front of the speaker, shown while on.
+#[derive(Component)]
+struct SpeakerWave;
+
+/// The line through the speaker, shown while off.
+#[derive(Component)]
+struct SpeakerStrike;
 
 /// Box around one of the player's missiles.
 #[derive(Component)]
@@ -262,6 +293,33 @@ fn spawn_hud(mut commands: Commands, keys: Res<CombatKeys>) {
                     row.spawn(text("next target", 15.0, HUD_DIM));
                     row.spawn(text(&hint(&keys.next_target), 15.0, HUD_DIM));
                 });
+            });
+
+            // Top left: the sound switch with its key.
+            hud.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: px(16),
+                top: px(14),
+                column_gap: px(8),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|corner| {
+                corner
+                    .spawn((
+                        SoundSwitch,
+                        Node {
+                            width: px(SPEAKER_WIDTH),
+                            height: px(SPEAKER_HEIGHT),
+                            ..default()
+                        },
+                    ))
+                    .with_children(spawn_speaker);
+                corner.spawn(text(
+                    &format!("[{}]", key_labels(&[SOUND_TOGGLE_KEY])),
+                    15.0,
+                    HUD_DIM,
+                ));
             });
 
             // Bottom right: hull.
@@ -837,6 +895,113 @@ fn place_missile_boxes(
                 visibility.set_if_neq(Visibility::Hidden);
             }
         }
+    }
+}
+
+/// A loudspeaker drawn from boxes: body, a stepped cone, two waves, and a
+/// slanted line for "off".
+fn spawn_speaker(icon: &mut ChildSpawnerCommands) {
+    let block = |left: f32, top: f32, width: f32, height: f32| Node {
+        position_type: PositionType::Absolute,
+        left: px(left),
+        top: px(top),
+        width: px(width),
+        height: px(height),
+        ..default()
+    };
+    let h = SPEAKER_HEIGHT;
+    // Body, then the cone widening in three steps.
+    for (left, width, height) in [
+        (0.0, 5.0, 8.0),
+        (5.0, 2.0, 10.0),
+        (7.0, 2.0, 14.0),
+        (9.0, 2.0, h),
+    ] {
+        icon.spawn((
+            SpeakerPart,
+            block(left, (h - height) / 2.0, width, height),
+            BackgroundColor(HUD),
+        ));
+    }
+    for (left, height) in [(13.0, 8.0), (17.0, 14.0)] {
+        icon.spawn((
+            SpeakerWave,
+            block(left, (h - height) / 2.0, 2.0, height),
+            BackgroundColor(HUD),
+        ));
+    }
+    icon.spawn((
+        SpeakerStrike,
+        block(-2.0, (h - 2.0) / 2.0, SPEAKER_WIDTH + 4.0, 2.0),
+        UiTransform {
+            rotation: Rot2::degrees(-35.0),
+            ..default()
+        },
+        BackgroundColor(ALERT),
+        Visibility::Hidden,
+    ));
+}
+
+/// A left click on the speaker switches the sound (outside the menu, which
+/// has its own row). The click counts as the browser's go-ahead for sound,
+/// and the weapons never see it.
+fn click_sound_switch(
+    mouse: Option<ResMut<ButtonInput<MouseButton>>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    pause: Option<Res<Pause>>,
+    switch: Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility), With<SoundSwitch>>,
+    settings: Option<ResMut<SoundSettings>>,
+    unlocked: Option<ResMut<AudioUnlocked>>,
+) {
+    let (Some(mut mouse), Some(mut settings)) = (mouse, settings) else {
+        return;
+    };
+    if !mouse.just_pressed(MouseButton::Left) || pause.is_some_and(|p| p.menu) {
+        return;
+    }
+    let Some(point) = windows
+        .single()
+        .ok()
+        .and_then(Window::physical_cursor_position)
+    else {
+        return;
+    };
+    let hit = switch
+        .iter()
+        .any(|(node, at, visible)| visible.get() && node.contains_point(*at, point));
+    if hit {
+        settings.enabled = !settings.enabled;
+        if let Some(mut unlocked) = unlocked {
+            unlocked.0 = true;
+        }
+        mouse.reset(MouseButton::Left);
+    }
+}
+
+/// The speaker shows waves while on, a red line through it while off.
+#[allow(clippy::type_complexity)]
+fn show_sound_switch(
+    settings: Option<Res<SoundSettings>>,
+    mut parts: Query<&mut BackgroundColor, With<SpeakerPart>>,
+    mut waves: Query<&mut Visibility, (With<SpeakerWave>, Without<SpeakerStrike>)>,
+    mut strikes: Query<&mut Visibility, (With<SpeakerStrike>, Without<SpeakerWave>)>,
+) {
+    let on = settings.is_none_or(|s| s.master() > 0.0);
+    let shown = |yes: bool| {
+        if yes {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        }
+    };
+    for mut color in &mut parts {
+        color.set_if_neq(BackgroundColor(if on { HUD } else { HUD_DIM }));
+    }
+    for mut wave in &mut waves {
+        wave.set_if_neq(shown(on));
+    }
+    for mut strike in &mut strikes {
+        strike.set_if_neq(shown(!on));
     }
 }
 

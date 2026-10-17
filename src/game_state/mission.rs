@@ -248,10 +248,14 @@ impl Mission {
 
     /// The mission for the player's settings.
     pub fn from_settings(settings: &GameSettings) -> Self {
-        match settings.mode {
-            GameMode::Hunt => Self::hunt(settings.difficulty),
-            GameMode::Protect => Self::protect(settings.difficulty),
-            GameMode::Battle => Self::battle(settings.difficulty),
+        Self::for_mode(settings.mode, settings.difficulty)
+    }
+
+    pub fn for_mode(mode: GameMode, difficulty: Difficulty) -> Self {
+        match mode {
+            GameMode::Hunt => Self::hunt(difficulty),
+            GameMode::Protect => Self::protect(difficulty),
+            GameMode::Battle => Self::battle(difficulty),
         }
     }
 
@@ -363,6 +367,21 @@ impl Mission {
 
     pub fn enemy_count(&self) -> u32 {
         self.waves.iter().map(WaveSpec::enemy_count).sum()
+    }
+
+    /// Missiles it takes to bring every wave down: a fighter one, a bomber
+    /// two, a zeppelin nine. Fighters a carrier launches are not counted.
+    pub fn missiles_needed(&self) -> u32 {
+        self.waves
+            .iter()
+            .flat_map(|w| &w.groups)
+            .flat_map(|g| &g.members)
+            .map(|kind| match kind {
+                EnemyKind::Zeppelin => MISSILES_PER_ZEPPELIN,
+                kind if kind.is_bomber() => MISSILES_PER_BOMBER,
+                _ => 1,
+            })
+            .sum()
     }
 
     /// The most enemies the round can bring: its waves plus every fighter
@@ -627,6 +646,11 @@ const ZEPPELIN_ENTRIES: [(Vec3, Vec3); 3] = [
     (Vec3::new(-3_200.0, 750.0, -600.0), Vec3::X),
     (Vec3::new(3_200.0, 650.0, -1_200.0), Vec3::NEG_X),
 ];
+
+/// Missiles a bomber takes ...
+pub const MISSILES_PER_BOMBER: u32 = 2;
+/// ... and a zeppelin.
+pub const MISSILES_PER_ZEPPELIN: u32 = 9;
 
 /// Where an escort enters relative to its bombers: this far behind (m) ...
 const ESCORT_TRAIL: f32 = 400.0;
