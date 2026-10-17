@@ -33,8 +33,10 @@ const HALF_VOLUME_DISTANCE: f32 = 400.0;
 const AUDIBLE: f32 = 0.02;
 /// The gun loop runs this long after the last round (s).
 const GUN_HOLD: f32 = 0.12;
-/// Enemy gun bursts are heard at most this often (s).
+/// Enemy gun bursts are heard at most this often (s) ...
 const ENEMY_GUN_INTERVAL: f32 = 0.25;
+/// ... and hits on the player's jet (a volley stays a rattle, not a mush).
+pub const PLAYER_HIT_INTERVAL: f32 = 0.12;
 
 /// Every sound file, one per slot. A missing file only stays silent, so a
 /// slot can be filled in later.
@@ -55,10 +57,11 @@ pub enum Clip {
     Bomb,
     Click,
     Music,
+    PlayerHit,
 }
 
 impl Clip {
-    pub const ALL: [Clip; 15] = [
+    pub const ALL: [Clip; 16] = [
         Clip::Engine,
         Clip::Afterburner,
         Clip::Gun,
@@ -74,6 +77,7 @@ impl Clip {
         Clip::Bomb,
         Clip::Click,
         Clip::Music,
+        Clip::PlayerHit,
     ];
 
     /// Asset path. Short loops are WAV: compressed loops click at the seam.
@@ -94,6 +98,7 @@ impl Clip {
             Clip::Bomb => "audio/bomb_kenney_low.ogg",
             Clip::Click => "audio/click_kenney_click_002.ogg",
             Clip::Music => "audio/music_drive.ogg",
+            Clip::PlayerHit => "audio/player_hit.ogg",
         }
     }
 }
@@ -227,6 +232,7 @@ pub fn attenuation(distance: f32) -> f32 {
 struct MixState {
     gun_hold: f32,
     enemy_gun_rest: f32,
+    player_hit_rest: f32,
     /// Alternates the two small explosions.
     explosions: u32,
 }
@@ -270,6 +276,7 @@ fn mix(
         !pause.is_paused() && round.is_some_and(|r| r.is_running() || r.outcome().is_some());
     state.gun_hold -= dt;
     state.enemy_gun_rest -= dt;
+    state.player_hit_rest -= dt;
     if master <= 0.0 {
         return;
     }
@@ -407,6 +414,14 @@ fn mix(
                 out.shots.push(shot(Clip::ExplosionBig, 1.0));
             }
             Sound::BombImpact => out.shots.push(shot(Clip::Bomb, 0.8)),
+            Sound::HitPlayer if state.player_hit_rest <= 0.0 => {
+                state.player_hit_rest = PLAYER_HIT_INTERVAL;
+                // In the cockpit: as loud wherever the round struck.
+                out.shots.push(OneShot {
+                    clip: Clip::PlayerHit,
+                    volume: master * 0.8,
+                });
+            }
             // Tones and hits are loops or have no sound of their own.
             Sound::LockTracking
             | Sound::LockAcquired

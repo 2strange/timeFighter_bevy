@@ -292,6 +292,20 @@ fn explosions_bombs_and_guns() {
     app.update();
     assert!(shots(&app).is_empty());
 
+    // Hits on the jet rattle, a few per second at most.
+    let mut hits = 0;
+    for _ in 0..30 {
+        cue(&mut app, Sound::HitPlayer, Some(Vec3::new(0.0, 0.0, -5.0)));
+        cue(&mut app, Sound::HitPlayer, Some(Vec3::new(0.0, 0.0, -5.0)));
+        app.update();
+        hits += shots(&app)
+            .iter()
+            .filter(|s| s.clip == Clip::PlayerHit)
+            .count();
+    }
+    let most = (30.0 * FRAME.as_secs_f32() / super::mix::PLAYER_HIT_INTERVAL).ceil() as usize;
+    assert!(hits >= 2 && hits <= most, "{hits} of at most {most}");
+
     // A volley of enemy rounds: one gun sound.
     for _ in 0..30 {
         cue(&mut app, Sound::EnemyGun, Some(Vec3::new(0.0, 0.0, -200.0)));

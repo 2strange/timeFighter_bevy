@@ -1,6 +1,7 @@
 //! Head-up display: flight data, weapons, enemies left, target markers
-//! with lock state, gun cross, pitch ladder, lead pipper, hit feedback and
-//! the result screen.
+//! with lock state and the selected target's health, boxes around the
+//! player's missiles in flight, gun cross, pitch ladder, lead pipper, hit
+//! feedback and the result screen.
 //!
 //! Fighter-jet style, kept calm: thin lines, one colour for normal
 //! information, amber while the seeker tracks, red for a lock or damage.
@@ -22,7 +23,7 @@ use crate::{
     camera::{CameraSystems, ChaseCamera},
     combat::{
         AircraftVelocity, CombatConfig, CombatKeys, Destroyed, GoingDown, Gun, Health, Hit, LockOn,
-        LockState, MissileRack, Team, gun_lead, in_seeker_cone, key_labels,
+        LockState, Missile, MissileRack, Munition, Team, gun_lead, in_seeker_cone, key_labels,
     },
     flight::{FlightState, PlayerAircraft},
     game_state::{Mission, Round, RoundPhase, RoundSystems},
@@ -56,6 +57,15 @@ const RUNG_WIDTH: f32 = 0.25;
 const RUNG_GAP: f32 = 0.3;
 const LADDER_RANGE: f32 = 1_000.0;
 const PIPPER_SIZE: f32 = 12.0;
+/// The selected target's health bar: this wide and high, this far above
+/// its marker (px).
+const HEALTH_BAR_WIDTH: f32 = 30.0;
+const HEALTH_BAR_HEIGHT: f32 = 4.0;
+const HEALTH_BAR_GAP: f32 = 4.0;
+/// Box around each of the player's missiles in flight (px), grey so it is
+/// never taken for an enemy.
+const MISSILE_BOX: f32 = 10.0;
+const MISSILE_GREY: Color = Color::srgba(0.8, 0.8, 0.8, 0.55);
 /// The lead pipper considers targets up to this far off the nose (rad).
 const PIPPER_CONE: f32 = 30.0 * std::f32::consts::PI / 180.0;
 
@@ -72,6 +82,9 @@ impl Plugin for HudPlugin {
                     update_texts,
                     sync_markers,
                     place_reticle_and_markers,
+                    place_health_bars,
+                    sync_missile_boxes,
+                    place_missile_boxes,
                     place_ladder,
                     place_pipper,
                     update_result_screen,
@@ -135,6 +148,20 @@ struct TargetMarker {
 
 #[derive(Component)]
 struct TargetLabel;
+
+/// Outline of the selected target's health bar, a child of its marker.
+#[derive(Component)]
+struct HealthBar;
+
+/// The bar's fill: as wide as the health left.
+#[derive(Component)]
+struct HealthFill;
+
+/// Box around one of the player's missiles.
+#[derive(Component)]
+struct MissileBox {
+    missile: Entity,
+}
 
 #[derive(Component)]
 struct ResultScreen;
@@ -514,6 +541,30 @@ fn sync_markers(
                 Visibility::Hidden,
             ))
             .with_children(|marker| {
+                // Above the marker, centred on it whatever its size.
+                marker
+                    .spawn((
+                        HealthBar,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            top: px(-(HEALTH_BAR_HEIGHT + HEALTH_BAR_GAP)),
+                            width: px(HEALTH_BAR_WIDTH),
+                            height: px(HEALTH_BAR_HEIGHT),
+                            border: UiRect::all(px(1.0)),
+                            ..default()
+                        },
+                        BorderColor::all(HUD),
+                        Visibility::Hidden,
+                    ))
+                    .with_child((
+                        HealthFill,
+                        Node {
+                            height: percent(100.0),
+                            width: percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(HUD),
+                    ));
                 marker.spawn((
                     TargetLabel,
                     Node {
@@ -643,6 +694,147 @@ fn place_reticle_and_markers(
                     text.0 = label.clone();
                 }
                 color.set_if_neq(TextColor(tint));
+            }
+        }
+    }
+}
+
+/// The target the seeker tracks or has locked: the selected one.
+pub fn selected_target(lock: LockState) -> Option<Entity> {
+    match lock {
+        LockState::Tracking { target, .. } | LockState::Locked { target } => Some(target),
+        LockState::Searching => None,
+    }
+}
+
+/// Colour of a health bar with `fraction` of the health left: the HUD's
+/// own colour, amber below a half, red below a quarter.
+pub fn health_tint(fraction: f32) -> Color {
+    if fraction > 0.5 {
+        HUD
+    } else if fraction > 0.25 {
+        TRACKING
+    } else {
+        ALERT
+    }
+}
+
+/// Shows the health bar on the selected target's marker only.
+#[allow(clippy::type_complexity)]
+fn place_health_bars(
+    player: Query<Option<&LockOn>, With<PlayerAircraft>>,
+    health: Query<&Health>,
+    markers: Query<(&TargetMarker, &Node, &Children), Without<HealthBar>>,
+    mut bars: Query<
+        (&mut Node, &mut Visibility, &Children),
+        (With<HealthBar>, Without<HealthFill>),
+    >,
+    mut fills: Query<(&mut Node, &mut BackgroundColor), (With<HealthFill>, Without<TargetMarker>)>,
+) {
+    let selected = player
+        .single()
+        .ok()
+        .flatten()
+        .and_then(|lock| selected_target(lock.state));
+    for (marker, marker_node, children) in &markers {
+        let fraction = (selected == Some(marker.enemy))
+            .then(|| health.get(marker.enemy).ok())
+            .flatten()
+            .map(Health::fraction);
+        for child in children {
+            let Ok((mut node, mut visibility, bar_children)) = bars.get_mut(*child) else {
+                continue;
+            };
+            let Some(fraction) = fraction else {
+                visibility.set_if_neq(Visibility::Hidden);
+                continue;
+            };
+            visibility.set_if_neq(Visibility::Inherited);
+            let width = match marker_node.width {
+                Val::Px(w) => w,
+                _ => MARKER_SIZE,
+            };
+            node.left = px((width - HEALTH_BAR_WIDTH) / 2.0 - LINE);
+            for fill in bar_children {
+                if let Ok((mut fill_node, mut color)) = fills.get_mut(*fill) {
+                    fill_node.width = percent(100.0 * fraction);
+                    color.set_if_neq(BackgroundColor(health_tint(fraction)));
+                }
+            }
+        }
+    }
+}
+
+/// One box per missile of the player's in flight.
+fn sync_missile_boxes(
+    mut commands: Commands,
+    root: Query<Entity, With<HudRoot>>,
+    missiles: Query<(Entity, &Munition), With<Missile>>,
+    boxes: Query<(Entity, &MissileBox)>,
+) {
+    let Ok(root) = root.single() else {
+        return;
+    };
+    let own = |m: &Munition| m.team == Team::Player;
+    for (entity, boxed) in &boxes {
+        if !missiles.get(boxed.missile).is_ok_and(|(_, m)| own(m)) {
+            commands.entity(entity).despawn();
+        }
+    }
+    let boxed: HashSet<Entity> = boxes.iter().map(|(_, b)| b.missile).collect();
+    for (missile, munition) in &missiles {
+        if !own(munition) || boxed.contains(&missile) {
+            continue;
+        }
+        commands.entity(root).with_child((
+            MissileBox { missile },
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(MISSILE_BOX),
+                height: px(MISSILE_BOX),
+                border: UiRect::all(px(1.0)),
+                ..default()
+            },
+            BorderColor::all(MISSILE_GREY),
+            Visibility::Hidden,
+        ));
+    }
+}
+
+/// Boxes follow their missiles on screen; off screen or after the round
+/// they hide.
+fn place_missile_boxes(
+    round: Res<Round>,
+    camera: Query<(&Camera, &Transform), With<ChaseCamera>>,
+    missiles: Query<&Transform, With<Missile>>,
+    mut boxes: Query<(&MissileBox, &mut Node, &mut Visibility)>,
+) {
+    let Ok((camera, camera_tf)) = camera.single() else {
+        return;
+    };
+    let camera_gt = GlobalTransform::from(*camera_tf);
+    let viewport = camera.logical_viewport_size();
+    let playing = round.outcome().is_none();
+    for (boxed, mut node, mut visibility) in &mut boxes {
+        let on_screen = missiles
+            .get(boxed.missile)
+            .ok()
+            .zip(viewport)
+            .filter(|_| playing)
+            .and_then(|(tf, size)| {
+                camera
+                    .world_to_viewport(&camera_gt, tf.translation)
+                    .ok()
+                    .filter(|p| p.cmpge(Vec2::ZERO).all() && p.cmple(size).all())
+            });
+        match on_screen {
+            Some(p) => {
+                node.left = px(p.x - MISSILE_BOX / 2.0);
+                node.top = px(p.y - MISSILE_BOX / 2.0);
+                visibility.set_if_neq(Visibility::Visible);
+            }
+            None => {
+                visibility.set_if_neq(Visibility::Hidden);
             }
         }
     }
