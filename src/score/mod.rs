@@ -99,6 +99,12 @@ pub enum Online {
     Answered(OnlineAnswer),
 }
 
+/// The name dialog's key and click handling (PreUpdate). Systems that
+/// read clicks or keys in PreUpdate go after it, so the open dialog
+/// swallows them for them too.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DialogInput;
+
 pub struct ScorePlugin;
 
 impl Plugin for ScorePlugin {
@@ -107,7 +113,10 @@ impl Plugin for ScorePlugin {
             .init_resource::<ScoreState>()
             .add_systems(Startup, (load_font, spawn_ui).chain())
             // Before anything else reads the keys of the frame.
-            .add_systems(PreUpdate, result_keys.after(InputSystems))
+            .add_systems(
+                PreUpdate,
+                result_keys.in_set(DialogInput).after(InputSystems),
+            )
             .add_systems(
                 Update,
                 (
