@@ -96,6 +96,7 @@ impl Plugin for MenuPlugin {
                         .before(LightingSystems),
                     sync_pause,
                     follow_sound_toggle,
+                    follow_pitch_invert,
                     rebuild_menu,
                     fit_menu_to_window,
                     show_result_button,
@@ -177,6 +178,18 @@ fn follow_sound_toggle(sound: Option<Res<SoundSettings>>, mut selection: ResMut<
     };
     if selection.sound != wanted {
         selection.sound = wanted;
+        storage::save(&selection.to_line());
+    }
+}
+
+/// "Invert pitch" switched elsewhere (the phone overlay's pause screen)
+/// shows in the menu row and is remembered.
+fn follow_pitch_invert(invert: Option<Res<PitchInvert>>, mut selection: ResMut<MenuSelection>) {
+    let Some(invert) = invert.filter(|i| i.is_changed()) else {
+        return;
+    };
+    if selection.invert_pitch != invert.0 {
+        selection.invert_pitch = invert.0;
         storage::save(&selection.to_line());
     }
 }

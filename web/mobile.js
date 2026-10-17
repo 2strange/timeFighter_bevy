@@ -8,8 +8,8 @@
 //                         recentred hold (gyro) or the stick, -1..1
 //   t               thrust slider, 0..1
 //   g               gun held (1/0)
-//   m n x a M       taps as counters: missile, next target, pause,
-//                   fly again, menu
+//   m n x a M i     taps as counters: missile, next target, pause,
+//                   fly again, menu, invert pitch (pause screen)
 //   name ok esc     the name field's text while the dialog is open, and
 //                   its save and cancel taps
 //
@@ -32,6 +32,7 @@ const state = {
   x: 0,
   a: 0,
   M: 0,
+  i: 0,
   name: null,
   ok: 0,
   esc: 0,
@@ -40,7 +41,7 @@ const state = {
 function publish() {
   const parts = [`src=${state.src}`, `p=${state.p.toFixed(2)}`, `r=${state.r.toFixed(2)}`];
   parts.push(`t=${state.t.toFixed(3)}`, `g=${state.g}`);
-  for (const key of ['m', 'n', 'x', 'a', 'M', 'ok', 'esc']) parts.push(`${key}=${state[key]}`);
+  for (const key of ['m', 'n', 'x', 'a', 'M', 'i', 'ok', 'esc']) parts.push(`${key}=${state[key]}`);
   if (state.name !== null) parts.push(`name=${encodeURIComponent(state.name)}`);
   root.dataset.tfInput = parts.join(';');
 }
@@ -256,7 +257,8 @@ function build() {
   top.append(tapButton('small', 'PAUSE', 'x'), center);
 
   const paused = el('div', 'group paused center');
-  paused.append(tapButton('', 'RESUME', 'x'));
+  const invert = tapButton('', 'INVERT PITCH: OFF', 'i');
+  paused.append(tapButton('', 'RESUME', 'x'), invert);
 
   const over = el('div', 'group over center');
   over.append(tapButton('', 'FLY AGAIN', 'a'), tapButton('', 'MENU', 'M'));
@@ -291,9 +293,10 @@ function build() {
   overlay.append(left, right, top, paused, over, dialog, turn);
   document.body.append(overlay);
 
-  // The game says what it shows.
+  // The game says what it shows, and whether pitch is inverted.
   let mode = null;
   new MutationObserver(() => {
+    invert.textContent = `INVERT PITCH: ${root.dataset.tfInvert === '1' ? 'ON' : 'OFF'}`;
     const now = root.dataset.tfMode;
     if (now === mode) return;
     mode = now;
@@ -305,7 +308,7 @@ function build() {
       if (state.g) hold(false)(new Event('pointerup'));
     }
     publish();
-  }).observe(root, { attributes: true, attributeFilter: ['data-tf-mode'] });
+  }).observe(root, { attributes: true, attributeFilter: ['data-tf-mode', 'data-tf-invert'] });
 
   return overlay;
 }

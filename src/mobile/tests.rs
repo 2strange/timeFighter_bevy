@@ -191,6 +191,11 @@ fn invert_pitch_turns_tilt_and_keyboard_around() {
             .pitch
     };
     assert_eq!(pitch(&mut app), 1.0, "top edge away pulls up when inverted");
+    // The pause screen's switch flips it back.
+    set(&mut app, |i| i.invert += 1);
+    assert!(!app.world().resource::<PitchInvert>().0);
+    app.update();
+    assert_eq!(pitch(&mut app), -1.0);
     assert_eq!(PitchInvert(true).apply(-1.0), 1.0);
     assert_eq!(PitchInvert(false).apply(-1.0), -1.0);
 }

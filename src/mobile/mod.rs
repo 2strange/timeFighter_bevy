@@ -6,15 +6,16 @@
 //! - buttons become key presses (gun = Space held, missile = Right Shift,
 //!   next target = Tab, pause = P, fly again = R, menu = M), so combat,
 //!   pause and round flow need nothing extra; taps travel as counters, so
-//!   none is lost between two frames;
+//!   none is lost between two frames; the pause screen's "Invert pitch"
+//!   switches [`PitchInvert`];
 //! - tilt (or the virtual stick) and the thrust slider go into the jet's
 //!   [`FlightInput`], after the keyboard;
 //! - the name dialog takes the text of the page's own input field (the
 //!   phone's on-screen keyboard), see [`crate::score`].
 //!
 //! The other way round it writes `data-tf-mode` (menu, play, paused, over,
-//! dialog), so the overlay shows the controls that fit, and `data-tf-name`
-//! (the name to prefill) when the dialog opens.
+//! dialog), so the overlay shows the controls that fit, `data-tf-name`
+//! (the name to prefill) when the dialog opens, and `data-tf-invert`.
 
 #[cfg(test)]
 mod tests;
@@ -67,6 +68,7 @@ pub struct MobileInput {
     pub pause: u32,
     pub again: u32,
     pub menu: u32,
+    pub invert: u32,
     /// The text in the page's name field while the dialog is open.
     pub name: Option<String>,
     pub name_ok: u32,
@@ -97,6 +99,7 @@ impl MobileInput {
                 "x" => input.pause = count(),
                 "a" => input.again = count(),
                 "M" => input.menu = count(),
+                "i" => input.invert = count(),
                 "name" => input.name = Some(percent_decode(value)),
                 "ok" => input.name_ok = count(),
                 "esc" => input.name_cancel = count(),
@@ -235,11 +238,17 @@ fn read_page(mut input: ResMut<MobileInput>) {
 fn press_keys(
     input: Res<MobileInput>,
     keys: Option<ResMut<ButtonInput<KeyCode>>>,
+    invert: Option<ResMut<PitchInvert>>,
     mut pressed: ResMut<Pressed>,
 ) {
     let Some(mut keys) = keys else {
         return;
     };
+    if let (Some(seen), Some(mut invert)) = (&pressed.seen, invert)
+        && input.invert > seen.invert
+    {
+        invert.0 = !invert.0;
+    }
     for key in std::mem::take(&mut pressed.tapped) {
         if !pressed.held.contains(&key) {
             keys.release(key);
@@ -321,13 +330,15 @@ fn write_page(
     pause: Option<Res<Pause>>,
     round: Option<Res<Round>>,
     score: Option<Res<ScoreState>>,
-    mut last: Local<Option<PageMode>>,
+    invert: Option<Res<PitchInvert>>,
+    mut last: Local<Option<(PageMode, bool)>>,
 ) {
     let mode = page_mode(pause.as_deref(), round.as_deref(), score.as_deref());
-    if *last == Some(mode) {
+    let inverted = invert.is_some_and(|i| i.0);
+    if *last == Some((mode, inverted)) {
         return;
     }
-    *last = Some(mode);
+    *last = Some((mode, inverted));
     #[cfg(target_arch = "wasm32")]
     {
         let Some(root) = web_sys::window()
@@ -340,6 +351,7 @@ fn write_page(
             let name = score.as_deref().map(|s| s.field.text()).unwrap_or_default();
             let _ = root.set_attribute("data-tf-name", &name);
         }
+        let _ = root.set_attribute("data-tf-invert", if inverted { "1" } else { "0" });
         let _ = root.set_attribute("data-tf-mode", mode.key());
     }
 }
