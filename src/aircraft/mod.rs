@@ -35,43 +35,18 @@ impl GunMount {
     }
 }
 
-const B17_MOUNTS: [GunMount; 4] = [
-    GunMount::new("front_gun", 0.00, -0.79, -10.94),
-    GunMount::new("rear_gun", 0.01, -1.37, 10.93),
-    GunMount::new("top_turret", 0.00, 1.65, -6.24),
-    GunMount::new("ball_turret", 0.00, -1.97, -0.12),
-];
-
-const LANCASTER_MOUNTS: [GunMount; 3] = [
-    GunMount::new("front_turret", 0.00, -0.06, -9.82),
-    GunMount::new("rear_turret", 0.00, 0.47, 9.74),
-    GunMount::new("top_turret", 0.00, 1.55, 2.92),
-];
-
-// Rough gun positions of the second set: the nose and tail ends and the
-// top of the fuselage, measured by the normaliser (mounts.json); to be
-// placed on real turrets once the set is chosen.
+// Gun positions of the bombers: the nose and tail ends and the top of the
+// fuselage, measured by the normaliser (mounts.json).
 const HE177_MOUNTS: [GunMount; 3] = [
     GunMount::new("front_gun", 0.00, -0.18, -10.27),
     GunMount::new("rear_gun", 0.00, 0.91, 10.26),
     GunMount::new("top_turret", 0.00, 0.66, -1.89),
 ];
 
-const ME264_MOUNTS: [GunMount; 3] = [
-    GunMount::new("front_gun", 0.00, -0.03, -9.41),
-    GunMount::new("rear_gun", 0.00, 1.08, 9.39),
-    GunMount::new("top_turret", 0.00, 0.83, -1.55),
-];
-
 const JU390_MOUNTS: [GunMount; 3] = [
     GunMount::new("front_gun", 0.00, -0.28, -16.47),
     GunMount::new("rear_gun", 0.00, 1.51, 16.36),
     GunMount::new("top_turret", 0.00, 1.78, -1.11),
-];
-
-const JU287_MOUNTS: [GunMount; 2] = [
-    GunMount::new("front_gun", 0.00, -0.31, -8.46),
-    GunMount::new("rear_gun", 0.00, -0.97, 8.46),
 ];
 
 // The airship has no turrets of its own: the front gun sits under the
@@ -94,46 +69,31 @@ const ZEPPELIN_ENGINES: [GunMount; 4] = [
     GunMount::new("engine_aft_right", 14.71, -17.36, 46.41),
 ];
 
-/// Normalised aircraft models available in `assets/aircraft/`.
+/// Normalised aircraft models in `assets/aircraft/`. Models not in the
+/// game any more are kept in `models_library/aircraft/` (not loaded).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AircraftModel {
+    /// The player's jet.
     F14Tomcat,
+    /// Not flown yet; kept ready as a second jet.
     Mig29,
-    Tu2,
-    F4uCorsair,
-    /// The enemy fighter: "Low Poly Spitfire" (simplified to 5.5k triangles).
-    Spitfire,
-    /// The first Spitfire model, kept in the showroom for comparison.
-    SpitfireClassic,
-    B17,
-    Lancaster,
-    // A low-poly set by one author, for a possible second enemy side.
+    // The enemies: a low-poly set by one author.
     Bf109K4,
     Me309,
     He177,
-    Me264,
     Ju390,
-    Ju287,
     /// An airship, 245 m long: the end boss of Battle.
     Zeppelin,
 }
 
 impl AircraftModel {
-    pub const ALL: [AircraftModel; 15] = [
+    pub const ALL: [AircraftModel; 7] = [
         AircraftModel::F14Tomcat,
         AircraftModel::Mig29,
-        AircraftModel::Tu2,
-        AircraftModel::F4uCorsair,
-        AircraftModel::Spitfire,
-        AircraftModel::SpitfireClassic,
-        AircraftModel::B17,
-        AircraftModel::Lancaster,
         AircraftModel::Bf109K4,
         AircraftModel::Me309,
         AircraftModel::He177,
-        AircraftModel::Me264,
         AircraftModel::Ju390,
-        AircraftModel::Ju287,
         AircraftModel::Zeppelin,
     ];
 
@@ -143,18 +103,10 @@ impl AircraftModel {
         match self {
             AircraftModel::F14Tomcat => "f14_tomcat",
             AircraftModel::Mig29 => "mig_29",
-            AircraftModel::Tu2 => "tupolev_tu_2",
-            AircraftModel::F4uCorsair => "f4u_corsair",
-            AircraftModel::Spitfire => "spitfire_lp",
-            AircraftModel::SpitfireClassic => "spitfire",
-            AircraftModel::B17 => "b17",
-            AircraftModel::Lancaster => "lancaster",
             AircraftModel::Bf109K4 => "bf109k4",
             AircraftModel::Me309 => "me309",
             AircraftModel::He177 => "he177",
-            AircraftModel::Me264 => "me264",
             AircraftModel::Ju390 => "ju390",
-            AircraftModel::Ju287 => "ju287",
             AircraftModel::Zeppelin => "zeppelin",
         }
     }
@@ -163,18 +115,10 @@ impl AircraftModel {
         match self {
             AircraftModel::F14Tomcat => "F-14 Tomcat",
             AircraftModel::Mig29 => "MiG-29",
-            AircraftModel::Tu2 => "Tu-2",
-            AircraftModel::F4uCorsair => "F4U Corsair",
-            AircraftModel::Spitfire => "Spitfire",
-            AircraftModel::SpitfireClassic => "Spitfire (first model)",
-            AircraftModel::B17 => "B-17",
-            AircraftModel::Lancaster => "Lancaster",
             AircraftModel::Bf109K4 => "Bf 109 K-4",
             AircraftModel::Me309 => "Me 309",
             AircraftModel::He177 => "He 177",
-            AircraftModel::Me264 => "Me 264",
             AircraftModel::Ju390 => "Ju 390",
-            AircraftModel::Ju287 => "Ju 287",
             AircraftModel::Zeppelin => "Zeppelin",
         }
     }
@@ -185,18 +129,10 @@ impl AircraftModel {
         let (min, max) = match self {
             AircraftModel::F14Tomcat => return AircraftSize::JET,
             AircraftModel::Mig29 => ([-5.82, -1.63, -8.65], [5.82, 2.36, 8.65]),
-            AircraftModel::Tu2 => ([-9.40, -2.23, -6.90], [9.40, 1.72, 6.90]),
-            AircraftModel::F4uCorsair => ([-5.35, -1.49, -5.10], [5.35, 2.31, 5.10]),
-            AircraftModel::Spitfire => ([-5.09, -0.84, -4.56], [5.09, 1.64, 4.56]),
-            AircraftModel::SpitfireClassic => ([-4.91, -1.83, -4.56], [4.91, 1.62, 4.56]),
-            AircraftModel::B17 => ([-14.93, -2.38, -11.33], [15.31, 3.01, 11.33]),
-            AircraftModel::Lancaster => ([-15.23, -3.145, -10.56], [15.24, 2.44, 10.56]),
             AircraftModel::Bf109K4 => ([-5.33, -0.86, -4.51], [5.33, 1.64, 4.51]),
             AircraftModel::Me309 => ([-5.33, -0.92, -4.73], [5.33, 1.75, 4.73]),
             AircraftModel::He177 => ([-15.59, -1.30, -11.00], [15.59, 4.05, 11.00]),
-            AircraftModel::Me264 => ([-18.35, -1.36, -10.06], [18.35, 2.59, 10.06]),
             AircraftModel::Ju390 => ([-26.83, -1.92, -17.10], [26.83, 4.62, 17.10]),
-            AircraftModel::Ju287 => ([-11.51, -2.76, -9.15], [11.51, 2.44, 9.15]),
             AircraftModel::Zeppelin => ([-23.89, -22.02, -122.50], [23.89, 23.01, 122.50]),
         };
         AircraftSize {
@@ -210,12 +146,8 @@ impl AircraftModel {
     /// Front and rear come first.
     pub fn gun_mounts(self) -> &'static [GunMount] {
         match self {
-            AircraftModel::B17 => &B17_MOUNTS,
-            AircraftModel::Lancaster => &LANCASTER_MOUNTS,
             AircraftModel::He177 => &HE177_MOUNTS,
-            AircraftModel::Me264 => &ME264_MOUNTS,
             AircraftModel::Ju390 => &JU390_MOUNTS,
-            AircraftModel::Ju287 => &JU287_MOUNTS,
             AircraftModel::Zeppelin => &ZEPPELIN_MOUNTS,
             _ => &[],
         }

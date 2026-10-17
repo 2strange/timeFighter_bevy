@@ -19,6 +19,7 @@
     {
       "name": "tupolev_tu_2",
       "source": "historic/tupolev_tu_2",
+      "library": true,
       "length": 13.8,
       "forward": "+Z",
       "up": "+Y",
@@ -27,6 +28,7 @@
     {
       "name": "f4u_corsair",
       "source": "historic/f4u_corsair",
+      "library": true,
       "length": 10.2,
       "forward": "+X",
       "up": "+Y",
@@ -35,6 +37,7 @@
     {
       "name": "spitfire",
       "source": "historic/spitfire",
+      "library": true,
       "length": 9.12,
       "forward": "-X",
       "up": "+Y",
@@ -43,6 +46,7 @@
     {
       "name": "b17",
       "source": "inbox/b17",
+      "library": true,
       "length": 22.66,
       "forward": "+X",
       "up": "+Y",
@@ -72,6 +76,7 @@
     {
       "name": "lancaster",
       "source": "inbox/lancaster",
+      "library": true,
       "length": 21.11,
       "forward": "-X",
       "up": "+Y",
@@ -104,6 +109,7 @@
     {
       "name": "spitfire_lp",
       "source": "inbox/spitfire2",
+      "library": true,
       "length": 9.12,
       "forward": "-Z",
       "up": "+Y",
@@ -159,6 +165,7 @@
     {
       "name": "me264",
       "source": "inbox/me264",
+      "library": true,
       "length": 20.11,
       "forward": "+Z",
       "up": "+Y",
@@ -217,6 +224,7 @@
     {
       "name": "ju287",
       "source": "inbox/ju287",
+      "library": true,
       "length": 18.3,
       "forward": "+Z",
       "up": "+Y",

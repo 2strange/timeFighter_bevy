@@ -22,6 +22,10 @@ points of interest are measured on the normalised model and written to
 It also writes `assets/aircraft/CREDITS.md` from the licence files and
 refuses any licence that is not on its allow-list.
 
+Entries marked `"library": true` go to `models_library/aircraft/` instead
+(models kept for later, not loaded or deployed), with their own
+`mounts.json` and `CREDITS.md`; `--library <dir>` changes that folder.
+
 ```sh
 npm ci
 node normalize.mjs --source-root <folder with the source models>
