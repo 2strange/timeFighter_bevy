@@ -3,11 +3,16 @@
 //! Headless; the result screen itself is drawn by the HUD. On the result
 //! screen game time stands still ([`Pause::round_over`]).
 
+use std::time::Duration;
+
 use bevy::prelude::*;
 
 use super::{GameSettings, Mission, Pause, TriggerHold, WaveTrigger};
 use crate::{
-    ai::{AttackSlots, Enemy, EnemyKind, FlightGroup, bomber_bundle, enemy_bundle, zeppelin_parts},
+    ai::{
+        AttackSlots, Carrier, Enemy, EnemyKind, FighterLaunched, FlightGroup, bomber_bundle,
+        enemy_bundle, zeppelin_parts,
+    },
     combat::{
         Bomb, BombImpact, CombatConfig, CombatSystems, CrashInto, DestroyCause, Destroyed, Effect,
         GoingDown, Hit, Munition, ShotFired, Team, Weapon, player_loadout,
@@ -78,6 +83,8 @@ pub struct Round {
     /// Index of the next wave to enter.
     pub next_wave: usize,
     pub spawned: u32,
+    /// Fighters launched by carriers (counted in `spawned` too).
+    pub launched: u32,
     pub destroyed: u32,
     pub stats: RoundStats,
 }
@@ -94,9 +101,10 @@ impl Round {
         }
     }
 
-    /// Enemies still to shoot down, including waves not yet arrived.
+    /// Enemies still to shoot down, including waves not yet arrived (and
+    /// the fighters launched so far).
     pub fn enemies_left(&self, mission: &Mission) -> u32 {
-        mission.enemy_count().saturating_sub(self.destroyed)
+        (mission.enemy_count() + self.launched).saturating_sub(self.destroyed)
     }
 
     fn enemies_alive(&self) -> u32 {
@@ -107,6 +115,31 @@ impl Round {
 /// Waiting flights circle this far from the map centre (m), on the
 /// bearing they came from.
 const HOLDING_DISTANCE: f32 = 2_200.0;
+
+/// Seeds where each round's waves enter ([`Mission::scattered`]). A fixed
+/// seed replays the same placement every round (tests); otherwise every
+/// round draws a new one from the clock and the number of rounds played.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SpawnSeed {
+    pub fixed: Option<u64>,
+    rounds: u64,
+}
+
+impl SpawnSeed {
+    pub fn fixed(seed: u64) -> Self {
+        Self {
+            fixed: Some(seed),
+            rounds: 0,
+        }
+    }
+
+    fn next(&mut self, clock: Duration) -> u64 {
+        self.rounds += 1;
+        self.fixed.unwrap_or_else(|| {
+            (clock.as_nanos() as u64) ^ self.rounds.wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        })
+    }
+}
 
 /// Starts a fresh round, whatever the current phase.
 #[derive(Message, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -140,6 +173,7 @@ impl Plugin for RoundPlugin {
         app.init_resource::<GameSettings>()
             .init_resource::<Mission>()
             .init_resource::<Round>()
+            .init_resource::<SpawnSeed>()
             .add_message::<RestartRound>()
             .configure_sets(Update, CombatSystems::Fire.run_if(weapons_free))
             .configure_sets(
@@ -199,6 +233,7 @@ fn drop_stale_messages(
     hits: Option<ResMut<Messages<Hit>>>,
     destroyed: Option<ResMut<Messages<Destroyed>>>,
     shots: Option<ResMut<Messages<ShotFired>>>,
+    launched: Option<ResMut<Messages<FighterLaunched>>>,
     city: (
         Option<ResMut<Messages<DamageArea>>>,
         Option<ResMut<Messages<BombImpact>>>,
@@ -217,6 +252,7 @@ fn drop_stale_messages(
     clear(hits);
     clear(destroyed);
     clear(shots);
+    clear(launched);
 }
 
 fn clear<M: Message>(messages: Option<ResMut<Messages<M>>>) {
@@ -255,6 +291,8 @@ fn start_round(
     mut round: ResMut<Round>,
     settings: Res<GameSettings>,
     mut mission: ResMut<Mission>,
+    mut seed: ResMut<SpawnSeed>,
+    clock: Option<Res<Time<Real>>>,
     mut combat: ResMut<CombatConfig>,
     mut slots: ResMut<AttackSlots>,
     mut repair: MessageWriter<RepairCity>,
@@ -277,8 +315,10 @@ fn start_round(
     if let Some(mut pause) = pause {
         pause.round_over = false;
     }
-    // The player's choices apply from this round on.
-    *mission = Mission::from_settings(&settings);
+    // The player's choices apply from this round on; the waves enter
+    // somewhere else every round.
+    let clock = clock.map(|c| c.elapsed()).unwrap_or_default();
+    *mission = Mission::from_settings(&settings).scattered(seed.next(clock));
     // The whole city stands again. Applies this frame: the start runs
     // before the city's damage systems.
     repair.write(RepairCity);
@@ -312,11 +352,15 @@ fn start_round(
 fn count_events(
     mission: Res<Mission>,
     mut round: ResMut<Round>,
+    mut launched: MessageReader<FighterLaunched>,
     mut shots: MessageReader<ShotFired>,
     mut hits: MessageReader<Hit>,
     mut destroyed: MessageReader<Destroyed>,
 ) {
     let counting = matches!(round.phase, RoundPhase::Running | RoundPhase::Ending { .. });
+    let launches = launched.read().count() as u32;
+    round.spawned += launches;
+    round.launched += launches;
     for shot in shots.read().filter(|s| s.team == Team::Player) {
         if !counting {
             continue;
@@ -387,11 +431,14 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
                 };
                 let kind = group.members[slot];
                 if kind == EnemyKind::Zeppelin {
-                    commands.spawn((
+                    let mut zeppelin = commands.spawn((
                         bomber_bundle(kind, group.tuning, transform, id),
                         zeppelin_parts(),
                         flight,
                     ));
+                    if let Some(spec) = &group.carrier {
+                        zeppelin.insert(Carrier::new(spec.clone(), group.skill, group.tuning, id));
+                    }
                 } else if kind.is_bomber() {
                     commands.spawn((bomber_bundle(kind, group.tuning, transform, id), flight));
                 } else {

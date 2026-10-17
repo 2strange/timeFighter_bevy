@@ -7,6 +7,9 @@
     <meta name="description" content="Free arcade dogfighter in your browser: one F-14 Tomcat, thrown into a parallel timeline, against waves of propeller fighters and bombers over a living city." />
     <link rel="canonical" href="https://timefighter.trendgegner.com/" />
     <meta name="theme-color" content="#161421" />
+    <!-- Online hall of fame: the leaderboard worker's address (leaderboard/README.md),
+         e.g. https://api.timefighter.trendgegner.com. Empty: scores stay on this device. -->
+    <meta name="tf-leaderboard" content="" />
     <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png" />
     <!-- Share preview (WhatsApp, Signal, Telegram, Slack, ...): rendered by tools/render-aircraft. -->
@@ -129,6 +132,19 @@
       footer { margin-top: 14px; display: flex; gap: 18px; justify-content: center; font-size: 12px; }
       footer a { color: var(--hud-dim); }
 
+      /* Hall of fame: closed by default, one list at a time. */
+      .hof { margin: 0 0 18px; border-top: 1px solid var(--hud-dim); padding-top: 10px; }
+      .hof summary {
+        cursor: pointer; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
+        font-size: 12px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--hud-dim);
+      }
+      .hof summary span { color: var(--hud); letter-spacing: 0.12em; margin-left: 8px; }
+      .hof .segments { margin: 10px 0 6px; }
+      .hof .segment { font-size: 12px; padding: 4px 10px; }
+      .hof ol { margin: 0; padding-left: 28px; max-width: 360px; font-variant-numeric: tabular-nums; }
+      .hof li span:last-child { float: right; color: var(--amber); }
+      .hof p { margin: 4px 0 0; font-size: 13px; color: var(--hud-dim); }
+
       @media (max-width: 640px) {
         .card { padding: 20px 16px 16px; }
         .modes { grid-template-columns: 1fr; }
@@ -192,6 +208,17 @@
           </section>
         </div>
 
+        <details class="hof" id="hof">
+          <summary>Hall of fame<span id="hof-title"></span></summary>
+          <div class="segments" role="group" aria-label="List">
+            <button class="segment" type="button" data-board="local">This device</button>
+            <button class="segment" type="button" data-board="all">Online</button>
+            <button class="segment" type="button" data-board="week">This week</button>
+          </div>
+          <ol id="hof-list"></ol>
+          <p id="hof-note"></p>
+        </details>
+
         <button id="play" type="button" disabled>LOADING</button>
         <div class="status" id="status" aria-live="polite">Loading the game…</div>
 
@@ -204,6 +231,7 @@
 
     <script type="module">
       import init from './timefighter.js';
+      import { hallOfFame, pumpOutbox } from './leaderboard.js';
 
       const canvas = document.getElementById('game');
       const start = document.getElementById('start');
@@ -287,7 +315,13 @@
           button.setAttribute('aria-pressed', String(button.dataset.light === light));
         }
         document.body.classList.toggle('evening', light === 'evening');
+        const levelButton = document.querySelector(`[data-level="${level}"]`);
+        const modeLabel = mode[0].toUpperCase() + mode.slice(1);
+        showBoard(mode, LEVEL_NAMES[level], `${modeLabel} · ${levelButton.textContent.replace('…', '')}`);
       }
+      const showBoard = hallOfFame();
+      // Scores the game queues go online from here, also during play.
+      pumpOutbox();
       function pick(groupId, attribute, apply) {
         document.getElementById(groupId).addEventListener('click', (event) => {
           const button = event.target.closest(`[data-${attribute}]`);

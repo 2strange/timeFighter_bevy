@@ -9,11 +9,15 @@ mod settings;
 mod tests;
 
 pub use mission::{
-    Formation, GameMode, Mission, SpawnGroup, WaveSpec, WaveTrigger, bomber_flight, fighter_flight,
+    Formation, GameMode, MIN_AXIS_OFFSET, MIN_HEAD_ON_ANGLE, MIN_PLAYER_DISTANCE, Mission, SECTORS,
+    SpawnGroup, WaveSpec, WaveTrigger, ZEPPELIN_GAP, bearing_gap, bearing_of, bomber_flight,
+    clear_of_player, fighter_flight, zeppelin_slot,
 };
 pub use pause::{Pause, PausePlugin, TriggerHold};
 pub use round::{
     Outcome, RESTART_KEYS, RestartRound, Round, RoundPhase, RoundPlugin, RoundStats, RoundSystems,
-    weapons_free,
+    SpawnSeed, weapons_free,
 };
-pub use settings::{Difficulty, DifficultyParams, GameSettings, MAX_ZEPPELINS, PilotMix};
+pub use settings::{
+    Difficulty, DifficultyParams, GameSettings, MAX_ZEPPELIN_FIGHTERS, MAX_ZEPPELINS, PilotMix,
+};
