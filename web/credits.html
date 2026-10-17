@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Credits – TimeFighter</title>
+    <meta name="description" content="Who made TimeFighter: the person, the AI agent team, the aircraft models and the tools behind the game." />
+    <link rel="canonical" href="https://timefighter.trendgegner.com/credits.html" />
+    <meta name="theme-color" content="#161421" />
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png" />
+    <!-- Orbitron (SIL Open Font License, fonts/OFL.txt), served locally: no third-party requests. -->
+    <link rel="preload" href="fonts/Orbitron-Variable.ttf" as="font" type="font/ttf" crossorigin />
+    <style>
+      @font-face {
+        font-family: "Orbitron";
+        src: url("fonts/Orbitron-Variable.ttf") format("truetype");
+        font-weight: 400 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      /* Same palette and sky as the start page (index.html). */
+      :root {
+        --hud: #b8ffc7;
+        --hud-dim: rgba(184, 255, 199, 0.55);
+        --amber: #ffbf33;
+        --ink: #e8f2ea;
+        --ink-soft: rgba(232, 242, 234, 0.8);
+        --panel: rgba(6, 10, 14, 0.78);
+        --sky-top: #142130;
+        --sky-mid: #2c3b4d;
+        --sky-low: #47566a;
+        --glow: rgba(150, 190, 230, 0.25);
+      }
+      body.evening {
+        --sky-top: #161421;
+        --sky-mid: #3a2c3c;
+        --sky-low: #7a4b3f;
+        --glow: rgba(255, 160, 90, 0.35);
+      }
+      html { background: #0b1218; }
+      body {
+        margin: 0; min-height: 100vh; padding: 16px; box-sizing: border-box;
+        display: grid; place-items: center;
+        font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink);
+        background:
+          radial-gradient(ellipse at 50% 115%, var(--glow), transparent 62%) fixed,
+          linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 58%, var(--sky-low) 100%) fixed;
+      }
+      a { color: var(--hud); text-underline-offset: 3px; }
+      a:hover, a:focus-visible { color: var(--amber); }
+
+      .card {
+        width: min(860px, 100%); padding: 28px 32px 22px; box-sizing: border-box;
+        background: var(--panel); border: 1px solid var(--hud-dim);
+      }
+      .logo {
+        margin: 0; font-family: "Orbitron", system-ui, sans-serif; font-weight: 800;
+        font-size: clamp(30px, 6.5vw, 52px); letter-spacing: 0.06em; line-height: 1;
+      }
+      .logo a { text-decoration: none; }
+      .logo .time { color: var(--amber); }
+      .logo .fighter { color: var(--hud); }
+      .tagline {
+        margin: 8px 0 22px; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
+        font-size: 12px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--hud-dim);
+      }
+
+      section { margin-bottom: 24px; }
+      h2 {
+        margin: 0 0 10px; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
+        font-size: 12px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--hud-dim);
+      }
+      p { margin: 0 0 8px; }
+      .lead {
+        margin: 0; border-left: 2px solid var(--amber); padding-left: 14px;
+      }
+      .name {
+        font-family: "Orbitron", system-ui, sans-serif; font-weight: 600; letter-spacing: 0.08em;
+        color: var(--hud);
+      }
+      .role { color: var(--ink-soft); }
+
+      .team {
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 10px; padding: 0;
+        list-style: none;
+      }
+      .team li {
+        padding: 10px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--hud-dim);
+      }
+      .team .name { display: block; }
+      .team .role { font-size: 13px; }
+
+      .big {
+        font-family: "Orbitron", system-ui, sans-serif; font-weight: 800; color: var(--amber);
+        font-size: clamp(26px, 5vw, 38px); letter-spacing: 0.04em; line-height: 1.1; margin: 0 0 8px;
+      }
+
+      .models { margin: 0 0 8px; padding: 0; list-style: none; }
+      .models li { padding: 7px 0; border-bottom: 1px solid rgba(184, 255, 199, 0.15); }
+      .models li:last-child { border-bottom: none; }
+      .models .aircraft { color: var(--hud); font-weight: 600; }
+      .note { font-size: 13px; color: var(--ink-soft); }
+
+      .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+      .tools a {
+        display: inline-block; padding: 6px 12px; border: 1px solid var(--hud-dim); text-decoration: none;
+      }
+      .tools a:hover, .tools a:focus-visible { border-color: var(--amber); }
+
+      .back {
+        display: block; width: max-content; margin: 8px auto 4px; padding: 12px 40px;
+        font-family: "Orbitron", system-ui, sans-serif; font-weight: 800; font-size: 18px; letter-spacing: 0.2em;
+        color: #0b1218; background: var(--hud); text-decoration: none;
+      }
+      .back:hover, .back:focus-visible { color: #0b1218; background: var(--amber); outline: none; }
+
+      @media (max-width: 640px) {
+        body { padding: 10px; }
+        .card { padding: 20px 16px 16px; }
+        .team { grid-template-columns: 1fr 1fr; }
+      }
+      @media (max-width: 400px) {
+        .team { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1 class="logo">
+        <a href="./"><span class="time">TIME</span><span class="fighter">FIGHTER</span></a>
+      </h1>
+      <p class="tagline">Credits</p>
+
+      <section>
+        <h2>Made by</h2>
+        <p class="lead">
+          <a class="name" href="https://www.linkedin.com/in/trendgegner" rel="noopener">Torsten Wetzel</a>
+          <span class="role">— idea, product, testing</span>
+        </p>
+      </section>
+
+      <section>
+        <h2>The Bobs · AI agent team</h2>
+        <ul class="team">
+          <li><span class="name">Bob</span><span class="role">team lead</span></li>
+          <li><span class="name">Maverick</span><span class="role">flight, camera, build, tools, start page</span></li>
+          <li><span class="name">Goose</span><span class="role">combat, AI, HUD, game modes</span></li>
+          <li><span class="name">Iceman</span><span class="role">city, light, damage</span></li>
+          <li><span class="name">Marvin</span><span class="role">tests, CI · Codex</span></li>
+          <li><span class="name">Riker</span><span class="role">code review · Codex</span></li>
+        </ul>
+        <p class="note">
+          Built with <a href="https://itsolutionsondemand.com/en/bobnet/" rel="noopener">BobNet</a>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Made in under <span data-build-hours>24</span> hours</h2>
+        <p class="big">&lt; <span data-build-hours>24</span> h</p>
+        <p>
+          First commit on 16 October 2026 at 11:17; less than
+          <span data-build-hours>24</span> hours later the game flew in the
+          browser. In between: a few hours of sleep — for the human. The Bobs
+          just kept going.
+        </p>
+      </section>
+
+      <section>
+        <h2>Aircraft models</h2>
+        <ul class="models">
+          <li>
+            <span class="aircraft">F-14 Tomcat</span> —
+            <a href="https://sketchfab.com/3d-models/low-poly-f14-tomcat-e99d03987b574e80971c1c8cc2b75925" rel="noopener">“Low poly F14 Tomcat”</a>
+            by <a href="https://sketchfab.com/S1Priv" rel="noopener">SIpriv</a>
+          </li>
+          <li>
+            <span class="aircraft">MiG-29</span> —
+            <a href="https://sketchfab.com/3d-models/low-poly-mig-29-c0f08d656dae4214b82b8647614f3ec4" rel="noopener">“Low poly Mig 29”</a>
+            by <a href="https://sketchfab.com/S1Priv" rel="noopener">SIpriv</a>
+          </li>
+          <li>
+            <span class="aircraft">Bf 109 K-4</span> —
+            <a href="https://sketchfab.com/3d-models/messerschmitt-bf-109-k4-low-poly-53ec8c75306340d49d319a65a2e733a1" rel="noopener">“Messerschmitt Bf-109 K4 (low poly)”</a>
+            by <a href="https://sketchfab.com/vonBerlichingen" rel="noopener">Götz von Berlichingen</a>
+          </li>
+          <li>
+            <span class="aircraft">Me 309</span> —
+            <a href="https://sketchfab.com/3d-models/messerschmitt-me-309-low-poly-f2eafa09a4364832b6d9a3c67ac5d866" rel="noopener">“Messerschmitt Me-309 (low poly)”</a>
+            by <a href="https://sketchfab.com/vonBerlichingen" rel="noopener">Götz von Berlichingen</a>
+          </li>
+          <li>
+            <span class="aircraft">He 177</span> —
+            <a href="https://sketchfab.com/3d-models/heinkel-he-177-low-poly-5aca29e45d7a4cd5b476f08e8d77521f" rel="noopener">“Heinkel He 177 (low poly)”</a>
+            by <a href="https://sketchfab.com/vonBerlichingen" rel="noopener">Götz von Berlichingen</a>
+          </li>
+          <li>
+            <span class="aircraft">Ju 390</span> —
+            <a href="https://sketchfab.com/3d-models/junkers-ju-390b-seefernaufklarer-low-poly-0b57afee26be401dba295521aaf180f4" rel="noopener">“Junkers Ju-390B Seefernaufklärer (low poly)”</a>
+            by <a href="https://sketchfab.com/vonBerlichingen" rel="noopener">Götz von Berlichingen</a>
+          </li>
+          <li>
+            <span class="aircraft">Zeppelin</span> —
+            <a href="https://sketchfab.com/3d-models/zeppelin-airfield-low-poly-07ab077c30d1465ea4d9a6b242ecc991" rel="noopener">“zeppelin airfield (low poly)”</a>
+            by <a href="https://sketchfab.com/vonBerlichingen" rel="noopener">Götz von Berlichingen</a>
+          </li>
+        </ul>
+        <p class="note">
+          All licensed under
+          <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>;
+          rescaled, reoriented and recentred for the game. Thank you!
+        </p>
+      </section>
+
+      <section>
+        <h2>Built with</h2>
+        <ul class="tools">
+          <li><a href="https://www.rust-lang.org/" rel="noopener">Rust</a></li>
+          <li><a href="https://bevy.org/" rel="noopener">Bevy</a></li>
+          <li><a href="https://rapier.rs/" rel="noopener">Rapier</a></li>
+          <li><a href="https://github.com/wasm-bindgen/wasm-bindgen" rel="noopener">wasm-bindgen</a></li>
+          <li><a href="https://github.com/theleagueof/orbitron" rel="noopener">Orbitron font (OFL)</a></li>
+        </ul>
+      </section>
+
+      <a class="back" href="./">BACK TO THE GAME</a>
+    </main>
+
+    <script>
+      // Hours from first commit to release; update at each release.
+      const BUILD_HOURS = 24;
+      for (const el of document.querySelectorAll('[data-build-hours]')) {
+        el.textContent = String(BUILD_HOURS);
+      }
+
+      // Day or evening tint as chosen on the start page (same storage key),
+      // else the browser's dark/light preference. Nothing is sent anywhere.
+      let light = '';
+      try {
+        const line = localStorage.getItem('timefighter.menu') ?? '';
+        const pair = line.split(';').find((p) => p.startsWith('light='));
+        light = pair ? pair.slice('light='.length) : '';
+      } catch {
+        // No storage (private window): fall back below.
+      }
+      if (light !== 'day' && light !== 'evening') {
+        light = matchMedia('(prefers-color-scheme: dark)').matches ? 'evening' : 'day';
+      }
+      document.body.classList.toggle('evening', light === 'evening');
+    </script>
+  </body>
+</html>

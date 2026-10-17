@@ -1,5 +1,6 @@
 //! Checks the normalised aircraft files directly (no renderer, no asset
-//! server): metres, +Y up, nose along −Z, origin near the box centre.
+//! server): metres, +Y up, nose along −Z, origin near the box centre. The
+//! models kept in `models_library/aircraft/` are checked the same way.
 
 use std::path::{Path, PathBuf};
 
@@ -11,11 +12,14 @@ fn repo() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
+fn manifest_json() -> serde_json::Value {
+    let text = std::fs::read_to_string(repo().join("tools/aircraft.json")).unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
 /// `(name, length in m)` for every entry of `tools/aircraft.json`.
 fn manifest() -> Vec<(String, f32)> {
-    let text = std::fs::read_to_string(repo().join("tools/aircraft.json")).unwrap();
-    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-    json["aircraft"]
+    manifest_json()["aircraft"]
         .as_array()
         .unwrap()
         .iter()
@@ -28,8 +32,41 @@ fn manifest() -> Vec<(String, f32)> {
         .collect()
 }
 
+/// Names of the entries kept in the library instead of the game.
+fn library() -> Vec<String> {
+    manifest_json()["aircraft"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["library"].as_bool() == Some(true))
+        .map(|entry| entry["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+const GAME_DIR: &str = "assets/aircraft";
+const LIBRARY_DIR: &str = "models_library/aircraft";
+
+/// The file of a manifest entry, in the game's assets or the library.
 fn glb(name: &str) -> PathBuf {
-    repo().join("assets/aircraft").join(format!("{name}.glb"))
+    let dir = if library().iter().any(|n| n == name) {
+        LIBRARY_DIR
+    } else {
+        GAME_DIR
+    };
+    repo().join(dir).join(format!("{name}.glb"))
+}
+
+/// The `.glb` file names (without extension) in a folder of the repo.
+fn glb_files(dir: &str) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(repo().join(dir))
+        .unwrap()
+        .filter_map(|entry| {
+            let path = entry.unwrap().path();
+            (path.extension()? == "glb").then(|| path.file_stem().unwrap().to_string_lossy().into())
+        })
+        .collect();
+    names.sort();
+    names
 }
 
 struct Model {
@@ -108,12 +145,52 @@ impl Model {
 #[test]
 fn catalogue_matches_manifest() {
     let names: Vec<_> = manifest().into_iter().map(|(name, _)| name).collect();
+    let library = library();
     for model in AircraftModel::ALL {
         assert!(
             names.iter().any(|n| n == model.file_stem()),
             "{model:?} not in manifest"
         );
-        assert!(glb(model.file_stem()).exists(), "{model:?} has no .glb");
+        assert!(
+            !library.contains(&model.file_stem().to_owned()),
+            "{model:?} is marked for the library"
+        );
+    }
+    // The game's folder holds exactly the catalogue, the library the rest.
+    let mut game: Vec<String> = AircraftModel::ALL
+        .iter()
+        .map(|m| m.file_stem().to_owned())
+        .collect();
+    game.sort();
+    assert_eq!(glb_files(GAME_DIR), game);
+    let mut kept = library.clone();
+    kept.sort();
+    assert_eq!(glb_files(LIBRARY_DIR), kept);
+}
+
+#[test]
+fn library_models_keep_their_credits_and_mounts() {
+    let dir = repo().join(LIBRARY_DIR);
+    let credits = std::fs::read_to_string(dir.join("CREDITS.md")).unwrap();
+    let text = std::fs::read_to_string(dir.join("mounts.json")).unwrap();
+    let mounts: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let library = library();
+    for name in &library {
+        assert!(
+            credits.contains(&format!("**{name}.glb**")),
+            "{name} credit"
+        );
+    }
+    for name in mounts.as_object().unwrap().keys() {
+        assert!(library.contains(name), "mounts for {name}");
+    }
+    // And the game's credits list only the game's models.
+    let game = std::fs::read_to_string(repo().join(GAME_DIR).join("CREDITS.md")).unwrap();
+    for name in &library {
+        assert!(
+            !game.contains(&format!("**{name}.glb**")),
+            "{name} in game credits"
+        );
     }
 }
 
@@ -290,7 +367,7 @@ fn gun_mounts_match_the_normaliser_output() {
 
 #[test]
 fn bomber_mounts_sit_on_the_aircraft_front_and_rear() {
-    for model in [AircraftModel::B17, AircraftModel::Lancaster] {
+    for model in [AircraftModel::He177, AircraftModel::Ju390] {
         let size = model.size();
         let mounts = model.gun_mounts();
         assert!(mounts.len() >= 2);
@@ -343,7 +420,7 @@ fn zeppelin_collider_holds_its_guns_and_engines_but_not_the_air_around_the_nose(
 
 #[test]
 fn bombers_are_light_enough_to_fly_in_numbers() {
-    for name in ["b17", "lancaster"] {
+    for name in ["he177", "ju390"] {
         let bytes = std::fs::read(glb(name)).unwrap();
         let gltf = gltf::Gltf::from_slice(&bytes).unwrap();
         let triangles: usize = gltf
