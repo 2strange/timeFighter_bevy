@@ -2,19 +2,33 @@ use bevy::prelude::*;
 
 use super::{FlightConfig, FlightInput, FlightState, PlayerAircraft};
 
+/// "Invert pitch" from the menu: W (and tilting the phone away) pulls the
+/// nose up instead of pushing it down.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PitchInvert(pub bool);
+
+impl PitchInvert {
+    /// `pitch` as the player wants it.
+    pub fn apply(self, pitch: f32) -> f32 {
+        if self.0 { -pitch } else { pitch }
+    }
+}
+
 /// Keyboard layout of the earlier prototype:
 /// W/S pitch (W = nose down), A/D roll, Q/E yaw, arrow up/down throttle.
 /// Arrow left/right also yaw, so the right hand can steer while the left flies.
 pub(super) fn keyboard_input(
     keys: Res<ButtonInput<KeyCode>>,
+    invert: Option<Res<PitchInvert>>,
     mut player: Query<&mut FlightInput, With<PlayerAircraft>>,
 ) {
+    let invert = invert.map_or_else(PitchInvert::default, |i| *i);
     let axis = |positive: &[KeyCode], negative: &[KeyCode]| -> f32 {
         f32::from(keys.any_pressed(positive.iter().copied()))
             - f32::from(keys.any_pressed(negative.iter().copied()))
     };
     let input = FlightInput {
-        pitch: axis(&[KeyCode::KeyS], &[KeyCode::KeyW]),
+        pitch: invert.apply(axis(&[KeyCode::KeyS], &[KeyCode::KeyW])),
         roll: axis(&[KeyCode::KeyA], &[KeyCode::KeyD]),
         yaw: axis(
             &[KeyCode::KeyQ, KeyCode::ArrowLeft],
@@ -65,6 +79,25 @@ mod tests {
         }
         app.update();
         *app.world().get::<FlightInput>(jet).unwrap()
+    }
+
+    #[test]
+    fn inverted_pitch_turns_w_and_s_around() {
+        assert_eq!(input_for(&[KeyCode::KeyW]).pitch, -1.0, "W: nose down");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(PitchInvert(true))
+            .add_systems(Update, keyboard_input);
+        let jet = app
+            .world_mut()
+            .spawn((PlayerAircraft, FlightInput::default()))
+            .id();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        app.update();
+        assert_eq!(app.world().get::<FlightInput>(jet).unwrap().pitch, 1.0);
     }
 
     #[test]

@@ -176,6 +176,26 @@ fn tilt_and_thrust_steer_the_jet_over_the_keyboard() {
 }
 
 #[test]
+fn invert_pitch_turns_tilt_and_keyboard_around() {
+    let mut app = keys_app();
+    app.insert_resource(PitchInvert(true));
+    set(&mut app, |i| {
+        i.steering = Steering::Gyro;
+        i.pitch = TILT_FULL;
+    });
+    let pitch = |app: &mut App| {
+        app.world_mut()
+            .query_filtered::<&FlightInput, With<PlayerAircraft>>()
+            .single(app.world())
+            .unwrap()
+            .pitch
+    };
+    assert_eq!(pitch(&mut app), 1.0, "top edge away pulls up when inverted");
+    assert_eq!(PitchInvert(true).apply(-1.0), 1.0);
+    assert_eq!(PitchInvert(false).apply(-1.0), -1.0);
+}
+
+#[test]
 fn the_page_mode_follows_menu_round_pause_and_dialog() {
     let pause = Pause::default();
     assert_eq!(page_mode(Some(&pause), None, None), PageMode::Play);
