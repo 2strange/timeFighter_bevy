@@ -168,15 +168,14 @@ impl CustomField {
                 200., 210., 220., 230., 240., 250., 260., 270., 280., 290., 300.,
             ],
             CustomField::CityLoss => &[0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6],
-            CustomField::Zeppelin => &[0., 1.],
+            CustomField::Zeppelin => &[0., 1., 2., 3.],
         }
     }
 
     fn step_label(self, value: f32) -> String {
         match self {
-            CustomField::UnlimitedGun | CustomField::Zeppelin => {
-                if value > 0.5 { "On" } else { "Off" }.into()
-            }
+            CustomField::UnlimitedGun => if value > 0.5 { "On" } else { "Off" }.into(),
+            CustomField::Zeppelin => format!("{value:.0}"),
             CustomField::Pilots => PILOT_MIXES
                 .get(value.round() as usize)
                 .map_or("", |(_, label)| label)
@@ -211,7 +210,7 @@ impl CustomField {
             CustomField::BombersPerWave => params.bombers_per_wave as f32,
             CustomField::WaveInterval => params.wave_interval,
             CustomField::CityLoss => params.city_loss,
-            CustomField::Zeppelin => f32::from(u8::from(params.zeppelin)),
+            CustomField::Zeppelin => params.zeppelins as f32,
         }
     }
 
@@ -235,7 +234,7 @@ impl CustomField {
             CustomField::BombersPerWave => params.bombers_per_wave = value.round() as u32,
             CustomField::WaveInterval => params.wave_interval = value,
             CustomField::CityLoss => params.city_loss = value,
-            CustomField::Zeppelin => params.zeppelin = value > 0.5,
+            CustomField::Zeppelin => params.zeppelins = value.round() as u32,
         }
     }
 
@@ -746,14 +745,14 @@ mod tests {
         selection.select(RowId::Difficulty, 1);
         selection.select(RowId::Difficulty, CUSTOM_LEVEL);
         // Easy has no end boss; Custom starts from that.
-        assert!(!selection.custom.zeppelin);
+        assert_eq!(selection.custom.zeppelins, 0);
         assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
 
         selection.select(RowId::Custom(CustomField::Zeppelin), 1);
         let Difficulty::Custom(params) = selection.settings().difficulty else {
             panic!("custom expected");
         };
-        assert!(params.zeppelin);
+        assert_eq!(params.zeppelins, 1);
         assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
     }
 

@@ -18,6 +18,9 @@ pub struct GameSettings {
     pub lighting: Lighting,
 }
 
+/// Most zeppelins a Battle sends.
+pub const MAX_ZEPPELINS: u32 = 3;
+
 /// How hard a round is.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Difficulty {
@@ -66,16 +69,16 @@ impl Difficulty {
             (GameMode::Protect, Difficulty::Normal) => 16,
             (GameMode::Protect, Difficulty::Hard) => 12,
             (GameMode::Protect, Difficulty::Insane) => 12,
-            // Battle: bombers take two missiles, fighters one, the zeppelin
-            // (Normal and up) about nine. Super Easy has a reserve (24 for
-            // 20 needed), Easy just enough (20), Normal stays doable (32 for
-            // 30 + 9), Hard and Insane leave much to the gun (20 for 36 + 9
-            // and 48 + 9).
+            // Battle: bombers take two missiles, fighters one, a zeppelin
+            // about nine. Super Easy has a reserve (24 for 20 needed), Easy
+            // just enough (20), Normal stays doable (32 for 30 + 9), Hard and
+            // Insane leave much to the gun (20 for 36 + 9; 36 for 48 + 3 × 9,
+            // eight more for each further zeppelin).
             (GameMode::Battle, Difficulty::SuperEasy) => 24,
             (GameMode::Battle, Difficulty::Easy) => 20,
             (GameMode::Battle, Difficulty::Normal) => 32,
             (GameMode::Battle, Difficulty::Hard) => 20,
-            (GameMode::Battle, Difficulty::Insane) => 20,
+            (GameMode::Battle, Difficulty::Insane) => 36,
         };
         DifficultyParams { missiles, ..params }
     }
@@ -99,7 +102,8 @@ impl Difficulty {
                 bomber_waves: 2,
                 wave_interval: 150.0,
                 city_loss: 0.4,
-                zeppelin: false,
+                zeppelins: 0,
+                gun_assist: true,
                 ..base
             },
             Difficulty::Easy => DifficultyParams {
@@ -115,7 +119,8 @@ impl Difficulty {
                 bomber_waves: 2,
                 wave_interval: 130.0,
                 city_loss: 0.35,
-                zeppelin: false,
+                zeppelins: 0,
+                gun_assist: true,
                 ..base
             },
             Difficulty::Normal => base,
@@ -145,6 +150,7 @@ impl Difficulty {
                 lock_time: 1.0,
                 bomber_waves: 4,
                 wave_interval: 90.0,
+                zeppelins: 3,
                 ..base
             },
             Difficulty::Custom(params) => params,
@@ -195,8 +201,11 @@ pub struct DifficultyParams {
     pub wave_interval: f32,
     /// The round is lost once this share of the city centre is destroyed.
     pub city_loss: f32,
-    /// Battle ends with the zeppelin as the last wave.
-    pub zeppelin: bool,
+    /// Battle ends with this many zeppelins (0–3), each in its own last
+    /// wave with an escort, from different sides.
+    pub zeppelins: u32,
+    /// The gun's lead circle shows where to aim.
+    pub gun_assist: bool,
 }
 
 impl Default for DifficultyParams {
@@ -217,7 +226,8 @@ impl Default for DifficultyParams {
             bombers_per_wave: 4,
             wave_interval: 110.0,
             city_loss: 0.3,
-            zeppelin: true,
+            zeppelins: 1,
+            gun_assist: false,
         }
     }
 }
@@ -236,6 +246,7 @@ impl DifficultyParams {
             enemy_speed: factor(self.enemy_speed, 0.3, 2.0),
             enemy_accuracy: factor(self.enemy_accuracy, 0.1, 3.0),
             attackers: self.attackers.clamp(1, 12),
+            zeppelins: self.zeppelins.min(MAX_ZEPPELINS),
             bomber_waves: self.bomber_waves.clamp(1, 12),
             bombers_per_wave: self.bombers_per_wave.clamp(1, 8),
             wave_interval: if self.wave_interval.is_finite() {
