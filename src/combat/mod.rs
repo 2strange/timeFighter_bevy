@@ -21,6 +21,7 @@ mod tests;
 mod turrets;
 mod visuals;
 mod weapons;
+mod wreck;
 
 use bevy::prelude::*;
 
@@ -35,7 +36,7 @@ pub use weapons::{Gun, Missile, MissileRack, Munition, Trigger, Weapon, gun_lead
 
 use crate::{
     flight::{FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft},
-    physics::{EnemyCrashed, PlayerCrashed, ProjectileHit},
+    physics::{CrashDetection, EnemyCrashed, PlayerCrashed, ProjectileHit},
     world::damage::DamageArea,
 };
 
@@ -238,17 +239,34 @@ impl Plugin for CombatPlugin {
                     (
                         hits::projectile_hits,
                         hits::proximity_hits,
-                        hits::player_crashes,
-                        hits::enemy_crashes,
                         hits::remember_positions,
                     )
                         .chain()
                         .in_set(CombatSystems::DetectHits),
                     hits::apply_hits.in_set(CombatSystems::Resolve),
+                    // Shot down: hidden and exploding in this frame.
+                    (wreck::wreck_player, wreck::restore_player)
+                        .chain()
+                        .after(CombatSystems::Resolve)
+                        .in_set(wreck::WreckSystems),
                     (effects::spawn_effects, effects::age_effects)
                         .chain()
                         .after(CombatSystems::Resolve),
                 ),
+            )
+            // Crashes are handled right where the physics reports them, so
+            // the frame that shows the impact shows the explosion, not a
+            // jet half inside a building (and enemies vanish just as fast).
+            .add_systems(
+                PostUpdate,
+                (
+                    hits::player_crashes,
+                    hits::enemy_crashes,
+                    wreck::wreck_player,
+                )
+                    .chain()
+                    .after(CrashDetection)
+                    .in_set(wreck::WreckSystems),
             );
     }
 }

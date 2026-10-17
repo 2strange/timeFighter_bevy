@@ -1089,3 +1089,152 @@ fn waiting_escorts_stay_with_their_bombers() {
         );
     }
 }
+
+// --- The player's jet is gone in the frame it is destroyed ----------------
+
+mod instant_wreck {
+    use bevy::prelude::*;
+    use bevy_rapier3d::prelude::{Collider, ColliderDisabled, RigidBody};
+
+    use super::{app, round, run_for};
+    use crate::{
+        combat::{Effect, EffectKind, Health, Hit, Team, Weapon},
+        flight::Wrecked,
+        game_state::{RestartRound, RoundPhase},
+        physics::{Layer, aircraft_body},
+    };
+
+    fn wrecked(app: &App, jet: Entity) -> bool {
+        app.world().get::<Wrecked>(jet).is_some()
+    }
+
+    fn hidden(app: &App, jet: Entity) -> bool {
+        app.world().get::<Visibility>(jet) == Some(&Visibility::Hidden)
+    }
+
+    fn big_explosions(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&Effect>()
+            .iter(app.world())
+            .filter(|e| e.kind == EffectKind::BigExplosion)
+            .count()
+    }
+
+    fn position(app: &App, jet: Entity) -> Vec3 {
+        app.world().get::<Transform>(jet).unwrap().translation
+    }
+
+    /// Flies until the jet is wrecked, checking every frame that it never
+    /// shows inside `inside` without being wrecked. Returns the frame count.
+    fn fly_into(app: &mut App, jet: Entity, inside: impl Fn(Vec3) -> bool) -> u32 {
+        for frame in 1..=240 {
+            app.update();
+            let at = position(app, jet);
+            if wrecked(app, jet) {
+                // Everything happens in the same frame.
+                assert!(hidden(app, jet), "wrecked but still visible");
+                assert_eq!(big_explosions(app), 1, "no explosion in the wreck frame");
+                assert!(app.world().get::<ColliderDisabled>(jet).is_some());
+                return frame;
+            }
+            assert!(
+                !inside(at),
+                "frame {frame}: jet at {at} inside without a crash"
+            );
+        }
+        panic!("never crashed");
+    }
+
+    /// After the wreck: it stays put and hidden for the rest of the round.
+    fn stays_down(app: &mut App, jet: Entity) {
+        let at = position(app, jet);
+        run_for(app, 1.0);
+        assert_eq!(position(app, jet), at, "the wreck flew on");
+        assert!(hidden(app, jet) && wrecked(app, jet));
+        assert!(app.world().get::<Health>(jet).unwrap().is_dead());
+    }
+
+    #[test]
+    fn diving_into_the_ground_explodes_at_once_and_never_resurfaces() {
+        let (mut app, jet) = app();
+        *app.world_mut().get_mut::<Transform>(jet).unwrap() =
+            Transform::from_xyz(0.0, 60.0, 0.0).with_rotation(Quat::from_rotation_x(-0.9));
+        fly_into(&mut app, jet, |p| p.y < 0.0);
+        stays_down(&mut app, jet);
+        run_for(&mut app, 2.0);
+        assert!(matches!(round(&app).phase, RoundPhase::Over(_)));
+    }
+
+    #[test]
+    fn flying_into_a_building_explodes_at_the_wall() {
+        let (mut app, jet) = app();
+        let start = position(&app, jet);
+        let forward = app.world().get::<Transform>(jet).unwrap().forward();
+        // A 200 m block 200 m ahead, across the flight path.
+        let centre = start + forward * 300.0;
+        let half = Vec3::splat(100.0);
+        app.world_mut().spawn((
+            RigidBody::Fixed,
+            Collider::cuboid(half.x, half.y, half.z),
+            Layer::World.groups(),
+            Transform::from_translation(centre),
+        ));
+        fly_into(&mut app, jet, |p| {
+            ((p - centre).abs() - half).max_element() < 0.0
+        });
+        stays_down(&mut app, jet);
+    }
+
+    #[test]
+    fn touching_an_enemy_is_instant_death() {
+        let (mut app, jet) = app();
+        let start = position(&app, jet);
+        let forward = app.world().get::<Transform>(jet).unwrap().forward();
+        let enemy_at = start + forward * 150.0;
+        app.world_mut().spawn((
+            Team::Enemy,
+            Health::full(50.0),
+            aircraft_body(Layer::Enemy),
+            Transform::from_translation(enemy_at),
+        ));
+        fly_into(&mut app, jet, |p| p.distance(enemy_at) < 3.0);
+        stays_down(&mut app, jet);
+    }
+
+    #[test]
+    fn being_shot_down_hides_the_jet_in_the_same_frame() {
+        let (mut app, jet) = app();
+        app.world_mut().write_message(Hit {
+            projectile: Entity::PLACEHOLDER,
+            target: jet,
+            point: Vec3::ZERO,
+            team: Team::Enemy,
+            weapon: Weapon::Gun,
+            damage: 1_000.0,
+        });
+        app.update();
+        assert!(wrecked(&app, jet) && hidden(&app, jet));
+        assert_eq!(big_explosions(&mut app), 1);
+        stays_down(&mut app, jet);
+    }
+
+    #[test]
+    fn a_new_round_brings_the_jet_back() {
+        let (mut app, jet) = app();
+        *app.world_mut().get_mut::<Transform>(jet).unwrap() =
+            Transform::from_xyz(0.0, 60.0, 0.0).with_rotation(Quat::from_rotation_x(-0.9));
+        fly_into(&mut app, jet, |p| p.y < 0.0);
+        app.world_mut().write_message(RestartRound);
+        run_for(&mut app, 0.2);
+        assert!(!wrecked(&app, jet), "still wrecked after the restart");
+        assert!(!hidden(&app, jet));
+        assert!(app.world().get::<ColliderDisabled>(jet).is_none());
+        let before = position(&app, jet);
+        run_for(&mut app, 0.5);
+        assert!(
+            position(&app, jet).distance(before) > 10.0,
+            "jet does not fly"
+        );
+        assert_eq!(round(&app).phase, RoundPhase::Running);
+    }
+}

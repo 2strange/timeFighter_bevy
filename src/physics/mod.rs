@@ -70,11 +70,18 @@ impl Plugin for PhysicsPlugin {
                 remember_aircraft_pose.before(PhysicsSet::SyncBackend),
                 (restore_aircraft_pose, crash::detect_crashes)
                     .chain()
-                    .after(PhysicsSet::Writeback),
+                    .after(PhysicsSet::Writeback)
+                    .in_set(CrashDetection),
             ),
         );
     }
 }
+
+/// Where [`PlayerCrashed`] and [`EnemyCrashed`] are written (in
+/// `PostUpdate`, after the physics step). Reacting right after it shows a
+/// crash in the same frame it happened.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CrashDetection;
 
 /// Marks ground colliders (land, water). The world builds them from its
 /// layout on [`Layer::World`]; this module only defines the marker.
