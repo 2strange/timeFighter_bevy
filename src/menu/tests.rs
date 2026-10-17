@@ -373,7 +373,7 @@ fn q_and_e_switch_the_enemy_tab_and_the_cursor_follows() {
     assert_eq!(tab(&app), EnemyTab::Fighters);
     tap(&mut app, KeyCode::ArrowRight);
     assert_eq!(tab(&app), EnemyTab::Bombers);
-    go_to(&mut app, RowId::Custom(CustomField::Zeppelin));
+    go_to(&mut app, RowId::Custom(CustomField::Zeppelins));
 }
 
 #[test]
