@@ -1,0 +1,13 @@
+{
+  "name": "render-aircraft",
+  "private": true,
+  "description": "Renders still images of the aircraft models on the CPU (no GPU, no browser).",
+  "type": "module",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "sharp": "0.35.5"
+  }
+}

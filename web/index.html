@@ -3,76 +3,143 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>TimeFighter</title>
+    <title>TimeFighter – arcade air combat in your browser</title>
+    <meta name="description" content="Free arcade dogfighter in your browser: one F-14 Tomcat, thrown into a parallel timeline, against waves of propeller fighters and bombers over a living city." />
+    <link rel="canonical" href="https://timefighter.trendgegner.com/" />
+    <meta name="theme-color" content="#161421" />
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png" />
+    <!-- Share preview (WhatsApp, Signal, Telegram, Slack, ...): rendered by tools/render-aircraft. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TimeFighter" />
+    <meta property="og:title" content="TimeFighter – arcade air combat in another timeline" />
+    <meta property="og:description" content="Free arcade dogfighter in your browser: one F-14 Tomcat, thrown into a parallel timeline, against waves of propeller fighters and bombers over a living city." />
+    <meta property="og:url" content="https://timefighter.trendgegner.com/" />
+    <meta property="og:image" content="https://timefighter.trendgegner.com/img/og-image.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="An F-14 Tomcat banking over an evening city, a formation of propeller bombers and fighters behind it." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TimeFighter – arcade air combat in another timeline" />
+    <meta name="twitter:description" content="Free arcade dogfighter in your browser: one F-14 Tomcat, thrown into a parallel timeline, against waves of propeller fighters and bombers over a living city." />
+    <meta name="twitter:image" content="https://timefighter.trendgegner.com/img/og-image.jpg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
         --hud: #b8ffc7;
         --hud-dim: rgba(184, 255, 199, 0.55);
         --amber: #ffbf33;
-        --panel: rgba(6, 10, 14, 0.82);
+        --ink: #e8f2ea;
+        --panel: rgba(6, 10, 14, 0.78);
+        --sky-top: #142130;
+        --sky-mid: #2c3b4d;
+        --sky-low: #47566a;
+        --glow: rgba(150, 190, 230, 0.25);
+      }
+      body.evening {
+        --sky-top: #161421;
+        --sky-mid: #3a2c3c;
+        --sky-low: #7a4b3f;
+        --glow: rgba(255, 160, 90, 0.35);
       }
       html, body { margin: 0; height: 100%; background: #0b1218; overflow: hidden; }
-      body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--hud); }
+      body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
       #game { display: block; width: 100%; height: 100%; outline: none; }
 
       #start {
         position: absolute; inset: 0; overflow-y: auto;
         display: grid; place-items: center; padding: 16px; box-sizing: border-box;
         background:
-          radial-gradient(ellipse at 50% 120%, rgba(255, 170, 90, 0.35), transparent 60%),
-          linear-gradient(180deg, #121b26 0%, #2a3442 55%, #5b4a46 100%);
+          radial-gradient(ellipse at 50% 115%, var(--glow), transparent 62%),
+          linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 58%, var(--sky-low) 100%);
+        transition: background 0.4s;
       }
       #start.hidden { display: none; }
       .card {
-        width: min(760px, 100%); padding: 28px 32px; box-sizing: border-box;
+        width: min(860px, 100%); padding: 28px 32px 22px; box-sizing: border-box;
         background: var(--panel); border: 1px solid var(--hud-dim);
       }
-      h1 { margin: 0 0 4px; font-size: clamp(32px, 7vw, 56px); letter-spacing: 0.12em; color: var(--hud); }
-      .tagline { margin: 0 0 20px; color: var(--hud-dim); letter-spacing: 0.08em; text-transform: uppercase; font-size: 13px; }
-      .story { margin: 0 0 22px; color: #e8f2ea; }
-      h2 { margin: 18px 0 8px; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--hud-dim); }
-      .keys { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 0; font-size: 14px; }
-      .keys dt { color: var(--amber); white-space: nowrap; }
-      .keys dd { margin: 0; color: #dfe9e2; }
-      .choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 6px; }
-      .choice {
+
+      /* Wordmark: replace this block (or put an <img> in .logo) for a real logo. */
+      .logo {
+        margin: 0; font-family: "Orbitron", system-ui, sans-serif; font-weight: 800;
+        font-size: clamp(34px, 7.5vw, 64px); letter-spacing: 0.06em; line-height: 1;
+      }
+      .logo .time { color: var(--amber); }
+      .logo .fighter { color: var(--hud); }
+      .tagline {
+        margin: 8px 0 18px; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
+        font-size: 12px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--hud-dim);
+      }
+      .story {
+        margin: 0 0 24px; max-width: 62ch; font-size: 16px; color: var(--ink);
+        border-left: 2px solid var(--amber); padding-left: 14px;
+      }
+
+      h2 {
+        margin: 0 0 10px; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
+        font-size: 12px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--hud-dim);
+      }
+      section { margin-bottom: 20px; }
+
+      .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      .mode {
+        display: flex; flex-direction: column; gap: 6px; padding: 10px; cursor: pointer; text-align: left;
+        color: var(--ink); background: rgba(255, 255, 255, 0.03); border: 1px solid var(--hud-dim);
+        font: inherit;
+      }
+      .mode img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; display: block; }
+      .mode strong {
+        font-family: "Orbitron", system-ui, sans-serif; font-weight: 600; letter-spacing: 0.12em;
+        color: var(--hud);
+      }
+      .mode span { font-size: 13px; color: rgba(232, 242, 234, 0.8); }
+      .mode[aria-pressed="true"] { border-color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); background: rgba(255, 191, 51, 0.08); }
+      .mode[aria-pressed="true"] strong { color: var(--amber); }
+      .mode:hover, .mode:focus-visible { border-color: var(--amber); outline: none; }
+
+      .segments { display: flex; flex-wrap: wrap; gap: 8px; }
+      .segment {
         padding: 8px 14px; font: 15px system-ui, sans-serif; cursor: pointer;
         color: var(--hud); background: transparent; border: 1px solid var(--hud-dim);
       }
-      .choice[aria-pressed="true"] { color: #0b1218; background: var(--hud); border-color: var(--hud); }
-      .choice:disabled { color: rgba(184, 255, 199, 0.35); border-style: dashed; cursor: not-allowed; }
-      .choice:not(:disabled):hover, .choice:focus-visible { border-color: var(--amber); outline: none; }
-      .hint { font-size: 13px; color: var(--hud-dim); margin: 0; }
+      .segment[aria-pressed="true"] { color: #0b1218; background: var(--hud); border-color: var(--hud); }
+      .segment:hover, .segment:focus-visible { border-color: var(--amber); outline: none; }
+      .row { display: flex; flex-wrap: wrap; gap: 20px 40px; }
+
       #play {
-        display: block; margin: 26px auto 8px; padding: 14px 56px;
-        font: 600 22px system-ui, sans-serif; letter-spacing: 0.2em;
+        display: block; margin: 8px auto 6px; padding: 14px 64px;
+        font-family: "Orbitron", system-ui, sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 0.24em;
         color: #0b1218; background: var(--hud); border: none; cursor: pointer;
       }
       #play:disabled { background: var(--hud-dim); cursor: progress; }
       #play:not(:disabled):hover, #play:not(:disabled):focus-visible { background: var(--amber); outline: none; }
       .status { text-align: center; font-size: 13px; color: var(--hud-dim); min-height: 1.5em; }
-      .links { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: center; font-size: 13px; }
-      a { color: var(--hud); }
-      .note { margin-top: 10px; text-align: center; font-size: 12px; color: var(--hud-dim); }
-      @media (max-width: 520px) {
-        .card { padding: 20px 16px; }
-        .keys { grid-template-columns: 1fr; gap: 0 0; }
-        .keys dd { margin-bottom: 6px; }
-      }
-      #nav {
-        position: absolute; right: 12px; bottom: 12px;
-        font: 14px system-ui, sans-serif; color: #fff; opacity: 0.8;
+      footer { margin-top: 14px; display: flex; gap: 18px; justify-content: center; font-size: 12px; }
+      footer a { color: var(--hud-dim); }
+
+      @media (max-width: 640px) {
+        .card { padding: 20px 16px 16px; }
+        .modes { grid-template-columns: 1fr; }
+        .mode { flex-direction: row; align-items: center; gap: 12px; }
+        .mode img { width: 42%; }
+        .mode div { display: flex; flex-direction: column; gap: 4px; }
       }
     </style>
   </head>
   <body>
     <canvas id="game" tabindex="0"></canvas>
-    <a id="nav" href="showroom.html">Aircraft showroom</a>
 
     <div id="start">
       <main class="card">
-        <h1>TIMEFIGHTER</h1>
-        <p class="tagline">Arcade air combat over a city in another timeline</p>
+        <h1 class="logo"><span class="time">TIME</span><span class="fighter">FIGHTER</span></h1>
+        <p class="tagline">Arcade air combat · another timeline</p>
         <p class="story">
           A routine training sortie from your home airbase. A storm front that no
           forecast saw coming, one blinding flash of lightning, and your jet
@@ -82,47 +149,52 @@
           in the sky that can stop them.
         </p>
 
-        <h2>Mode</h2>
-        <div class="choices" id="modes" role="group" aria-label="Mode">
-          <button class="choice" type="button" data-mode="hunt">Hunt</button>
-          <button class="choice" type="button" data-mode="protect">Protect</button>
-          <button class="choice" type="button" data-mode="battle">Battle</button>
-        </div>
-        <p class="hint" id="mode-hint"></p>
+        <section>
+          <h2>Mode</h2>
+          <div class="modes" id="modes" role="group" aria-label="Mode">
+            <button class="mode" type="button" data-mode="hunt">
+              <img src="img/mode-hunt.webp" alt="A fighter" width="480" height="270" />
+              <div><strong>HUNT</strong><span>Shoot down every fighter.</span></div>
+            </button>
+            <button class="mode" type="button" data-mode="protect">
+              <img src="img/mode-protect.webp" alt="Two bombers" width="480" height="270" />
+              <div><strong>PROTECT</strong><span>Stop the bomber waves before they wreck the city centre.</span></div>
+            </button>
+            <button class="mode" type="button" data-mode="battle">
+              <img src="img/mode-battle.webp" alt="Bombers with fighter escort" width="480" height="270" />
+              <div><strong>BATTLE</strong><span>Bombers with a fighter escort: protect the city and survive.</span></div>
+            </button>
+          </div>
+        </section>
 
-        <h2>Difficulty</h2>
-        <div class="choices" id="levels" role="group" aria-label="Difficulty">
-          <button class="choice" type="button" data-level="0">Super Easy</button>
-          <button class="choice" type="button" data-level="1">Easy</button>
-          <button class="choice" type="button" data-level="2">Normal</button>
-          <button class="choice" type="button" data-level="3">Hard</button>
-          <button class="choice" type="button" data-level="4">Insane</button>
-          <button class="choice" type="button" data-level="5">Custom…</button>
+        <div class="row">
+          <section>
+            <h2>Difficulty</h2>
+            <div class="segments" id="levels" role="group" aria-label="Difficulty">
+              <button class="segment" type="button" data-level="0">Super Easy</button>
+              <button class="segment" type="button" data-level="1">Easy</button>
+              <button class="segment" type="button" data-level="2">Normal</button>
+              <button class="segment" type="button" data-level="3">Hard</button>
+              <button class="segment" type="button" data-level="4">Insane</button>
+              <button class="segment" type="button" data-level="5" title="All values in the game's menu">Custom…</button>
+            </div>
+          </section>
+          <section>
+            <h2>Light</h2>
+            <div class="segments" id="lights" role="group" aria-label="Light">
+              <button class="segment" type="button" data-light="day">Day</button>
+              <button class="segment" type="button" data-light="evening">Evening</button>
+            </div>
+          </section>
         </div>
-        <p class="hint">Custom opens the in-game menu with all the values.</p>
-
-        <h2>Controls</h2>
-        <dl class="keys">
-          <dt>W / S</dt><dd>pitch (W = nose down)</dd>
-          <dt>A / D</dt><dd>roll</dd>
-          <dt>Q / E or ← / →</dt><dd>yaw</dd>
-          <dt>↑ / ↓</dt><dd>throttle</dd>
-          <dt>Space / left mouse</dt><dd>gun</dd>
-          <dt>Right Shift / right mouse</dt><dd>missile (homes on a locked target)</dd>
-          <dt>Tab / right Alt (Option)</dt><dd>next target</dd>
-          <dt>Enter or R / M</dt><dd>fly again / menu, after a round</dd>
-          <dt>P / Esc</dt><dd>pause</dd>
-          <dt>I</dt><dd>key help in the game</dd>
-        </dl>
 
         <button id="play" type="button" disabled>LOADING</button>
         <div class="status" id="status" aria-live="polite">Loading the game…</div>
 
-        <div class="links">
+        <footer>
           <a href="showroom.html">Aircraft showroom</a>
-          <a href="assets/aircraft/CREDITS.md">Credits for the aircraft models</a>
-        </div>
-        <p class="note">Best on a desktop or laptop with a keyboard.</p>
+          <a href="assets/aircraft/CREDITS.md">Credits</a>
+        </footer>
       </main>
     </div>
 
@@ -161,17 +233,12 @@
         return bytes;
       }
 
-      // --- Mode and difficulty, handed to the game ---------------------------
+      // --- Choices, handed to the game ----------------------------------------
       // The game reads its menu choice from localStorage ("key=value;..."),
       // and starts without its menu when "timefighter.autostart" is "1".
       // Without storage (private windows) the choice goes into the URL.
       const MENU_KEY = 'timefighter.menu';
       const LEVEL_NAMES = ['super-easy', 'easy', 'normal', 'hard', 'insane', 'custom'];
-      const MODE_HINTS = {
-        hunt: 'Shoot down every fighter.',
-        protect: 'Stop the bomber waves before they wreck the city centre.',
-        battle: 'Bombers with a fighter escort: protect the city and survive.',
-      };
 
       function storage() {
         try {
@@ -198,6 +265,12 @@
       let mode = ['protect', 'battle'].includes(stored.get('mode')) ? stored.get('mode') : 'hunt';
       let level = Number(stored.get('level') ?? 2);
       if (!(level >= 0 && level <= 5)) level = 2;
+      // Nothing stored yet: follow the browser's dark/light preference.
+      let light = ['day', 'evening'].includes(stored.get('light'))
+        ? stored.get('light')
+        : matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'evening'
+          : 'day';
 
       function showChoices() {
         for (const button of document.querySelectorAll('[data-mode]')) {
@@ -206,48 +279,51 @@
         for (const button of document.querySelectorAll('[data-level]')) {
           button.setAttribute('aria-pressed', String(Number(button.dataset.level) === level));
         }
-        document.getElementById('mode-hint').textContent = MODE_HINTS[mode];
+        for (const button of document.querySelectorAll('[data-light]')) {
+          button.setAttribute('aria-pressed', String(button.dataset.light === light));
+        }
+        document.body.classList.toggle('evening', light === 'evening');
       }
-      document.getElementById('modes').addEventListener('click', (event) => {
-        const button = event.target.closest('[data-mode]');
-        if (!button || button.disabled) return;
-        mode = button.dataset.mode;
-        showChoices();
-      });
-      document.getElementById('levels').addEventListener('click', (event) => {
-        const button = event.target.closest('[data-level]');
-        if (!button) return;
-        level = Number(button.dataset.level);
-        showChoices();
-      });
+      function pick(groupId, attribute, apply) {
+        document.getElementById(groupId).addEventListener('click', (event) => {
+          const button = event.target.closest(`[data-${attribute}]`);
+          if (!button) return;
+          apply(button.dataset[attribute]);
+          showChoices();
+        });
+      }
+      pick('modes', 'mode', (value) => (mode = value));
+      pick('levels', 'level', (value) => (level = Number(value)));
+      pick('lights', 'light', (value) => (light = value));
       showChoices();
 
       function handOver() {
         const store = storage();
         if (store) {
-          // Keep everything else the menu stored (custom values, light).
+          // Keep everything else the menu stored (custom values).
           const pairs = readStored();
           pairs.set('mode', mode);
           pairs.set('level', String(level));
+          pairs.set('light', light);
           store.setItem(MENU_KEY, [...pairs].map(([k, v]) => `${k}=${v}`).join(';'));
           store.setItem('timefighter.autostart', '1');
         } else {
-          // Only mode and level change; other parameters (e.g. ?set=)
-          // stay as they are.
+          // Only these change; other parameters (e.g. ?set=) stay.
           const params = new URLSearchParams(location.search);
           params.set('mode', mode);
           params.set('level', LEVEL_NAMES[level]);
+          params.set('light', light);
           history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`);
         }
       }
 
-      // --- Start -------------------------------------------------------------
+      // --- Start ----------------------------------------------------------------
       let module = null;
 
       function ready() {
         play.disabled = false;
         play.textContent = 'START';
-        status.textContent = 'Ready. Pick mode and difficulty, then Start.';
+        status.textContent = '';
         play.focus();
       }
 
@@ -255,7 +331,6 @@
         if (!module) return;
         play.disabled = true;
         play.textContent = 'STARTING';
-        status.textContent = 'Starting the engine…';
         handOver();
         try {
           // Bevy hands control to the browser's event loop by throwing; that
@@ -276,7 +351,6 @@
       try {
         const wasm = await download('./timefighter_bg.wasm');
         play.textContent = 'PREPARING';
-        status.textContent = 'Preparing the game…';
         // Compile now, so Start only has to run it.
         module = await WebAssembly.compile(wasm);
         ready();

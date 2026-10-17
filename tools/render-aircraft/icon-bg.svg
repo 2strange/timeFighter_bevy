@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180">
+  <!-- Background of the touch icon and favicon: evening sky, warm glow low. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17152b"/>
+      <stop offset="0.6" stop-color="#4a2f52"/>
+      <stop offset="1" stop-color="#d9773f"/>
+    </linearGradient>
+  </defs>
+  <rect width="180" height="180" fill="url(#sky)"/>
+</svg>

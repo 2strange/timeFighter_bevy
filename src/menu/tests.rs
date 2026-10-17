@@ -333,3 +333,20 @@ fn start_page_request_for_battle() {
     );
     assert!(!menu.open);
 }
+
+#[test]
+fn start_page_hands_over_the_light() {
+    let (selection, _) = after_start_page(
+        MenuSelection::default(),
+        Some("mode=hunt;level=easy;light=evening"),
+    );
+    assert_eq!(selection.lighting, crate::world::Lighting::Evening);
+    let (selection, _) = after_start_page(selection, Some("light=day"));
+    assert_eq!(selection.lighting, crate::world::Lighting::Day);
+    let (selection, _) = after_start_page(selection, Some("light=night"));
+    assert_eq!(
+        selection.lighting,
+        crate::world::Lighting::Day,
+        "unknown light ignored"
+    );
+}

@@ -1,0 +1,248 @@
+{
+  "mode-hunt": {
+    "width": 480,
+    "height": 270,
+    "fov": 26,
+    "view": {
+      "yaw": 40,
+      "pitch": 12
+    },
+    "aircraft": [
+      {
+        "model": "bf109k4",
+        "at": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -8,
+        "pitch": 4,
+        "roll": -22
+      }
+    ]
+  },
+  "mode-protect": {
+    "width": 480,
+    "height": 270,
+    "fov": 26,
+    "view": {
+      "yaw": 34,
+      "pitch": 14
+    },
+    "aircraft": [
+      {
+        "model": "ju390",
+        "at": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "model": "he177",
+        "at": [
+          -36,
+          -5,
+          28
+        ]
+      }
+    ]
+  },
+  "mode-battle": {
+    "width": 480,
+    "height": 270,
+    "fov": 26,
+    "view": {
+      "yaw": 34,
+      "pitch": 14
+    },
+    "aircraft": [
+      {
+        "model": "ju390",
+        "at": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "model": "he177",
+        "at": [
+          -36,
+          -5,
+          28
+        ]
+      },
+      {
+        "model": "bf109k4",
+        "at": [
+          34,
+          9,
+          -8
+        ],
+        "yaw": -6,
+        "roll": -24
+      },
+      {
+        "model": "me309",
+        "at": [
+          24,
+          14,
+          14
+        ],
+        "yaw": -4,
+        "roll": -16
+      }
+    ]
+  },
+  "og-image": {
+    "width": 1200,
+    "height": 630,
+    "format": "jpg",
+    "quality": 84,
+    "camera": {
+      "eye": [
+        0,
+        5,
+        0
+      ],
+      "target": [
+        0,
+        0.4,
+        -30
+      ],
+      "fov": 40
+    },
+    "light": {
+      "dir": [
+        -0.7,
+        0.55,
+        0.45
+      ],
+      "color": [
+        1.25,
+        0.98,
+        0.78
+      ],
+      "ambient": 0.4,
+      "sky": [
+        0.72,
+        0.72,
+        1.0
+      ]
+    },
+    "haze": {
+      "color": [
+        214,
+        128,
+        112
+      ],
+      "near": 60,
+      "far": 320,
+      "max": 0.55
+    },
+    "background": "og-sky.svg",
+    "overlay": "og-text.svg",
+    "aircraft": [
+      {
+        "model": "f14_tomcat",
+        "at": [
+          0,
+          0,
+          -30
+        ],
+        "yaw": 232,
+        "pitch": 14,
+        "roll": -46
+      },
+      {
+        "model": "ju390",
+        "at": [
+          -20,
+          8,
+          -220
+        ],
+        "yaw": 180,
+        "pitch": 2
+      },
+      {
+        "model": "he177",
+        "at": [
+          -95,
+          2,
+          -190
+        ],
+        "yaw": 178
+      },
+      {
+        "model": "bf109k4",
+        "at": [
+          70,
+          12,
+          -150
+        ],
+        "yaw": 190,
+        "roll": 20
+      },
+      {
+        "model": "me309",
+        "at": [
+          -62,
+          13,
+          -120
+        ],
+        "yaw": 172,
+        "roll": -16
+      }
+    ]
+  },
+  "apple-touch-icon": {
+    "width": 180,
+    "height": 180,
+    "format": "png",
+    "fov": 24,
+    "margin": 0.84,
+    "view": {
+      "yaw": 180,
+      "pitch": 80
+    },
+    "light": {
+      "dir": [
+        -0.3,
+        1.0,
+        0.2
+      ],
+      "color": [
+        1.45,
+        1.25,
+        1.05
+      ],
+      "ambient": 0.55,
+      "sky": [
+        0.9,
+        0.9,
+        1.05
+      ]
+    },
+    "background": "icon-bg.svg",
+    "aircraft": [
+      {
+        "model": "f14_tomcat",
+        "at": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -45
+      }
+    ],
+    "also": [
+      {
+        "name": "favicon-32",
+        "width": 32,
+        "height": 32,
+        "format": "png"
+      }
+    ]
+  }
+}
