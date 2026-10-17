@@ -24,6 +24,7 @@ use rows::{Action, Nav, Row, navigate};
 pub use selection::{CustomField, EnemyTab, MenuMode, MenuSelection, RowId, Section};
 
 use crate::{
+    audio::SoundSettings,
     combat::CombatKeys,
     flight::{KeyHelpAppExt, KeyHelpSection},
     game_state::{GameSettings, Pause, RestartRound, Round, RoundPhase, TriggerHold},
@@ -94,6 +95,7 @@ impl Plugin for MenuPlugin {
                         // The light preview applies in the same frame.
                         .before(LightingSystems),
                     sync_pause,
+                    follow_sound_toggle,
                     rebuild_menu,
                     fit_menu_to_window,
                     show_result_button,
@@ -138,9 +140,41 @@ fn prepare_first_round(
     selection: Res<MenuSelection>,
     mut settings: ResMut<GameSettings>,
     mut lighting: ResMut<Lighting>,
+    sound: Option<ResMut<SoundSettings>>,
 ) {
     *settings = selection.settings();
     *lighting = selection.lighting;
+    if let Some(mut sound) = sound {
+        apply_sound(&selection, &mut sound);
+    }
+}
+
+/// The menu's Sound row onto the sound: a volume, or off.
+fn apply_sound(selection: &MenuSelection, sound: &mut SoundSettings) {
+    match selection.sound_volume() {
+        Some(volume) => {
+            sound.enabled = true;
+            sound.volume = volume;
+        }
+        None => sound.enabled = false,
+    }
+}
+
+/// The sound switched with its key (N) shows in the Sound row, and is
+/// remembered like a choice in the menu.
+fn follow_sound_toggle(sound: Option<Res<SoundSettings>>, mut selection: ResMut<MenuSelection>) {
+    let Some(sound) = sound.filter(|s| s.is_changed()) else {
+        return;
+    };
+    let wanted = match (sound.enabled, selection.sound) {
+        (false, _) => 0,
+        (true, 0) => MenuSelection::sound_step(sound.volume),
+        (true, step) => step,
+    };
+    if selection.sound != wanted {
+        selection.sound = wanted;
+        storage::save(&selection.to_line());
+    }
 }
 
 #[derive(Component)]
@@ -225,6 +259,7 @@ fn menu_input(
     mut lighting: ResMut<Lighting>,
     mut restart: MessageWriter<RestartRound>,
     (mut hold, combat): (ResMut<TriggerHold>, Res<CombatKeys>),
+    mut sound: Option<ResMut<SoundSettings>>,
 ) {
     let rows = selection.rows();
     let cursor = rows.iter().position(|r| r.id == menu.cursor).unwrap_or(0);
@@ -252,9 +287,16 @@ fn menu_input(
         Action::Focus(row) => menu.cursor = row,
         Action::Select(row, index) => {
             menu.cursor = row;
-            if selection.select(row, index) && *lighting != selection.lighting {
+            let changed = selection.select(row, index);
+            if changed && *lighting != selection.lighting {
                 // Show the light at once; the menu sits over the city.
                 *lighting = selection.lighting;
+            }
+            if changed
+                && row == RowId::Sound
+                && let Some(sound) = sound.as_deref_mut()
+            {
+                apply_sound(&selection, sound);
             }
         }
         Action::Start => {

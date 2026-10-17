@@ -297,6 +297,9 @@ impl CustomField {
     }
 }
 
+/// Sound volumes offered (percent); 0 switches the sound off.
+pub const SOUND_STEPS: [u32; 5] = [0, 25, 50, 75, 100];
+
 /// The label of unlimited gun ammunition; the menu draws it as a symbol
 /// (the built-in font has only ASCII).
 pub const INFINITY: &str = "∞";
@@ -308,6 +311,7 @@ pub enum RowId {
     Difficulty,
     Custom(CustomField),
     Lighting,
+    Sound,
     /// The tab bar over the enemy values.
     Tabs,
     Start,
@@ -319,7 +323,7 @@ impl RowId {
         match self {
             RowId::Mode | RowId::Difficulty => Section::Top,
             RowId::Custom(field) => field.section(),
-            RowId::Lighting => Section::General,
+            RowId::Lighting | RowId::Sound => Section::General,
             RowId::Tabs => Section::TabBar,
             RowId::Start => Section::Bottom,
         }
@@ -396,6 +400,8 @@ pub struct MenuSelection {
     /// Custom starts from the level picked before).
     pub custom_edited: bool,
     pub lighting: Lighting,
+    /// Sound volume in percent, one of [`SOUND_STEPS`]; 0 is off.
+    pub sound: u32,
     /// The enemy tab last picked (see [`MenuSelection::active_tab`]).
     pub tab: EnemyTab,
 }
@@ -412,6 +418,8 @@ impl Default for MenuSelection {
             custom: Difficulty::Normal.params(),
             custom_edited: false,
             lighting: Lighting::Day,
+            // Near the sound's own default (0.8).
+            sound: 75,
             tab: EnemyTab::default(),
         }
     }
@@ -510,10 +518,12 @@ impl MenuSelection {
             rows.extend(fields(Section::Weapons));
             rows.extend(fields(Section::General));
             rows.push(self.lighting_row());
+            rows.push(self.sound_row());
             rows.push(self.tab_row());
             rows.extend(fields(Section::Tab(self.active_tab())));
         } else {
             rows.push(self.lighting_row());
+            rows.push(self.sound_row());
         }
         rows.push(Row {
             id: RowId::Start,
@@ -550,6 +560,45 @@ impl MenuSelection {
                 .position(|l| *l == self.lighting)
                 .unwrap_or(0),
         }
+    }
+
+    fn sound_row(&self) -> Row<RowId> {
+        Row {
+            id: RowId::Sound,
+            label: "Sound".into(),
+            choices: SOUND_STEPS
+                .iter()
+                .map(|&p| {
+                    Choice::new(if p == 0 {
+                        "Off".to_owned()
+                    } else {
+                        format!("{p}%")
+                    })
+                })
+                .collect(),
+            selected: SOUND_STEPS
+                .iter()
+                .position(|p| *p == self.sound)
+                .unwrap_or(0),
+        }
+    }
+
+    /// The sound settings this selection asks for (`None` leaves the
+    /// volume as it is when switched off).
+    pub fn sound_volume(&self) -> Option<f32> {
+        (self.sound > 0).then(|| self.sound as f32 / 100.0)
+    }
+
+    /// The volume step nearest to `volume` (0-1), never 0.
+    pub fn sound_step(volume: f32) -> u32 {
+        SOUND_STEPS[1..]
+            .iter()
+            .copied()
+            .min_by(|a, b| {
+                let d = |p: u32| (p as f32 / 100.0 - volume).abs();
+                d(*a).total_cmp(&d(*b))
+            })
+            .unwrap_or(75)
     }
 
     /// The tabs with the number of such enemies in the round; a tab the
@@ -620,6 +669,11 @@ impl MenuSelection {
                     self.lighting = *lighting;
                 }
             }
+            RowId::Sound => {
+                if let Some(sound) = SOUND_STEPS.get(index) {
+                    self.sound = *sound;
+                }
+            }
             RowId::Tabs => {
                 if let Some(tab) = EnemyTab::ALL.get(index).filter(|t| t.used_in(self.mode)) {
                     self.tab = *tab;
@@ -682,6 +736,7 @@ impl MenuSelection {
             format!("light={}", self.lighting.label().to_lowercase()),
             format!("edited={}", u8::from(self.custom_edited)),
             format!("tab={}", self.tab.key()),
+            format!("sound={}", self.sound),
         ];
         for field in CustomField::ALL {
             parts.push(format!("{}={}", field.key(), field.get(&self.custom)));
@@ -717,6 +772,11 @@ impl MenuSelection {
                     }
                 }
                 "edited" => selection.custom_edited = value == "1",
+                "sound" => {
+                    if let Some(sound) = value.parse().ok().filter(|p| SOUND_STEPS.contains(p)) {
+                        selection.sound = sound;
+                    }
+                }
                 "tab" => {
                     if let Some(tab) = EnemyTab::ALL.into_iter().find(|t| t.key() == value) {
                         selection.tab = tab;
@@ -985,6 +1045,20 @@ mod tests {
     }
 
     #[test]
+    fn sound_steps_are_stored_and_read_back() {
+        let mut selection = MenuSelection::default();
+        assert_eq!(selection.sound_volume(), Some(0.75));
+        selection.select(RowId::Sound, 0);
+        assert_eq!(selection.sound_volume(), None, "off");
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+        selection.select(RowId::Sound, 4);
+        assert_eq!(selection.sound_volume(), Some(1.0));
+        assert_eq!(MenuSelection::from_line("sound=33").sound, 75, "not a step");
+        assert_eq!(MenuSelection::sound_step(0.0), 25, "never off");
+        assert_eq!(MenuSelection::sound_step(0.8), 75);
+    }
+
+    #[test]
     fn gun_offers_unlimited_first_then_counts() {
         let mut selection = MenuSelection::default();
         // Easy shoots without limit.
@@ -1076,7 +1150,7 @@ mod tests {
     #[test]
     fn rows_come_in_sections_with_only_the_open_tab() {
         let mut selection = MenuSelection::default();
-        // Without Custom: mode, level, light, start.
+        // Without Custom: mode, level, light, sound, start.
         let ids = |s: &MenuSelection| s.rows().iter().map(|r| r.id).collect::<Vec<_>>();
         assert_eq!(
             ids(&selection),
@@ -1084,6 +1158,7 @@ mod tests {
                 RowId::Mode,
                 RowId::Difficulty,
                 RowId::Lighting,
+                RowId::Sound,
                 RowId::Start
             ]
         );
@@ -1098,7 +1173,7 @@ mod tests {
                 [
                     vec![Section::Top; 2],
                     vec![Section::Weapons; 4],
-                    vec![Section::General; 3],
+                    vec![Section::General; 4],
                     vec![Section::TabBar],
                     vec![Section::Tab(tab); if tab == EnemyTab::Fighters { 3 } else { 6 }],
                     vec![Section::Bottom],

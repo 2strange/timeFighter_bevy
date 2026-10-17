@@ -451,3 +451,29 @@ fn the_custom_menu_fits_a_low_laptop_window() {
         );
     }
 }
+
+#[test]
+fn the_sound_row_sets_the_volume_and_follows_the_n_key() {
+    let mut app = game();
+    app.world_mut()
+        .resource_mut::<MenuSelection>()
+        .select(RowId::Sound, 4);
+    go_to(&mut app, RowId::Sound);
+    let sound = |app: &App| *app.world().resource::<crate::audio::SoundSettings>();
+    // 100 %, two steps down: 50 %.
+    tap(&mut app, KeyCode::ArrowLeft);
+    tap(&mut app, KeyCode::ArrowLeft);
+    assert!(sound(&app).enabled);
+    assert!((sound(&app).volume - 0.5).abs() < 1e-6, "{:?}", sound(&app));
+    // On to 25 % and off: the volume stays at 25 % behind the switch.
+    tap(&mut app, KeyCode::ArrowLeft);
+    tap(&mut app, KeyCode::ArrowLeft);
+    assert!(!sound(&app).enabled);
+
+    // Switched on with its own key: the row shows the volume again.
+    app.world_mut()
+        .resource_mut::<crate::audio::SoundSettings>()
+        .enabled = true;
+    app.update();
+    assert_eq!(app.world().resource::<MenuSelection>().sound, 25);
+}
