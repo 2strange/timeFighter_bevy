@@ -58,6 +58,8 @@ pub enum CustomField {
     LockTime,
     /// Gun ammunition, unlimited as the first step.
     Gun,
+    /// The lead circle for the gun.
+    GunAssist,
     EnemySpeed,
     EnemyAccuracy,
     Enemies,
@@ -68,15 +70,16 @@ pub enum CustomField {
     BombersPerWave,
     WaveInterval,
     CityLoss,
-    Zeppelin,
+    Zeppelins,
 }
 
 impl CustomField {
     /// In menu order, section by section.
-    pub const ALL: [CustomField; 14] = [
+    pub const ALL: [CustomField; 15] = [
         CustomField::Missiles,
         CustomField::LockTime,
         CustomField::Gun,
+        CustomField::GunAssist,
         CustomField::EnemySpeed,
         CustomField::EnemyAccuracy,
         CustomField::Enemies,
@@ -87,12 +90,15 @@ impl CustomField {
         CustomField::BombersPerWave,
         CustomField::WaveInterval,
         CustomField::CityLoss,
-        CustomField::Zeppelin,
+        CustomField::Zeppelins,
     ];
 
     pub fn section(self) -> Section {
         match self {
-            CustomField::Missiles | CustomField::LockTime | CustomField::Gun => Section::Weapons,
+            CustomField::Missiles
+            | CustomField::LockTime
+            | CustomField::Gun
+            | CustomField::GunAssist => Section::Weapons,
             CustomField::EnemySpeed | CustomField::EnemyAccuracy => Section::General,
             CustomField::Enemies
             | CustomField::Pilots
@@ -102,7 +108,7 @@ impl CustomField {
             | CustomField::BombersPerWave
             | CustomField::WaveInterval
             | CustomField::CityLoss
-            | CustomField::Zeppelin => Section::Tab(EnemyTab::Bombers),
+            | CustomField::Zeppelins => Section::Tab(EnemyTab::Bombers),
         }
     }
 
@@ -112,7 +118,7 @@ impl CustomField {
             // Battle's total comes from its waves (bombers plus escort).
             CustomField::Enemies => mode == MenuMode::Hunt,
             // The end boss comes only in Battle.
-            CustomField::Zeppelin => mode == MenuMode::Battle,
+            CustomField::Zeppelins => mode == MenuMode::Battle,
             _ => true,
         }
     }
@@ -128,11 +134,12 @@ impl CustomField {
             CustomField::Attackers => "Attacking at once",
             CustomField::LockTime => "Lock time",
             CustomField::Gun => "Gun",
+            CustomField::GunAssist => "Gun assist",
             CustomField::BomberWaves => "Waves",
             CustomField::BombersPerWave => "Bombers per wave",
             CustomField::WaveInterval => "Interval",
             CustomField::CityLoss => "City loss",
-            CustomField::Zeppelin => "Zeppelin at the end",
+            CustomField::Zeppelins => "Zeppelins",
         }
     }
 
@@ -148,11 +155,13 @@ impl CustomField {
             CustomField::LockTime => "lock",
             // A new key: the old "gun" (unlimited 0/1) would read wrongly.
             CustomField::Gun => "mg",
+            CustomField::GunAssist => "assist",
             CustomField::BomberWaves => "waves",
             CustomField::BombersPerWave => "bombers",
             CustomField::WaveInterval => "interval",
             CustomField::CityLoss => "loss",
-            CustomField::Zeppelin => "zeppelin",
+            // A new key: the old "zeppelin" was a switch.
+            CustomField::Zeppelins => "zeppelins",
         }
     }
 
@@ -183,13 +192,14 @@ impl CustomField {
                 200., 210., 220., 230., 240., 250., 260., 270., 280., 290., 300.,
             ],
             CustomField::CityLoss => &[0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6],
-            CustomField::Zeppelin => &[0., 1., 2., 3.],
+            CustomField::Zeppelins => &[0., 1., 2., 3.],
+            CustomField::GunAssist => &[0., 1.],
         }
     }
 
     fn step_label(self, value: f32) -> String {
         match self {
-            CustomField::Zeppelin => format!("{value:.0}"),
+            CustomField::GunAssist => if value > 0.5 { "On" } else { "Off" }.into(),
             CustomField::Gun if value < 0.5 => INFINITY.into(),
             CustomField::Pilots => PILOT_MIXES
                 .get(value.round() as usize)
@@ -225,7 +235,8 @@ impl CustomField {
             CustomField::BombersPerWave => params.bombers_per_wave as f32,
             CustomField::WaveInterval => params.wave_interval,
             CustomField::CityLoss => params.city_loss,
-            CustomField::Zeppelin => params.zeppelins as f32,
+            CustomField::Zeppelins => params.zeppelins as f32,
+            CustomField::GunAssist => f32::from(u8::from(params.gun_assist)),
         }
     }
 
@@ -257,7 +268,8 @@ impl CustomField {
             CustomField::BombersPerWave => params.bombers_per_wave = value.round() as u32,
             CustomField::WaveInterval => params.wave_interval = value,
             CustomField::CityLoss => params.city_loss = value,
-            CustomField::Zeppelin => params.zeppelins = value.round() as u32,
+            CustomField::Zeppelins => params.zeppelins = value.round() as u32,
+            CustomField::GunAssist => params.gun_assist = value > 0.5,
         }
     }
 
@@ -664,8 +676,6 @@ impl MenuSelection {
         for field in CustomField::ALL {
             parts.push(format!("{}={}", field.key(), field.get(&self.custom)));
         }
-        // Not a menu row yet; kept so a custom level survives a reload.
-        parts.push(format!("assist={}", u8::from(self.custom.gun_assist)));
         parts.join(";")
     }
 
@@ -697,7 +707,6 @@ impl MenuSelection {
                     }
                 }
                 "edited" => selection.custom_edited = value == "1",
-                "assist" => selection.custom.gun_assist = value == "1",
                 "tab" => {
                     if let Some(tab) = EnemyTab::ALL.into_iter().find(|t| t.key() == value) {
                         selection.tab = tab;
@@ -722,6 +731,7 @@ impl MenuSelection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_state::MAX_ZEPPELINS;
 
     #[test]
     fn default_is_normal_hunt_by_day() {
@@ -772,7 +782,7 @@ mod tests {
         assert!(!has(&selection, CustomField::Enemies));
         assert!(selection.switch_tab(1));
         assert!(has(&selection, CustomField::BomberWaves));
-        assert!(has(&selection, CustomField::Zeppelin));
+        assert!(has(&selection, CustomField::Zeppelins));
         assert!(!has(&selection, CustomField::FlightSize));
         // Custom starts from Normal's values for Battle.
         assert_eq!(
@@ -806,10 +816,10 @@ mod tests {
         let has = |s: &MenuSelection, f| s.rows().iter().any(|r| r.id == RowId::Custom(f));
         assert!(!has(&selection, CustomField::BomberWaves));
         assert!(has(&selection, CustomField::Missiles));
-        assert!(!has(&selection, CustomField::Zeppelin));
+        assert!(!has(&selection, CustomField::Zeppelins));
 
         selection.select(RowId::Mode, 1);
-        assert!(!has(&selection, CustomField::Zeppelin), "Battle only");
+        assert!(!has(&selection, CustomField::Zeppelins), "Battle only");
         for field in [
             CustomField::BomberWaves,
             CustomField::BombersPerWave,
@@ -893,7 +903,8 @@ mod tests {
                 CustomField::BombersPerWave => (1.0, 8.0),
                 CustomField::WaveInterval => (60.0, 300.0),
                 CustomField::CityLoss => (0.1, 0.6),
-                CustomField::Zeppelin => (0.0, 3.0),
+                CustomField::Zeppelins => (0.0, MAX_ZEPPELINS as f32),
+                CustomField::GunAssist => (0.0, 1.0),
             };
             assert!(lo >= min && hi <= max, "{field:?}");
             assert!(
@@ -937,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn zeppelin_can_be_switched_on_in_an_easy_battle() {
+    fn zeppelins_can_be_added_to_an_easy_battle() {
         let mut selection = MenuSelection::default();
         selection.select(RowId::Mode, 2);
         selection.select(RowId::Difficulty, 1);
@@ -946,11 +957,11 @@ mod tests {
         assert_eq!(selection.custom.zeppelins, 0);
         assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
 
-        selection.select(RowId::Custom(CustomField::Zeppelin), 1);
+        selection.select(RowId::Custom(CustomField::Zeppelins), 3);
         let Difficulty::Custom(params) = selection.settings().difficulty else {
             panic!("custom expected");
         };
-        assert_eq!(params.zeppelins, 1);
+        assert_eq!(params.zeppelins, 3);
         assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
     }
 
@@ -982,6 +993,24 @@ mod tests {
         selection.select(RowId::Custom(CustomField::Gun), 0);
         assert!(selection.custom.unlimited_gun);
         assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+    }
+
+    #[test]
+    fn gun_assist_follows_the_level_and_can_be_switched() {
+        let mut selection = MenuSelection::default();
+        // Easy aims for you, Normal does not.
+        selection.select(RowId::Difficulty, 1);
+        selection.select(RowId::Difficulty, CUSTOM_LEVEL);
+        assert!(selection.custom.gun_assist);
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+
+        selection.select(RowId::Custom(CustomField::GunAssist), 0);
+        let Difficulty::Custom(params) = selection.settings().difficulty else {
+            panic!("custom expected");
+        };
+        assert!(!params.gun_assist);
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+        assert!(!Difficulty::Normal.params().gun_assist);
     }
 
     #[test]
@@ -1049,7 +1078,7 @@ mod tests {
                 sections,
                 [
                     vec![Section::Top; 2],
-                    vec![Section::Weapons; 3],
+                    vec![Section::Weapons; 4],
                     vec![Section::General; 3],
                     vec![Section::TabBar],
                     vec![Section::Tab(tab); if tab == EnemyTab::Fighters { 3 } else { 5 }],
