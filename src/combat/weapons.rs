@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
 use super::{
-    AircraftVelocity, CombatKeys, CombatRng, GunSpec, Health, LockOn, LockState, MissileSpec,
-    ShotFired, Team,
+    AircraftVelocity, CombatKeys, CombatRng, DryFire, GunSpec, Health, LockOn, LockState,
+    MissileSpec, ShotFired, Team,
 };
 use crate::{
     flight::PlayerAircraft,
@@ -179,6 +179,7 @@ pub(super) fn fire_guns(
     time: Res<Time>,
     mut rng: ResMut<CombatRng>,
     mut shots: MessageWriter<ShotFired>,
+    mut dry: MessageWriter<DryFire>,
     mut shooters: Query<(
         Entity,
         &mut Gun,
@@ -202,6 +203,10 @@ pub(super) fn fire_guns(
             if let Some(ammo) = gun.ammo.as_mut() {
                 if *ammo == 0 {
                     gun.cooldown = 0.0;
+                    dry.write(DryFire {
+                        shooter,
+                        weapon: Weapon::Gun,
+                    });
                     break;
                 }
                 *ammo -= 1;
@@ -231,6 +236,7 @@ pub(super) fn launch_missiles(
     mut commands: Commands,
     time: Res<Time>,
     mut shots: MessageWriter<ShotFired>,
+    mut dry: MessageWriter<DryFire>,
     mut launchers: Query<(
         Entity,
         &mut MissileRack,
@@ -244,7 +250,14 @@ pub(super) fn launch_missiles(
     let dt = frame_dt(&time);
     for (shooter, mut rack, mut trigger, team, transform, velocity, mut lock) in &mut launchers {
         rack.reload = (rack.reload - dt).max(0.0);
-        if !std::mem::take(&mut trigger.missile) || rack.count == 0 || rack.reload > 0.0 {
+        if !std::mem::take(&mut trigger.missile) || rack.reload > 0.0 {
+            continue;
+        }
+        if rack.count == 0 {
+            dry.write(DryFire {
+                shooter,
+                weapon: Weapon::Missile,
+            });
             continue;
         }
         rack.count -= 1;

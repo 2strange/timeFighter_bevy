@@ -206,7 +206,17 @@ fn gun_spends_ammunition_at_its_rate_and_stops_when_empty() {
     for _ in 0..30 {
         app.update();
         assert!(read::<ShotFired>(&app).is_empty(), "empty gun fired");
+        // A dry click instead, every frame the trigger is held.
+        let dry = read::<super::DryFire>(&app);
+        assert_eq!(dry.len(), 1);
+        assert_eq!((dry[0].shooter, dry[0].weapon), (jet, Weapon::Gun));
     }
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .release(KeyCode::Space);
+    app.update();
+    app.update();
+    assert!(read::<super::DryFire>(&app).is_empty());
 }
 
 #[test]
@@ -382,6 +392,13 @@ fn missile_racks_hold_a_limited_number() {
         .iter(app.world())
         .count();
     assert_eq!(launched as u32, cfg.player_missiles);
+
+    // One more request on the empty rack: a refusal, nothing launched.
+    launch_at(&mut app, jet, None);
+    app.update();
+    let dry = read::<super::DryFire>(&app);
+    assert_eq!(dry.len(), 1);
+    assert_eq!(dry[0].weapon, Weapon::Missile);
 }
 
 #[test]

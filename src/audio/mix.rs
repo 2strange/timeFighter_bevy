@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use super::{Sound, SoundCue};
 use crate::{
     ai::{Enemy, EnemyKind},
-    combat::{GoingDown, LockOn, LockState, Missile},
+    combat::{GoingDown, LockOn, LockState, Missile, MissileRack},
     flight::{FlightConfig, FlightInput, FlightState, PlayerAircraft},
     game_state::{Pause, Round},
 };
@@ -35,6 +35,11 @@ const AUDIBLE: f32 = 0.02;
 const GUN_HOLD: f32 = 0.12;
 /// Enemy gun bursts are heard at most this often (s) ...
 const ENEMY_GUN_INTERVAL: f32 = 0.25;
+/// An empty gun clicks at most this often while the trigger is held (s).
+const GUN_EMPTY_INTERVAL: f32 = 0.25;
+/// The search tone's volume once the missiles are gone: it still helps to
+/// aim the gun, quieter.
+const EMPTY_SEARCH_VOLUME: f32 = 0.7;
 /// ... and hits on the player's jet (a volley stays a rattle, not a mush),
 /// each a little higher or lower than the last.
 pub const PLAYER_HIT_INTERVAL: f32 = 0.07;
@@ -60,10 +65,12 @@ pub enum Clip {
     Click,
     Music,
     PlayerHit,
+    GunEmpty,
+    MissileEmpty,
 }
 
 impl Clip {
-    pub const ALL: [Clip; 16] = [
+    pub const ALL: [Clip; 18] = [
         Clip::Engine,
         Clip::Afterburner,
         Clip::Gun,
@@ -80,6 +87,8 @@ impl Clip {
         Clip::Click,
         Clip::Music,
         Clip::PlayerHit,
+        Clip::GunEmpty,
+        Clip::MissileEmpty,
     ];
 
     /// Asset path. Short loops are WAV: compressed loops click at the seam.
@@ -101,6 +110,8 @@ impl Clip {
             Clip::Click => "audio/click_kenney_click_002.ogg",
             Clip::Music => "audio/music_drive.ogg",
             Clip::PlayerHit => "audio/player_hit.ogg",
+            Clip::GunEmpty => "audio/gun_empty.ogg",
+            Clip::MissileEmpty => "audio/missile_empty.ogg",
         }
     }
 }
@@ -244,6 +255,7 @@ struct MixState {
     gun_hold: f32,
     enemy_gun_rest: f32,
     player_hit_rest: f32,
+    gun_empty_rest: f32,
     /// Alternates the two small explosions.
     explosions: u32,
     player_hits: u32,
@@ -269,6 +281,7 @@ fn mix(
             Option<&FlightState>,
             Option<&FlightInput>,
             Option<&LockOn>,
+            Option<&MissileRack>,
         ),
         With<PlayerAircraft>,
     >,
@@ -289,6 +302,7 @@ fn mix(
     state.gun_hold -= dt;
     state.enemy_gun_rest -= dt;
     state.player_hit_rest -= dt;
+    state.gun_empty_rest -= dt;
     if master <= 0.0 {
         return;
     }
@@ -317,7 +331,7 @@ fn mix(
         return;
     }
 
-    let Ok((jet, transform, state_now, input, lock)) = player.single() else {
+    let Ok((jet, transform, state_now, input, lock, rack)) = player.single() else {
         return;
     };
     let listener = transform.translation;
@@ -348,20 +362,29 @@ fn mix(
     }
 
     // Seeker: a search tone while a target is in the cone, the lock tone
-    // once locked.
-    match lock.map(|l| l.state) {
-        Some(LockState::Tracking { .. }) => out.loops.push(LoopMix {
-            voice: Voice::LockSearch,
-            clip: Clip::LockSearch,
-            volume: master * 0.35,
-            speed: 1.0,
-        }),
-        Some(LockState::Locked { .. }) => out.loops.push(LoopMix {
+    // once locked. Without missiles no lock tone: the search tone goes on
+    // over a lock too, quieter, as a gun aid.
+    let armed = rack.is_none_or(|r| r.count > 0);
+    let search = LoopMix {
+        voice: Voice::LockSearch,
+        clip: Clip::LockSearch,
+        volume: master * 0.35,
+        speed: 1.0,
+    };
+    match (lock.map(|l| l.state), armed) {
+        (Some(LockState::Tracking { .. }), true) => out.loops.push(search),
+        (Some(LockState::Locked { .. }), true) => out.loops.push(LoopMix {
             voice: Voice::LockTone,
             clip: Clip::LockTone,
             volume: master * 0.4,
             speed: 1.0,
         }),
+        (Some(LockState::Tracking { .. } | LockState::Locked { .. }), false) => {
+            out.loops.push(LoopMix {
+                volume: search.volume * EMPTY_SEARCH_VOLUME,
+                ..search
+            });
+        }
         _ => {}
     }
     if missiles.iter().any(|m| m.target == Some(jet)) {
@@ -428,6 +451,11 @@ fn mix(
                 out.shots.push(shot(Clip::ExplosionBig, 1.0));
             }
             Sound::BombImpact => out.shots.push(shot(Clip::Bomb, 0.8)),
+            Sound::GunEmpty if state.gun_empty_rest <= 0.0 => {
+                state.gun_empty_rest = GUN_EMPTY_INTERVAL;
+                out.shots.push(shot(Clip::GunEmpty, 0.7));
+            }
+            Sound::MissileEmpty => out.shots.push(shot(Clip::MissileEmpty, 0.6)),
             Sound::HitPlayer if state.player_hit_rest <= 0.0 => {
                 state.player_hit_rest = PLAYER_HIT_INTERVAL;
                 // In the cockpit: as loud wherever the round struck.
@@ -443,6 +471,7 @@ fn mix(
             | Sound::LockAcquired
             | Sound::HitEnemy
             | Sound::HitPlayer
+            | Sound::GunEmpty
             | Sound::Victory
             | Sound::Defeat => {}
         }

@@ -11,15 +11,15 @@ mod tests;
 use bevy::{platform::collections::HashMap, prelude::*};
 
 pub use mix::{
-    Clip, LoopMix, MAX_BOMBER_VOICES, MAX_ZEPPELIN_VOICES, OneShot, SOUND_TOGGLE_KEY, SoundMix,
-    SoundMixPlugin, SoundSettings, Voice,
+    AudioUnlocked, Clip, LoopMix, MAX_BOMBER_VOICES, MAX_ZEPPELIN_VOICES, OneShot,
+    SOUND_TOGGLE_KEY, SoundMix, SoundMixPlugin, SoundSettings, Voice,
 };
 
 use crate::{
     ai::{Enemy, EnemyKind},
     combat::{
-        BombImpact, CombatSystems, Destroyed, GoingDown, Hit, LockOn, LockState, ShotFired, Team,
-        Weapon,
+        BombImpact, CombatSystems, Destroyed, DryFire, GoingDown, Hit, LockOn, LockState,
+        ShotFired, Team, Weapon,
     },
     flight::{KeyHelpAppExt, KeyHelpSection, PlayerAircraft},
     game_state::{Outcome, Round, RoundPhase, RoundSystems},
@@ -53,6 +53,10 @@ pub enum Sound {
     /// A burning wreck hits the ground.
     WreckImpact,
     BombImpact,
+    /// The player pulled the trigger on an empty gun ...
+    GunEmpty,
+    /// ... or asked for a missile with none left.
+    MissileEmpty,
     Victory,
     Defeat,
 }
@@ -75,8 +79,9 @@ impl Plugin for SoundHooksPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SoundCue>()
             .init_resource::<KnownEnemies>()
-            // The bomb system registers it too.
+            // The combat plugin registers them too.
             .add_message::<BombImpact>()
+            .add_message::<DryFire>()
             .add_systems(
                 Update,
                 (
@@ -120,6 +125,8 @@ fn combat_cues(
     mut hits: MessageReader<Hit>,
     mut destroyed: MessageReader<Destroyed>,
     mut bombs: MessageReader<BombImpact>,
+    mut dry: MessageReader<DryFire>,
+    jets: Query<(), With<PlayerAircraft>>,
     mut known: ResMut<KnownEnemies>,
     alive: Query<(), With<Enemy>>,
     lock: Query<&LockOn, (With<PlayerAircraft>, Changed<LockOn>)>,
@@ -162,6 +169,15 @@ fn combat_cues(
                 Sound::Explosion
             },
             position: Some(event.position),
+        });
+    }
+    for event in dry.read().filter(|d| jets.contains(d.shooter)) {
+        cues.write(SoundCue {
+            sound: match event.weapon {
+                Weapon::Gun => Sound::GunEmpty,
+                Weapon::Missile => Sound::MissileEmpty,
+            },
+            position: None,
         });
     }
     for bomb in bombs.read() {

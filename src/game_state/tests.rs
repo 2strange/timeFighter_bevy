@@ -768,12 +768,23 @@ fn missiles_are_counted_per_mode() {
         .iter()
         .map(|d| d.params_for(GameMode::Protect).missiles)
         .collect();
-    assert_eq!(protect, vec![24, 16, 16, 12, 12]);
+    // Two missiles a bomber, times 2.0 / 1.5 / 0.9 / 0.75, rounded up;
+    // Insane keeps its 12.
+    assert_eq!(protect, vec![32, 24, 22, 18, 12]);
+    let hunt: Vec<u32> = Difficulty::PRESETS
+        .iter()
+        .map(|d| d.params_for(GameMode::Hunt).missiles)
+        .collect();
+    // One a fighter: 6, 6, 10, 12 fighters; Insane keeps its 8.
+    assert_eq!(hunt, vec![12, 9, 9, 9, 8]);
     for difficulty in Difficulty::PRESETS {
         assert_eq!(
             difficulty.params_for(GameMode::Hunt),
-            difficulty.params(),
-            "Hunt unchanged"
+            crate::game_state::DifficultyParams {
+                missiles: difficulty.params_for(GameMode::Hunt).missiles,
+                ..difficulty.params()
+            },
+            "only the missiles differ"
         );
     }
     let custom = Difficulty::Custom(crate::game_state::DifficultyParams {
@@ -790,7 +801,7 @@ fn a_protect_round_arms_the_jet_with_the_protect_missiles() {
         protect(Difficulty::Normal),
         true,
     );
-    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 16);
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 22);
     app.insert_resource(GameSettings {
         difficulty: Difficulty::Normal,
         ..default()
@@ -799,7 +810,7 @@ fn a_protect_round_arms_the_jet_with_the_protect_missiles() {
     app.update();
     assert_eq!(
         app.world().get::<MissileRack>(jet).unwrap().count,
-        8,
+        9,
         "Hunt"
     );
 }
@@ -953,7 +964,23 @@ fn battle_missiles_follow_the_two_for_a_bomber_one_for_a_fighter_rule() {
         .iter()
         .map(|d| d.params_for(GameMode::Battle).missiles)
         .collect();
-    assert_eq!(missiles, vec![24, 20, 32, 20, 36]);
+    // SE 2×(8+2) = 20 needed, Easy the same, Normal 24 + 6 + 9 = 39,
+    // Hard 24 + 12 + 9 = 45; times 2.0 / 1.5 / 0.9 / 0.75. Insane keeps 36.
+    let needed: Vec<u32> = Difficulty::PRESETS
+        .iter()
+        .map(|d| Mission::battle(*d).missiles_needed())
+        .collect();
+    assert_eq!(needed, vec![20, 20, 39, 45, 75]);
+    assert_eq!(missiles, vec![40, 30, 36, 34, 36]);
+    // Carrier fighters are gun work: the count ignores the hangar.
+    let without_hangar = Difficulty::Custom(crate::game_state::DifficultyParams {
+        zeppelin_fighters: 0,
+        ..default()
+    });
+    assert_eq!(
+        Mission::battle(without_hangar).missiles_needed(),
+        Mission::battle(Difficulty::Custom(default())).missiles_needed()
+    );
 }
 
 #[test]
@@ -963,7 +990,7 @@ fn a_battle_round_is_won_when_everything_is_down() {
         battle(Difficulty::SuperEasy),
         true,
     );
-    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 24);
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 40);
     let mut kinds: Vec<bool> = app
         .world_mut()
         .query::<&Enemy>()
@@ -1311,7 +1338,7 @@ fn levels_set_gun_ammunition_speed_and_flights() {
             (None, 0.6, 3, 1),
             (Some(2_000), 0.75, 5, 2),
             (Some(1_000), 0.9, 3, 3),
-            (Some(500), 1.0, 4, 4),
+            (Some(1_000), 1.0, 4, 4),
         ]
     );
     assert_eq!(Difficulty::SuperEasy.params().bomber_waves, 2);
@@ -1320,7 +1347,7 @@ fn levels_set_gun_ammunition_speed_and_flights() {
     for (difficulty, ammo) in [
         (Difficulty::SuperEasy, None),
         (Difficulty::Normal, Some(2_000)),
-        (Difficulty::Insane, Some(500)),
+        (Difficulty::Insane, Some(1_000)),
     ] {
         let (mut app, jet) = app();
         app.insert_resource(GameSettings {

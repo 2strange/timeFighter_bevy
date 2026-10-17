@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     ai::{Enemy, EnemyKind},
-    combat::{CombatConfig, LockOn, LockState, Missile},
+    combat::{CombatConfig, LockOn, LockState, Missile, MissileRack},
     flight::{FlightConfig, FlightInput, FlightState, PlayerAircraft},
     game_state::{Pause, Round, RoundPhase},
 };
@@ -326,4 +326,46 @@ fn explosions_bombs_and_guns() {
         app.update();
     }
     assert!(mix(&app).voice(Voice::Gun).is_none());
+}
+
+#[test]
+fn without_missiles_no_lock_tone_and_a_quieter_search_tone() {
+    let (mut app, jet) = unlocked_app();
+    let target = app.world_mut().spawn_empty().id();
+    app.world_mut()
+        .entity_mut(jet)
+        .insert(MissileRack::new(CombatConfig::default().missile, 2));
+    app.world_mut().get_mut::<LockOn>(jet).unwrap().state = LockState::Tracking {
+        target,
+        progress: 0.5,
+    };
+    app.update();
+    let armed = mix(&app).voice(Voice::LockSearch).unwrap().volume;
+
+    app.world_mut().get_mut::<MissileRack>(jet).unwrap().count = 0;
+    app.update();
+    let empty = mix(&app).voice(Voice::LockSearch).unwrap().volume;
+    assert!((empty / armed - 0.7).abs() < 1e-3, "{armed} {empty}");
+    // Locked: still only the search tone.
+    app.world_mut().get_mut::<LockOn>(jet).unwrap().state = LockState::Locked { target };
+    app.update();
+    assert!(mix(&app).voice(Voice::LockTone).is_none());
+    assert_eq!(mix(&app).voice(Voice::LockSearch).unwrap().volume, empty);
+}
+
+#[test]
+fn empty_weapons_answer_with_a_refusal_and_a_dry_click() {
+    let (mut app, _) = unlocked_app();
+    cue(&mut app, Sound::MissileEmpty, None);
+    app.update();
+    let clips = |app: &App| mix(app).shots.iter().map(|s| s.clip).collect::<Vec<_>>();
+    assert_eq!(clips(&app), vec![Clip::MissileEmpty]);
+    // The held trigger clicks a few times a second, not every frame.
+    let mut clicks = 0;
+    for _ in 0..60 {
+        cue(&mut app, Sound::GunEmpty, None);
+        app.update();
+        clicks += clips(&app).iter().filter(|c| **c == Clip::GunEmpty).count();
+    }
+    assert!((3..=5).contains(&clicks), "{clicks} clicks in a second");
 }
