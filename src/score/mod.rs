@@ -46,6 +46,7 @@ use crate::{
     combat::{DestroyCause, Destroyed, GoingDown, MissileRack, Team},
     flight::PlayerAircraft,
     game_state::{GameSettings, Mission, Outcome, Pause, Round, RoundPhase, RoundSystems},
+    mobile::MobileInput,
     world::{CityLayout, damage::CityHealth},
 };
 
@@ -310,6 +311,7 @@ fn submit(state: &mut ScoreState, store: &mut Store) {
 /// Keys on the result screen, before the rest of the game sees them:
 /// while the dialog is open it gets every key, and nothing else gets any
 /// key or click.
+#[allow(clippy::too_many_arguments)]
 fn result_keys(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mouse: Option<ResMut<ButtonInput<MouseButton>>>,
@@ -317,13 +319,32 @@ fn result_keys(
     pause: Option<Res<Pause>>,
     mut state: ResMut<ScoreState>,
     mut store: ResMut<Store>,
+    mobile: Option<Res<MobileInput>>,
+    mut seen: Local<Option<(u32, u32)>>,
 ) {
+    // The phone's own field (on-screen keyboard): its text, and its Enter
+    // and cancel taps as counters.
+    let taps = mobile.as_ref().map(|m| (m.name_ok, m.name_cancel));
+    let before = seen.unwrap_or(taps.unwrap_or_default());
+    *seen = taps;
     let menu_open = pause.is_some_and(|p| p.menu);
     if state.result.is_none() || menu_open {
         typed.clear();
         return;
     }
     if state.dialog {
+        if let Some(text) = mobile.as_ref().and_then(|m| m.name.as_deref())
+            && state.field.text() != text
+        {
+            state.field = NameField::with_text(text);
+        }
+        if let Some((ok, cancel)) = taps {
+            if ok > before.0 && state.field.name().is_some() {
+                submit(&mut state, &mut store);
+            } else if cancel > before.1 {
+                state.dialog = false;
+            }
+        }
         for event in typed.read() {
             if !event.state.is_pressed() {
                 continue;
