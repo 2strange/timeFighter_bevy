@@ -5,9 +5,7 @@ use bevy::prelude::*;
 
 use super::rows::{Choice, Row};
 use crate::{
-    game_state::{
-        Difficulty, DifficultyParams, GameMode, GameSettings, Mission, MissionConfig, PilotMix,
-    },
+    game_state::{Difficulty, DifficultyParams, GameMode, GameSettings, Mission, PilotMix},
     world::Lighting,
 };
 
@@ -431,7 +429,7 @@ impl MenuSelection {
 
     /// Fighters and bombers in the round these settings make.
     pub fn enemy_counts(&self) -> (u32, u32) {
-        let mission = Mission::from_settings(&self.settings(), &MissionConfig::default());
+        let mission = Mission::from_settings(&self.settings());
         mission
             .waves
             .iter()
@@ -1016,7 +1014,7 @@ mod tests {
         selection.select(RowId::Mode, 2);
         assert_eq!(enabled(&selection), [true, true]);
         let (fighters, bombers) = selection.enemy_counts();
-        let mission = Mission::from_settings(&selection.settings(), &MissionConfig::default());
+        let mission = Mission::from_settings(&selection.settings());
         assert_eq!(fighters + bombers, mission.enemy_count());
         assert!(fighters > 0 && bombers > 0);
         assert!(selection.switch_tab(1));
