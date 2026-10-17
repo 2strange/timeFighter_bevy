@@ -136,8 +136,11 @@ fn custom_values_reach_the_settings() {
         tap(&mut app, KeyCode::ArrowRight);
     }
     assert!(app.world().resource::<MenuSelection>().is_custom());
-    go_to(&mut app, RowId::Custom(CustomField::UnlimitedGun));
-    tap(&mut app, KeyCode::ArrowRight);
+    // Normal's 2000 rounds, four steps left: unlimited.
+    go_to(&mut app, RowId::Custom(CustomField::Gun));
+    for _ in 0..4 {
+        tap(&mut app, KeyCode::ArrowLeft);
+    }
     go_to(&mut app, RowId::Custom(CustomField::Enemies));
     tap(&mut app, KeyCode::ArrowLeft);
     tap(&mut app, KeyCode::Enter);
@@ -349,4 +352,102 @@ fn start_page_hands_over_the_light() {
         crate::world::Lighting::Day,
         "unknown light ignored"
     );
+}
+
+#[test]
+fn q_and_e_switch_the_enemy_tab_and_the_cursor_follows() {
+    let mut app = game();
+    {
+        let mut selection = app.world_mut().resource_mut::<MenuSelection>();
+        selection.select(RowId::Mode, 2);
+        selection.select(RowId::Difficulty, 5);
+    }
+    app.update();
+    go_to(&mut app, RowId::Custom(CustomField::FlightSize));
+    tap(&mut app, KeyCode::KeyE);
+    let tab = |app: &App| app.world().resource::<MenuSelection>().active_tab();
+    assert_eq!(tab(&app), EnemyTab::Bombers);
+    // The fighters' rows are gone: the cursor waits on the tab bar.
+    assert_eq!(menu(&app).cursor, RowId::Tabs);
+    tap(&mut app, KeyCode::KeyQ);
+    assert_eq!(tab(&app), EnemyTab::Fighters);
+    tap(&mut app, KeyCode::ArrowRight);
+    assert_eq!(tab(&app), EnemyTab::Bombers);
+    go_to(&mut app, RowId::Custom(CustomField::Zeppelin));
+}
+
+#[test]
+fn tabs_are_buttons_and_unused_ones_cannot_be_clicked() {
+    let mut app = game();
+    app.world_mut()
+        .resource_mut::<MenuSelection>()
+        .select(RowId::Difficulty, 5);
+    app.update();
+    let tabs: Vec<MenuButton> = app
+        .world_mut()
+        .query::<&MenuButton>()
+        .iter(app.world())
+        .copied()
+        .filter(|b| b.row == RowId::Tabs)
+        .collect();
+    // Hunt: fighters open, bombers greyed out.
+    assert_eq!(tabs.len(), 2);
+    assert!(tabs.iter().any(|b| b.index == Some(0) && b.enabled));
+    assert!(tabs.iter().any(|b| b.index == Some(1) && !b.enabled));
+}
+
+#[test]
+fn the_panel_shrinks_only_when_the_window_is_too_small() {
+    let window = Vec2::new(1280.0, 700.0);
+    assert_eq!(fit_scale(Vec2::new(700.0, 600.0), window), 1.0);
+    let scale = fit_scale(Vec2::new(700.0, 800.0), window);
+    assert!((scale * 800.0 - 0.96 * 700.0).abs() < 0.01);
+    assert!(fit_scale(Vec2::new(1400.0, 300.0), window) < 1.0);
+    // Before the first layout.
+    assert_eq!(fit_scale(Vec2::ZERO, window), 1.0);
+}
+
+/// The panel's laid-out size (logical px) in a 1280 x 700 window.
+fn panel_size(setup: impl FnOnce(&mut MenuSelection)) -> Vec2 {
+    let mut app = headless_app(AppModePlugin(AppMode::Game));
+    app.world_mut().spawn((
+        Window {
+            resolution: (1280, 700).into(),
+            ..default()
+        },
+        PrimaryWindow,
+    ));
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        50,
+    )));
+    setup(&mut app.world_mut().resource_mut::<MenuSelection>());
+    for _ in 0..4 {
+        app.update();
+    }
+    let (node, transform) = app
+        .world_mut()
+        .query_filtered::<(&ComputedNode, &UiTransform), With<MenuPanel>>()
+        .single(app.world())
+        .unwrap();
+    // Fits as it is: not scaled down.
+    assert_eq!(transform.scale, Vec2::ONE);
+    node.size() * node.inverse_scale_factor()
+}
+
+#[test]
+fn the_custom_menu_fits_a_low_laptop_window() {
+    // Every mode with its tabs; 600 px leaves room for the browser's bars
+    // in a 700 px window.
+    for (mode, tab) in [(0, 0), (1, 1), (2, 0), (2, 1)] {
+        let size = panel_size(|s| {
+            s.select(RowId::Mode, mode);
+            s.select(RowId::Difficulty, 5);
+            s.select(RowId::Tabs, tab);
+        });
+        assert!(size.y > 300.0, "laid out: {size:?}");
+        assert!(
+            size.y <= 600.0 && size.x <= 900.0,
+            "mode {mode} tab {tab}: {size:?}"
+        );
+    }
 }
