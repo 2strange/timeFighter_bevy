@@ -87,7 +87,13 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_hud)
             // Before the weapons read the mouse: a click on the switch is
             // not a burst.
-            .add_systems(PreUpdate, click_sound_switch.after(InputSystems))
+            .add_systems(
+                PreUpdate,
+                click_sound_switch
+                    .after(InputSystems)
+                    // Not while the name dialog takes every key and click.
+                    .after(crate::score::DialogInput),
+            )
             .add_systems(
                 Update,
                 (
