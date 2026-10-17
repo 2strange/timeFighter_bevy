@@ -145,7 +145,9 @@ impl CustomField {
     fn steps(self) -> &'static [f32] {
         match self {
             // Includes every level's count in every mode (e.g. 8, 16, 24).
-            CustomField::Missiles => &[0., 2., 4., 6., 8., 10., 12., 14., 16., 20., 24., 30., 40.],
+            CustomField::Missiles => &[
+                0., 2., 4., 6., 8., 10., 12., 14., 16., 20., 24., 28., 32., 36., 40.,
+            ],
             CustomField::Enemies => &[1., 2., 4., 6., 8., 10., 12., 16., 20., 24.],
             CustomField::FlightSize => &[1., 2., 3., 4., 5., 6.],
             CustomField::EnemySpeed => &[
