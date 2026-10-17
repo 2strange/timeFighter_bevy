@@ -260,8 +260,12 @@
     </script>
 
     <script type="module">
-      import init from './timefighter.js';
       import { hallOfFame, pumpOutbox } from './leaderboard.js';
+      // scripts/build-web.sh writes hashed names here, so script and
+      // WebAssembly always come from the same build.
+      const GAME_JS = './timefighter.js';
+      const GAME_WASM = './timefighter_bg.wasm';
+      let init = null;
 
       const canvas = document.getElementById('game');
       const start = document.getElementById('start');
@@ -416,15 +420,38 @@
         }
       });
 
+      // A page cached from before a deploy names files that are gone: load
+      // the page once more, past the cache (once per tab).
+      function reloadFresh() {
+        try {
+          if (sessionStorage.getItem('timefighter.reloaded')) return false;
+          sessionStorage.setItem('timefighter.reloaded', '1');
+        } catch {
+          return false;
+        }
+        const params = new URLSearchParams(location.search);
+        params.set('fresh', String(Date.now()));
+        location.replace(`${location.pathname}?${params}${location.hash}`);
+        return true;
+      }
+
       try {
-        const wasm = await download('./timefighter_bg.wasm');
+        ({ default: init } = await import(GAME_JS));
+        const wasm = await download(GAME_WASM);
         play.textContent = 'PREPARING';
         // Compile now, so Start only has to run it.
         module = await WebAssembly.compile(wasm);
+        try {
+          sessionStorage.removeItem('timefighter.reloaded');
+        } catch {
+          // No storage: nothing to forget.
+        }
         ready();
       } catch (error) {
-        play.textContent = 'ERROR';
-        status.textContent = `The game could not be loaded (${error?.message ?? error}). Reload the page to try again.`;
+        if (!reloadFresh()) {
+          play.textContent = 'ERROR';
+          status.textContent = `The game could not be loaded (${error?.message ?? error}). Reload the page to try again.`;
+        }
       }
     </script>
   </body>
