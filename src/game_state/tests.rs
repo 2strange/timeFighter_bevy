@@ -1173,6 +1173,88 @@ mod instant_wreck {
     }
 
     #[test]
+    fn enter_on_the_result_screen_restarts_without_a_second_explosion() {
+        let (mut app, jet) = app();
+        *app.world_mut().get_mut::<Transform>(jet).unwrap() =
+            Transform::from_xyz(0.0, 60.0, 0.0).with_rotation(Quat::from_rotation_x(-0.9));
+        fly_into(&mut app, jet, |p| p.y < 0.0);
+        // Wait for the result screen, as a player would.
+        run_for(&mut app, 3.0);
+        assert!(matches!(round(&app).phase, RoundPhase::Over(_)));
+
+        let deaths = |app: &App| {
+            app.world()
+                .resource::<Messages<crate::combat::Destroyed>>()
+                .iter_current_update_messages()
+                .filter(|d| d.team == Team::Player)
+                .count()
+        };
+        super::hold(&mut app, KeyCode::Enter);
+        let mut later_deaths = 0;
+        let mut later_explosions = 0;
+        for frame in 0..90 {
+            app.update();
+            if frame == 1 {
+                super::release(&mut app, KeyCode::Enter);
+            }
+            later_deaths += deaths(&app);
+            later_explosions = later_explosions.max(big_explosions(&mut app));
+            assert!(
+                !wrecked(&app, jet) || frame == 0,
+                "frame {frame}: wrecked again"
+            );
+        }
+        assert_eq!(later_deaths, 0, "the jet died again after the restart");
+        assert_eq!(later_explosions, 0, "a new explosion after the restart");
+        assert_eq!(round(&app).phase, RoundPhase::Running);
+        assert!(!hidden(&app, jet));
+        let before = position(&app, jet);
+        run_for(&mut app, 0.5);
+        assert!(
+            position(&app, jet).distance(before) > 10.0,
+            "jet does not fly"
+        );
+    }
+
+    #[test]
+    fn restarting_after_a_win_does_not_crash_on_the_way_back_to_the_spawn() {
+        let (mut app, jet) = app();
+        let spawn = position(&app, jet);
+        // Somewhere else, with a wall between there and the spawn point.
+        let away = spawn + Vec3::new(0.0, 0.0, -1_000.0);
+        app.world_mut().spawn((
+            RigidBody::Fixed,
+            Collider::cuboid(300.0, 300.0, 20.0),
+            Layer::World.groups(),
+            Transform::from_translation(spawn + Vec3::new(0.0, 0.0, -500.0)),
+        ));
+        for _ in 0..3 {
+            *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_translation(away);
+            app.update();
+        }
+        app.world_mut()
+            .resource_mut::<crate::game_state::Round>()
+            .phase = RoundPhase::Ending {
+            outcome: crate::game_state::Outcome::Victory,
+            left: 0.1,
+        };
+        run_for(&mut app, 0.5);
+        assert!(matches!(round(&app).phase, RoundPhase::Over(_)));
+        super::hold(&mut app, KeyCode::Enter);
+        for frame in 0..60 {
+            app.update();
+            if frame == 1 {
+                super::release(&mut app, KeyCode::Enter);
+            }
+            assert!(
+                !wrecked(&app, jet),
+                "frame {frame}: crashed after the restart"
+            );
+        }
+        assert_eq!(round(&app).phase, RoundPhase::Running);
+    }
+
+    #[test]
     fn a_new_round_brings_the_jet_back() {
         let (mut app, jet) = app();
         *app.world_mut().get_mut::<Transform>(jet).unwrap() =
