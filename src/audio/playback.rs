@@ -1,6 +1,8 @@
 //! Plays the [`SoundMix`] with Bevy's audio: one looping player per voice,
 //! following its volume and pitch, and a despawning player per one-shot.
 
+use std::time::Duration;
+
 use bevy::{audio::Volume, platform::collections::HashMap, prelude::*};
 
 use super::mix::{Clip, SoundMix, SoundMixSystems, Voice};
@@ -79,9 +81,12 @@ fn play(
         commands.spawn((
             OneShotSound,
             AudioPlayer::new(handle.clone()),
-            PlaybackSettings::DESPAWN
-                .with_volume(Volume::Linear(shot.volume))
-                .with_speed(shot.speed),
+            PlaybackSettings {
+                duration: shot.clip.max_length().map(Duration::from_secs_f32),
+                ..PlaybackSettings::DESPAWN
+                    .with_volume(Volume::Linear(shot.volume))
+                    .with_speed(shot.speed)
+            },
         ));
     }
 }
