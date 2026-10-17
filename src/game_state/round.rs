@@ -137,7 +137,7 @@ impl Plugin for RoundPlugin {
         )
         // The city's damage plugin registers it too.
         .add_message::<RepairCity>();
-        // `?set=second` in the page URL (or `--set=second`) switches the
+        // `?set=first` in the page URL (or `--set=first`) switches the
         // enemy aircraft, unless a configuration was set up before.
         if !app.world().contains_resource::<MissionConfig>() {
             app.insert_resource(MissionConfig::detect());
@@ -291,6 +291,7 @@ fn start_round(
     let params = settings.difficulty.params_for(settings.mode).clamped();
     combat.player_missiles = params.missiles;
     combat.player_gun_unlimited = params.unlimited_gun;
+    combat.player_gun_ammo = params.gun_ammo;
     combat.lock.time = params.lock_time;
     slots.max = params.attackers;
     for entity in &leftovers {

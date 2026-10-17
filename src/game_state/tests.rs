@@ -34,12 +34,27 @@ fn app() -> (App, Entity) {
 /// The round app with the player's jet placed at `jet_at` before the first
 /// update (the round start moves it to the spawn point).
 fn app_with_jet_at(jet_at: Transform) -> (App, Entity) {
-    // Hard: two flights of four, the layout most tests below assume.
     let settings = GameSettings {
-        difficulty: Difficulty::Hard,
+        difficulty: classic(),
         ..default()
     };
     custom_app(jet_at, settings, false)
+}
+
+/// The layout most tests below assume: two flights of four Spitfires (the
+/// first set), rookies then veterans, at designed speed.
+fn classic() -> Difficulty {
+    Difficulty::Custom(crate::game_state::DifficultyParams {
+        missiles: 6,
+        enemies: 8,
+        flight_size: 4,
+        pilots: crate::game_state::PilotMix::RookiesThenVeterans,
+        enemy_speed: 1.0,
+        enemy_accuracy: 1.0,
+        attackers: 3,
+        lock_time: 1.0,
+        ..default()
+    })
 }
 
 /// The round app for `settings`, optionally with the generated city and
@@ -62,6 +77,12 @@ fn custom_app(jet_at: Transform, settings: GameSettings, city: bool) -> (App, En
     .add_message::<WindowOccluded>()
     .insert_resource(TimeUpdateStrategy::ManualDuration(FRAME));
     app.insert_resource(settings);
+    // The tests below were written for the first set; those about the
+    // second set insert their own configuration.
+    app.insert_resource(MissionConfig {
+        set: crate::game_state::EnemySet::First,
+        ..default()
+    });
     if city {
         app.add_plugins((
             crate::world::CityPlugin,
@@ -535,7 +556,7 @@ fn difficulty_table_matches_the_design() {
         .collect();
     assert_eq!(
         table,
-        vec![(20, 4, 2), (10, 6, 2), (8, 8, 2), (6, 8, 4), (6, 12, 4)]
+        vec![(24, 6, 2), (12, 6, 2), (8, 10, 2), (8, 12, 4), (8, 16, 4)]
     );
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
@@ -685,8 +706,12 @@ fn protect_is_won_when_every_bomber_is_down() {
     );
     let mission = app.world().resource::<Mission>().clone();
     assert_eq!(mission.mode, GameMode::Protect);
-    assert_eq!(enemies(&mut app).len(), 4, "one flight of four bombers");
-    shoot_down_all(&mut app);
+    assert_eq!(enemies(&mut app).len(), 4, "a flight of four bombers");
+    // Each wave arrives as soon as the sky is clear.
+    for _ in 0..mission.waves.len() {
+        shoot_down_all(&mut app);
+        app.update();
+    }
     run_for(&mut app, mission.end_delay + 0.5);
     assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
 }
@@ -724,8 +749,8 @@ fn protect_flies_the_configured_bomber() {
             true,
         );
         app.insert_resource(crate::game_state::MissionConfig {
+            set: crate::game_state::EnemySet::First,
             bomber,
-            ..default()
         });
         app.world_mut().write_message(RestartRound);
         app.update();
@@ -772,7 +797,7 @@ fn missiles_are_counted_per_mode() {
         .iter()
         .map(|d| d.params_for(GameMode::Protect).missiles)
         .collect();
-    assert_eq!(protect, vec![20, 16, 16, 12, 12]);
+    assert_eq!(protect, vec![24, 16, 16, 12, 12]);
     for difficulty in Difficulty::PRESETS {
         assert_eq!(
             difficulty.params_for(GameMode::Hunt),
@@ -843,7 +868,13 @@ fn the_second_set_flies_mixed_pairs_and_ju_390_led_bombers() {
         2.0 * EnemyKind::He177.stats().health
     );
     // The first set stays as it was.
-    let first = Mission::hunt(Difficulty::Hard, &MissionConfig::default());
+    let first = Mission::hunt(
+        Difficulty::Hard,
+        &MissionConfig {
+            set: EnemySet::First,
+            ..default()
+        },
+    );
     assert!(
         first.waves[0].groups[0]
             .members
@@ -867,10 +898,13 @@ fn the_set_is_chosen_by_url_or_command_line() {
         MissionConfig::from_query("--showroom --set=second").set,
         EnemySet::Second
     );
-    assert_eq!(MissionConfig::from_query("").set, EnemySet::First);
+    // The second set is the default; the first only on request.
+    assert_eq!(MissionConfig::from_query("?set=first").set, EnemySet::First);
+    assert_eq!(MissionConfig::from_query("").set, EnemySet::Second);
+    assert_eq!(MissionConfig::default().set, EnemySet::Second);
     assert_eq!(
         MissionConfig::from_query("?set=nonsense").set,
-        EnemySet::First
+        EnemySet::Second
     );
 }
 
@@ -943,8 +977,8 @@ fn battle_waves_are_bombers_with_a_fighter_escort() {
         .iter()
         .map(|d| Mission::battle(*d, &MissionConfig::default()).enemy_count())
         .collect();
-    // SE 1×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane 4×(4+4).
-    assert_eq!(totals, vec![6, 12, 18, 24, 32]);
+    // SE 2×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane 4×(4+4).
+    assert_eq!(totals, vec![12, 12, 18, 24, 32]);
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
         let mission = Mission::battle(difficulty, &MissionConfig::default());
@@ -987,7 +1021,7 @@ fn battle_missiles_follow_the_two_for_a_bomber_one_for_a_fighter_rule() {
         .iter()
         .map(|d| d.params_for(GameMode::Battle).missiles)
         .collect();
-    assert_eq!(missiles, vec![14, 20, 24, 16, 16]);
+    assert_eq!(missiles, vec![24, 20, 24, 16, 16]);
 }
 
 #[test]
@@ -997,7 +1031,7 @@ fn a_battle_round_is_won_when_everything_is_down() {
         battle(Difficulty::SuperEasy),
         true,
     );
-    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 14);
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 24);
     let mut kinds: Vec<bool> = app
         .world_mut()
         .query::<&Enemy>()
@@ -1019,7 +1053,10 @@ fn a_battle_round_is_won_when_everything_is_down() {
             .filter(|(e, _)| !e.kind.is_bomber())
             .all(|(_, g)| g.escort == Some(bomber_flight))
     );
-    shoot_down_all(&mut app);
+    for _ in 0..app.world().resource::<Mission>().waves.len() {
+        shoot_down_all(&mut app);
+        app.update();
+    }
     run_for(&mut app, 3.0);
     assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
 }
@@ -1236,5 +1273,52 @@ mod instant_wreck {
             "jet does not fly"
         );
         assert_eq!(round(&app).phase, RoundPhase::Running);
+    }
+}
+
+#[test]
+fn levels_set_gun_ammunition_speed_and_flights() {
+    let table: Vec<(Option<u32>, f32, u32, u32)> = Difficulty::PRESETS
+        .iter()
+        .map(|d| {
+            let p = d.params();
+            (
+                (!p.unlimited_gun).then_some(p.gun_ammo),
+                p.enemy_speed,
+                p.enemies.div_ceil(p.flight_size),
+                p.attackers,
+            )
+        })
+        .collect();
+    assert_eq!(
+        table,
+        vec![
+            (None, 0.5, 3, 1),
+            (None, 0.6, 3, 1),
+            (Some(2_000), 0.75, 5, 2),
+            (Some(1_000), 0.9, 3, 3),
+            (Some(500), 1.0, 4, 4),
+        ]
+    );
+    assert_eq!(Difficulty::SuperEasy.params().bomber_waves, 2);
+
+    // The round loads the gun accordingly.
+    for (difficulty, ammo) in [
+        (Difficulty::SuperEasy, None),
+        (Difficulty::Normal, Some(2_000)),
+        (Difficulty::Insane, Some(500)),
+    ] {
+        let (mut app, jet) = app();
+        app.insert_resource(GameSettings {
+            difficulty,
+            ..default()
+        });
+        app.world_mut().write_message(RestartRound);
+        app.update();
+        assert_eq!(
+            app.world().get::<Gun>(jet).unwrap().ammo,
+            ammo,
+            "{difficulty:?}"
+        );
     }
 }
