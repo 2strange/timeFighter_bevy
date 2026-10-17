@@ -312,6 +312,7 @@ pub enum RowId {
     Custom(CustomField),
     Lighting,
     Sound,
+    InvertPitch,
     /// The tab bar over the enemy values.
     Tabs,
     Start,
@@ -323,7 +324,7 @@ impl RowId {
         match self {
             RowId::Mode | RowId::Difficulty => Section::Top,
             RowId::Custom(field) => field.section(),
-            RowId::Lighting | RowId::Sound => Section::General,
+            RowId::Lighting | RowId::Sound | RowId::InvertPitch => Section::General,
             RowId::Tabs => Section::TabBar,
             RowId::Start => Section::Bottom,
         }
@@ -400,6 +401,8 @@ pub struct MenuSelection {
     /// Custom starts from the level picked before).
     pub custom_edited: bool,
     pub lighting: Lighting,
+    /// "Invert pitch": W (and tilting away) pulls the nose up.
+    pub invert_pitch: bool,
     /// Sound volume in percent, one of [`SOUND_STEPS`]; 0 is off.
     pub sound: u32,
     /// The enemy tab last picked (see [`MenuSelection::active_tab`]).
@@ -420,6 +423,7 @@ impl Default for MenuSelection {
             lighting: Lighting::Day,
             // Near the sound's own default (0.8).
             sound: 75,
+            invert_pitch: false,
             tab: EnemyTab::default(),
         }
     }
@@ -519,11 +523,13 @@ impl MenuSelection {
             rows.extend(fields(Section::General));
             rows.push(self.lighting_row());
             rows.push(self.sound_row());
+            rows.push(self.invert_row());
             rows.push(self.tab_row());
             rows.extend(fields(Section::Tab(self.active_tab())));
         } else {
             rows.push(self.lighting_row());
             rows.push(self.sound_row());
+            rows.push(self.invert_row());
         }
         rows.push(Row {
             id: RowId::Start,
@@ -559,6 +565,15 @@ impl MenuSelection {
                 .iter()
                 .position(|l| *l == self.lighting)
                 .unwrap_or(0),
+        }
+    }
+
+    fn invert_row(&self) -> Row<RowId> {
+        Row {
+            id: RowId::InvertPitch,
+            label: "Invert pitch".into(),
+            choices: vec![Choice::new("Off"), Choice::new("On")],
+            selected: usize::from(self.invert_pitch),
         }
     }
 
@@ -674,6 +689,11 @@ impl MenuSelection {
                     self.sound = *sound;
                 }
             }
+            RowId::InvertPitch => {
+                if index < 2 {
+                    self.invert_pitch = index == 1;
+                }
+            }
             RowId::Tabs => {
                 if let Some(tab) = EnemyTab::ALL.get(index).filter(|t| t.used_in(self.mode)) {
                     self.tab = *tab;
@@ -737,6 +757,7 @@ impl MenuSelection {
             format!("edited={}", u8::from(self.custom_edited)),
             format!("tab={}", self.tab.key()),
             format!("sound={}", self.sound),
+            format!("invert={}", u8::from(self.invert_pitch)),
         ];
         for field in CustomField::ALL {
             parts.push(format!("{}={}", field.key(), field.get(&self.custom)));
@@ -772,6 +793,7 @@ impl MenuSelection {
                     }
                 }
                 "edited" => selection.custom_edited = value == "1",
+                "invert" => selection.invert_pitch = value == "1",
                 "sound" => {
                     if let Some(sound) = value.parse().ok().filter(|p| SOUND_STEPS.contains(p)) {
                         selection.sound = sound;
@@ -1051,6 +1073,16 @@ mod tests {
     }
 
     #[test]
+    fn invert_pitch_is_stored_and_read_back() {
+        let mut selection = MenuSelection::default();
+        assert!(!selection.invert_pitch);
+        assert!(selection.select(RowId::InvertPitch, 1));
+        assert!(selection.invert_pitch);
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+        assert!(!selection.select(RowId::InvertPitch, 2), "no third choice");
+    }
+
+    #[test]
     fn sound_steps_are_stored_and_read_back() {
         let mut selection = MenuSelection::default();
         assert_eq!(selection.sound_volume(), Some(0.75));
@@ -1156,7 +1188,7 @@ mod tests {
     #[test]
     fn rows_come_in_sections_with_only_the_open_tab() {
         let mut selection = MenuSelection::default();
-        // Without Custom: mode, level, light, sound, start.
+        // Without Custom: mode, level, light, sound, pitch, start.
         let ids = |s: &MenuSelection| s.rows().iter().map(|r| r.id).collect::<Vec<_>>();
         assert_eq!(
             ids(&selection),
@@ -1165,6 +1197,7 @@ mod tests {
                 RowId::Difficulty,
                 RowId::Lighting,
                 RowId::Sound,
+                RowId::InvertPitch,
                 RowId::Start
             ]
         );
@@ -1179,7 +1212,7 @@ mod tests {
                 [
                     vec![Section::Top; 2],
                     vec![Section::Weapons; 4],
-                    vec![Section::General; 4],
+                    vec![Section::General; 5],
                     vec![Section::TabBar],
                     vec![Section::Tab(tab); if tab == EnemyTab::Fighters { 3 } else { 6 }],
                     vec![Section::Bottom],

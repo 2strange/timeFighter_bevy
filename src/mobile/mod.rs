@@ -24,7 +24,7 @@ use std::collections::HashSet;
 use bevy::{input::InputSystems, prelude::*};
 
 use crate::{
-    flight::{FlightConfig, FlightInput, FlightState, FlightSystems, PlayerAircraft},
+    flight::{FlightConfig, FlightInput, FlightState, FlightSystems, PitchInvert, PlayerAircraft},
     game_state::{Pause, Round, RoundPhase},
     score::{DialogInput, ScoreState},
 };
@@ -275,6 +275,7 @@ fn press_keys(
 fn steer(
     input: Res<MobileInput>,
     cfg: Res<FlightConfig>,
+    invert: Option<Res<PitchInvert>>,
     mut player: Query<(&mut FlightInput, &FlightState), With<PlayerAircraft>>,
 ) {
     let axes = input.flight_axes();
@@ -284,7 +285,7 @@ fn steer(
     for (mut flight, state) in &mut player {
         let mut wanted = *flight;
         if let Some((pitch, roll)) = axes {
-            wanted.pitch = pitch;
+            wanted.pitch = invert.as_deref().copied().unwrap_or_default().apply(pitch);
             wanted.roll = roll;
         }
         if let Some(thrust) = input.thrust {

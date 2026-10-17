@@ -18,6 +18,7 @@ use bevy::prelude::*;
 use crate::game_state::RoundSystems;
 
 pub use config::{FlightConfig, PLAYER_SPAWN, SPAWN_AIM, spawn_pitch_towards};
+pub use input::PitchInvert;
 pub use jet_fx::{JetFxConfig, JetFxPoints, flame_length, vortex_strength};
 pub use key_help::{KeyHelpAppExt, KeyHelpLines, KeyHelpSection};
 pub use model::{FlightInput, FlightState, step};
@@ -66,6 +67,7 @@ impl Plugin for PlayerFlightPlugin {
             .add_key_help(KeyHelpSection::Flight, "Q / E or Left / Right", "yaw")
             .add_key_help(KeyHelpSection::Flight, "Up / Down", "throttle")
             .add_key_help(KeyHelpSection::Help, "I", "show / hide this help")
+            .init_resource::<PitchInvert>()
             .add_plugins(jet_fx::JetFxPlugin)
             .add_systems(Startup, (jet::spawn_player_jet, key_help::spawn_key_help))
             .add_systems(

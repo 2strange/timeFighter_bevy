@@ -26,7 +26,7 @@ pub use selection::{CustomField, EnemyTab, MenuMode, MenuSelection, RowId, Secti
 use crate::{
     audio::SoundSettings,
     combat::CombatKeys,
-    flight::{KeyHelpAppExt, KeyHelpSection},
+    flight::{KeyHelpAppExt, KeyHelpSection, PitchInvert},
     game_state::{GameSettings, Pause, RestartRound, Round, RoundPhase, TriggerHold},
     world::{Lighting, LightingSystems},
 };
@@ -141,9 +141,13 @@ fn prepare_first_round(
     mut settings: ResMut<GameSettings>,
     mut lighting: ResMut<Lighting>,
     sound: Option<ResMut<SoundSettings>>,
+    invert: Option<ResMut<PitchInvert>>,
 ) {
     *settings = selection.settings();
     *lighting = selection.lighting;
+    if let Some(mut invert) = invert {
+        invert.set_if_neq(PitchInvert(selection.invert_pitch));
+    }
     if let Some(mut sound) = sound {
         apply_sound(&selection, &mut sound);
     }
@@ -270,6 +274,7 @@ fn menu_input(
     mut restart: MessageWriter<RestartRound>,
     (mut hold, combat): (ResMut<TriggerHold>, Res<CombatKeys>),
     mut sound: Option<ResMut<SoundSettings>>,
+    mut invert: Option<ResMut<PitchInvert>>,
 ) {
     let rows = selection.rows();
     let cursor = rows.iter().position(|r| r.id == menu.cursor).unwrap_or(0);
@@ -307,6 +312,12 @@ fn menu_input(
                 && let Some(sound) = sound.as_deref_mut()
             {
                 apply_sound(&selection, sound);
+            }
+            if changed
+                && row == RowId::InvertPitch
+                && let Some(invert) = invert.as_deref_mut()
+            {
+                *invert = PitchInvert(selection.invert_pitch);
             }
         }
         Action::Start => {
