@@ -137,12 +137,17 @@ fn toggle_pause(keys: Option<Res<ButtonInput<KeyCode>>>, mut pause: ResMut<Pause
 
 /// Switching tabs, minimising or clicking elsewhere pauses. Getting focus
 /// back does not resume by itself: the player decides when to go on.
+/// With the touch overlay, focus does not count: every tap on one of its
+/// buttons takes the focus from the canvas (the overlay reports the page
+/// going to the background itself, see [`crate::mobile`]).
 fn pause_when_window_hidden(
     mut focus: MessageReader<WindowFocused>,
     mut occlusion: MessageReader<WindowOccluded>,
+    mobile: Option<Res<crate::mobile::MobileInput>>,
     mut pause: ResMut<Pause>,
 ) {
-    let lost_focus = focus.read().any(|event| !event.focused);
+    let touch = crate::mobile::touch(mobile.as_deref());
+    let lost_focus = focus.read().any(|event| !event.focused) && !touch;
     let hidden = occlusion.read().any(|event| event.occluded);
     if (lost_focus || hidden) && !pause.menu {
         pause.player = true;
@@ -227,6 +232,7 @@ fn spawn_pause_screen(mut commands: Commands) {
                     ..default()
                 },
                 TextColor(Color::srgb(0.85, 0.85, 0.85)),
+                crate::mobile::KeyHint,
             ));
         });
 }

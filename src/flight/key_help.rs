@@ -70,8 +70,9 @@ impl KeyHelpAppExt for App {
     }
 }
 
+/// The key help text (hidden on touch screens).
 #[derive(Component)]
-pub(super) struct KeyHelp;
+pub struct KeyHelp;
 
 pub(super) fn spawn_key_help(mut commands: Commands, lines: Res<KeyHelpLines>) {
     commands.spawn((
@@ -106,6 +107,7 @@ pub(super) fn update_key_help(lines: Res<KeyHelpLines>, mut help: Query<&mut Tex
 
 /// I toggles the help. A round start shows it for [`AUTO_SHOW_SECONDS`];
 /// pressing I meanwhile takes over (and cancels the timer).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn toggle_key_help(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -114,7 +116,16 @@ pub(super) fn toggle_key_help(
     mut was_running: Local<bool>,
     mut auto_hide_in: Local<Option<f32>>,
     mut help: Query<&mut Visibility, With<KeyHelp>>,
+    mobile: Option<Res<crate::mobile::MobileInput>>,
 ) {
+    // Touch screens have no keys to explain.
+    if crate::mobile::touch(mobile.as_deref()) {
+        *auto_hide_in = None;
+        for mut visibility in &mut help {
+            visibility.set_if_neq(Visibility::Hidden);
+        }
+        return;
+    }
     // Runs before the round systems: a restart shows up as a phase other
     // than Running for one frame, or as a pending restart request.
     if restarts.read().count() > 0 {

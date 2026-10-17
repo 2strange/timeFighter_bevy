@@ -34,6 +34,7 @@ use crate::{
     },
     flight::{FlightState, PlayerAircraft},
     game_state::{Mission, Pause, Round, RoundPhase, RoundSystems},
+    mobile::KeyHint,
     world::damage::CityHealth,
 };
 
@@ -289,15 +290,15 @@ fn spawn_hud(mut commands: Commands, keys: Res<CombatKeys>) {
                 };
                 panel.spawn(row.clone()).with_children(|row| {
                     row.spawn((HudText::Gun, text("", 20.0, HUD)));
-                    row.spawn(text(&hint(&keys.gun), 15.0, HUD_DIM));
+                    row.spawn((text(&hint(&keys.gun), 15.0, HUD_DIM), KeyHint));
                 });
                 panel.spawn(row.clone()).with_children(|row| {
                     row.spawn((HudText::Missiles, text("", 20.0, HUD)));
-                    row.spawn(text(&hint(&keys.missile), 15.0, HUD_DIM));
+                    row.spawn((text(&hint(&keys.missile), 15.0, HUD_DIM), KeyHint));
                 });
                 panel.spawn(row).with_children(|row| {
-                    row.spawn(text("next target", 15.0, HUD_DIM));
-                    row.spawn(text(&hint(&keys.next_target), 15.0, HUD_DIM));
+                    row.spawn((text("next target", 15.0, HUD_DIM), KeyHint));
+                    row.spawn((text(&hint(&keys.next_target), 15.0, HUD_DIM), KeyHint));
                 });
             });
 
@@ -321,10 +322,13 @@ fn spawn_hud(mut commands: Commands, keys: Res<CombatKeys>) {
                         },
                     ))
                     .with_children(spawn_speaker);
-                corner.spawn(text(
-                    &format!("[{}]", key_labels(&[SOUND_TOGGLE_KEY])),
-                    15.0,
-                    HUD_DIM,
+                corner.spawn((
+                    text(
+                        &format!("[{}]", key_labels(&[SOUND_TOGGLE_KEY])),
+                        15.0,
+                        HUD_DIM,
+                    ),
+                    KeyHint,
                 ));
             });
 
@@ -435,7 +439,10 @@ fn spawn_hud(mut commands: Commands, keys: Res<CombatKeys>) {
                     text("", 22.0, Color::srgb(0.9, 0.9, 0.9)),
                     TextLayout::justify(Justify::Center),
                 ));
-                screen.spawn(text("R: fly again", 18.0, Color::srgb(0.75, 0.75, 0.75)));
+                screen.spawn((
+                    text("R: fly again", 18.0, Color::srgb(0.75, 0.75, 0.75)),
+                    KeyHint,
+                ));
             });
         });
 }

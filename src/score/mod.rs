@@ -550,7 +550,10 @@ fn spawn_ui(mut commands: Commands, font: Res<NameFont>) {
                     BorderColor::all(AMBER),
                     children![(NameText, name_label(&font, "", 24.0, AMBER))],
                 ),
-                label("Enter: save    Esc: cancel", 14.0, DIM),
+                (
+                    label("Enter: save    Esc: cancel", 14.0, DIM),
+                    crate::mobile::KeyHint
+                ),
             ],
         ));
 }
@@ -611,7 +614,7 @@ fn update_live(
 
 /// Lines of the result panel: `(left, right, color)`; names may use any
 /// script, so the panel uses the name font.
-pub fn panel_lines(state: &ScoreState, store: &Store) -> Vec<(String, String, Color)> {
+pub fn panel_lines(state: &ScoreState, store: &Store, touch: bool) -> Vec<(String, String, Color)> {
     let Some(result) = &state.result else {
         return Vec::new();
     };
@@ -651,6 +654,7 @@ pub fn panel_lines(state: &ScoreState, store: &Store) -> Vec<(String, String, Co
     // Short lines: the panel is narrow.
     let hints: Vec<String> = match (&state.submitted, state.dialog) {
         (None, true) => vec!["Enter your name".into()],
+        (None, false) if touch => vec!["Not saved".into(), "Tap SAVE SCORE".into()],
         (None, false) => vec!["Not saved".into(), "C: save it after all".into()],
         (Some(submitted), _) => {
             let local = submitted
@@ -716,7 +720,9 @@ fn update_panel(
     font: Res<NameFont>,
     pause: Option<Res<Pause>>,
     panel: Query<(Entity, &mut Visibility), With<ResultPanel>>,
+    mobile: Option<Res<MobileInput>>,
 ) {
+    let touch = crate::mobile::touch(mobile.as_deref());
     let menu_open = pause.as_ref().is_some_and(|p| p.menu);
     if !state.is_changed() && !pause.as_ref().is_some_and(|p| p.is_changed()) {
         return;
@@ -729,7 +735,7 @@ fn update_panel(
             Visibility::Hidden
         });
         commands.entity(entity).despawn_related::<Children>();
-        let lines = panel_lines(&state, &store);
+        let lines = panel_lines(&state, &store, touch);
         commands.entity(entity).with_children(|panel| {
             for (left, right, color) in lines {
                 panel

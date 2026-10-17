@@ -8,8 +8,11 @@
 //!   pause and round flow need nothing extra; taps travel as counters, so
 //!   none is lost between two frames; the pause screen's "Invert pitch"
 //!   switches [`PitchInvert`];
-//! - tilt (or the virtual stick) and the thrust slider go into the jet's
-//!   [`FlightInput`], after the keyboard;
+//! - tilt (or the virtual stick), the yaw buttons and the thrust slider go
+//!   into the jet's [`FlightInput`], after the keyboard;
+//! - the page going to the background pauses (losing focus does not: a
+//!   tap on an overlay button takes the focus from the game's canvas);
+//! - key hints ([`KeyHint`]) and the key help stay hidden;
 //! - the name dialog takes the text of the page's own input field (the
 //!   phone's on-screen keyboard), see [`crate::score`].
 //!
@@ -55,7 +58,11 @@ pub enum Steering {
 /// The page's touch controls, as read from `data-tf-input`.
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
 pub struct MobileInput {
+    /// The overlay is running: a touch device, the game started.
+    pub present: bool,
     pub steering: Steering,
+    /// Yaw buttons: -1 (left) .. 1 (right).
+    pub yaw: f32,
     pub pitch: f32,
     pub roll: f32,
     /// Thrust slider, 0 (slowest) to 1 (fastest); `None` without slider.
@@ -69,6 +76,10 @@ pub struct MobileInput {
     pub again: u32,
     pub menu: u32,
     pub invert: u32,
+    /// The page went to the background.
+    pub hidden: u32,
+    /// "Save score" on the result screen: opens the name dialog again.
+    pub save: u32,
     /// The text in the page's name field while the dialog is open.
     pub name: Option<String>,
     pub name_ok: u32,
@@ -78,7 +89,10 @@ pub struct MobileInput {
 impl MobileInput {
     /// Reads `key=value;…`; unknown keys and bad values are skipped.
     pub fn parse(line: &str) -> Self {
-        let mut input = Self::default();
+        let mut input = Self {
+            present: !line.trim().is_empty(),
+            ..Self::default()
+        };
         for (key, value) in line.split(';').filter_map(|pair| pair.split_once('=')) {
             let number = || value.parse::<f32>().ok().filter(|v| v.is_finite());
             let count = || value.parse::<u32>().unwrap_or(0);
@@ -100,6 +114,9 @@ impl MobileInput {
                 "a" => input.again = count(),
                 "M" => input.menu = count(),
                 "i" => input.invert = count(),
+                "y" => input.yaw = number().unwrap_or(0.0).clamp(-1.0, 1.0),
+                "h" => input.hidden = count(),
+                "s" => input.save = count(),
                 "name" => input.name = Some(percent_decode(value)),
                 "ok" => input.name_ok = count(),
                 "esc" => input.name_cancel = count(),
@@ -121,6 +138,16 @@ impl MobileInput {
         Some((-forward, -right))
     }
 }
+
+/// Whether the touch overlay is in charge (no key hints, no key help).
+pub fn touch(input: Option<&MobileInput>) -> bool {
+    input.is_some_and(|i| i.present)
+}
+
+/// A text that names keys ("[Space]", "R: fly again"); hidden on touch
+/// screens.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct KeyHint;
 
 /// Degrees of tilt to -1..1: nothing within the dead zone, full from
 /// [`TILT_FULL`], linear between.
@@ -209,9 +236,12 @@ impl Plugin for MobilePlugin {
             )
             .add_systems(
                 Update,
-                steer
-                    .after(FlightSystems::Input)
-                    .before(FlightSystems::Simulate),
+                (
+                    steer
+                        .after(FlightSystems::Input)
+                        .before(FlightSystems::Simulate),
+                    hide_key_hints,
+                ),
             )
             .add_systems(PostUpdate, write_page);
     }
@@ -238,7 +268,7 @@ fn read_page(mut input: ResMut<MobileInput>) {
 fn press_keys(
     input: Res<MobileInput>,
     keys: Option<ResMut<ButtonInput<KeyCode>>>,
-    invert: Option<ResMut<PitchInvert>>,
+    (invert, pause): (Option<ResMut<PitchInvert>>, Option<ResMut<Pause>>),
     mut pressed: ResMut<Pressed>,
 ) {
     let Some(mut keys) = keys else {
@@ -248,6 +278,13 @@ fn press_keys(
         && input.invert > seen.invert
     {
         invert.0 = !invert.0;
+    }
+    // In the background: pause, as the desktop does on losing focus.
+    if let (Some(seen), Some(mut pause)) = (&pressed.seen, pause)
+        && input.hidden > seen.hidden
+        && !pause.menu
+    {
+        pause.player = true;
     }
     for key in std::mem::take(&mut pressed.tapped) {
         if !pressed.held.contains(&key) {
@@ -269,6 +306,8 @@ fn press_keys(
         (input.pause, seen.pause, KeyCode::KeyP),
         (input.again, seen.again, KeyCode::KeyR),
         (input.menu, seen.menu, KeyCode::KeyM),
+        // The score panel's "change name" key reopens the dialog.
+        (input.save, seen.save, KeyCode::KeyC),
     ];
     for (now, before, key) in taps {
         if now > before {
@@ -288,7 +327,7 @@ fn steer(
     mut player: Query<(&mut FlightInput, &FlightState), With<PlayerAircraft>>,
 ) {
     let axes = input.flight_axes();
-    if axes.is_none() && input.thrust.is_none() {
+    if axes.is_none() && input.thrust.is_none() && input.yaw == 0.0 {
         return;
     }
     for (mut flight, state) in &mut player {
@@ -300,7 +339,20 @@ fn steer(
         if let Some(thrust) = input.thrust {
             wanted.throttle = thrust_throttle(thrust, state.speed, &cfg);
         }
+        if input.yaw != 0.0 {
+            // Keyboard convention: yaw > 0 = left (Q).
+            wanted.yaw = -input.yaw;
+        }
         flight.set_if_neq(wanted);
+    }
+}
+
+fn hide_key_hints(input: Res<MobileInput>, mut hints: Query<&mut Visibility, With<KeyHint>>) {
+    if !input.present {
+        return;
+    }
+    for mut visibility in &mut hints {
+        visibility.set_if_neq(Visibility::Hidden);
     }
 }
 

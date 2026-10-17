@@ -280,3 +280,104 @@ fn the_phone_keyboard_names_the_pilot() {
     app.update();
     assert!(app.world().resource::<Round>().is_running());
 }
+
+#[test]
+fn presence_yaw_and_the_new_taps_are_read() {
+    let input = MobileInput::parse("src=gyro;y=-1;h=2;s=1");
+    assert!(input.present);
+    assert_eq!(input.yaw, -1.0);
+    assert_eq!((input.hidden, input.save), (2, 1));
+    assert_eq!(MobileInput::parse("y=5").yaw, 1.0, "clamped");
+    assert!(!MobileInput::parse("").present);
+}
+
+#[test]
+fn the_yaw_buttons_turn_the_nose() {
+    let mut app = keys_app();
+    set(&mut app, |i| {
+        i.present = true;
+        i.yaw = 1.0;
+    });
+    let yaw = app
+        .world_mut()
+        .query_filtered::<&FlightInput, With<PlayerAircraft>>()
+        .single(app.world())
+        .unwrap()
+        .yaw;
+    assert_eq!(yaw, -1.0, "right button: yaw right (keyboard: E)");
+}
+
+fn touch_game() -> App {
+    let mut app = game();
+    set(&mut app, |i| i.present = true);
+    app
+}
+
+fn paused(app: &App) -> bool {
+    app.world().resource::<Pause>().player
+}
+
+#[test]
+fn a_tap_that_takes_the_focus_does_not_pause_but_the_background_does() {
+    let mut desktop = game();
+    desktop
+        .world_mut()
+        .write_message(bevy::window::WindowFocused {
+            window: Entity::PLACEHOLDER,
+            focused: false,
+        });
+    desktop.update();
+    assert!(paused(&desktop), "desktop: losing focus pauses");
+
+    let mut phone = touch_game();
+    phone
+        .world_mut()
+        .write_message(bevy::window::WindowFocused {
+            window: Entity::PLACEHOLDER,
+            focused: false,
+        });
+    phone.update();
+    assert!(!paused(&phone), "phone: a button tap took the focus");
+    set(&mut phone, |i| i.hidden += 1);
+    phone.update();
+    assert!(paused(&phone), "phone: the page went to the background");
+}
+
+#[test]
+fn key_hints_and_the_key_help_stay_hidden_on_touch() {
+    let mut app = touch_game();
+    for _ in 0..3 {
+        app.update();
+    }
+    let hints: Vec<Visibility> = app
+        .world_mut()
+        .query_filtered::<&Visibility, With<KeyHint>>()
+        .iter(app.world())
+        .copied()
+        .collect();
+    assert!(hints.len() >= 5, "{}", hints.len());
+    assert!(hints.iter().all(|v| *v == Visibility::Hidden));
+    let help: Vec<Visibility> = app
+        .world_mut()
+        .query_filtered::<&Visibility, With<crate::flight::KeyHelp>>()
+        .iter(app.world())
+        .copied()
+        .collect();
+    assert!(!help.is_empty());
+    assert!(
+        help.iter().all(|v| *v == Visibility::Hidden),
+        "no help at round start"
+    );
+}
+
+#[test]
+fn save_score_opens_the_dialog_again_after_cancel() {
+    let mut app = touch_game();
+    app.world_mut().resource_mut::<Round>().phase = RoundPhase::Over(Outcome::ShotDown);
+    app.update();
+    app.update();
+    set(&mut app, |i| i.name_cancel += 1);
+    assert!(!app.world().resource::<ScoreState>().dialog);
+    set(&mut app, |i| i.save += 1);
+    assert!(app.world().resource::<ScoreState>().dialog);
+}

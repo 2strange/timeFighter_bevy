@@ -20,7 +20,7 @@ use crate::game_state::RoundSystems;
 pub use config::{FlightConfig, PLAYER_SPAWN, SPAWN_AIM, spawn_pitch_towards};
 pub use input::PitchInvert;
 pub use jet_fx::{JetFxConfig, JetFxPoints, flame_length, vortex_strength};
-pub use key_help::{KeyHelpAppExt, KeyHelpLines, KeyHelpSection};
+pub use key_help::{KeyHelp, KeyHelpAppExt, KeyHelpLines, KeyHelpSection};
 pub use model::{FlightInput, FlightState, step};
 
 /// Marks the aircraft flown by the player.

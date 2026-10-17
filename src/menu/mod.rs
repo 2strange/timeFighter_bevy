@@ -456,8 +456,13 @@ fn rebuild_menu(
     selection: Res<MenuSelection>,
     mut root: Query<&mut Visibility, With<MenuRoot>>,
     panel: Query<Entity, With<MenuPanel>>,
+    (mobile, mut was_touch): (Option<Res<crate::mobile::MobileInput>>, Local<bool>),
 ) {
-    if !menu.is_changed() && !selection.is_changed() {
+    // Touch screens get tap wording instead of keys.
+    let touch = crate::mobile::touch(mobile.as_deref());
+    let touch_changed = touch != *was_touch;
+    *was_touch = touch;
+    if !menu.is_changed() && !selection.is_changed() && !touch_changed {
         return;
     }
     for mut visibility in &mut root {
@@ -553,7 +558,7 @@ fn rebuild_menu(
                 }
                 Section::Bottom => {
                     for row in block {
-                        spawn_start_button(panel, row, menu.cursor == row.id);
+                        spawn_start_button(panel, row, menu.cursor == row.id, touch);
                     }
                 }
                 // Without Custom only the light: a plain row.
@@ -580,7 +585,11 @@ fn rebuild_menu(
             }
         }
         panel.spawn(label(
-            "Arrows: choose    Q/E: tabs    Enter: start    Mouse works too",
+            if touch {
+                "Tap a value to choose it, START to fly"
+            } else {
+                "Arrows: choose    Q/E: tabs    Enter: start    Mouse works too"
+            },
             SMALL_SIZE,
             HUD_DIM,
         ));
@@ -767,7 +776,12 @@ fn spawn_tab_bar(parent: &mut ChildSpawnerCommands, row: &Row<RowId>, focused: b
         });
 }
 
-fn spawn_start_button(parent: &mut ChildSpawnerCommands, row: &Row<RowId>, focused: bool) {
+fn spawn_start_button(
+    parent: &mut ChildSpawnerCommands,
+    row: &Row<RowId>,
+    focused: bool,
+    touch: bool,
+) {
     let color = if focused { CURSOR } else { HUD };
     parent
         .spawn((
@@ -785,7 +799,11 @@ fn spawn_start_button(parent: &mut ChildSpawnerCommands, row: &Row<RowId>, focus
             },
             BorderColor::all(color),
         ))
-        .with_child(label("START  (Enter)", 22.0, color));
+        .with_child(label(
+            if touch { "START" } else { "START  (Enter)" },
+            22.0,
+            color,
+        ));
 }
 
 /// Scale of the panel so it fits `available` (physical px, height and
@@ -847,8 +865,12 @@ fn show_result_button(
     menu: Res<Menu>,
     round: Option<Res<Round>>,
     mut button: Query<&mut Visibility, With<ResultMenuButton>>,
+    mobile: Option<Res<crate::mobile::MobileInput>>,
 ) {
-    let show = !menu.open && round.is_some_and(|r| matches!(r.phase, RoundPhase::Over(_)));
+    // Touch screens have the overlay's own MENU button.
+    let show = !menu.open
+        && round.is_some_and(|r| matches!(r.phase, RoundPhase::Over(_)))
+        && !crate::mobile::touch(mobile.as_deref());
     for mut visibility in &mut button {
         let wanted = if show {
             Visibility::Visible

@@ -8,8 +8,10 @@
 //                         recentred hold (gyro) or the stick, -1..1
 //   t               thrust slider, 0..1
 //   g               gun held (1/0)
-//   m n x a M i     taps as counters: missile, next target, pause,
-//                   fly again, menu, invert pitch (pause screen)
+//   y               yaw buttons held: -1 left, 1 right
+//   m n x a M i s   taps as counters: missile, next target, pause,
+//                   fly again, menu, invert pitch, save score
+//   h               counter: the page went to the background (pauses)
 //   name ok esc     the name field's text while the dialog is open, and
 //                   its save and cancel taps
 //
@@ -33,6 +35,9 @@ const state = {
   a: 0,
   M: 0,
   i: 0,
+  s: 0,
+  h: 0,
+  y: 0,
   name: null,
   ok: 0,
   esc: 0,
@@ -40,8 +45,10 @@ const state = {
 
 function publish() {
   const parts = [`src=${state.src}`, `p=${state.p.toFixed(2)}`, `r=${state.r.toFixed(2)}`];
-  parts.push(`t=${state.t.toFixed(3)}`, `g=${state.g}`);
-  for (const key of ['m', 'n', 'x', 'a', 'M', 'i', 'ok', 'esc']) parts.push(`${key}=${state[key]}`);
+  parts.push(`t=${state.t.toFixed(3)}`, `g=${state.g}`, `y=${state.y}`);
+  for (const key of ['m', 'n', 'x', 'a', 'M', 'i', 's', 'h', 'ok', 'esc']) {
+    parts.push(`${key}=${state[key]}`);
+  }
   if (state.name !== null) parts.push(`name=${encodeURIComponent(state.name)}`);
   root.dataset.tfInput = parts.join(';');
 }
@@ -109,18 +116,22 @@ html[data-tf-mode="over"] #tc .over, html[data-tf-mode="dialog"] #tc .dialog { d
   background: rgba(6, 10, 14, 0.45); border: 2px solid rgba(184, 255, 199, 0.6); border-radius: 14px; }
 #tc button:active, #tc .on { background: rgba(255, 191, 51, 0.35); border-color: #ffbf33; }
 #tc .left { position: absolute; left: calc(14px + env(safe-area-inset-left)); bottom: 16px; top: 64px;
-  flex-direction: column; justify-content: flex-end; gap: 14px; }
+  flex-direction: column; justify-content: flex-end; gap: 12px; }
+#tc .yaw { display: flex; gap: 10px; }
+#tc .yaw button { width: 64px; height: 56px; font-size: 20px; }
 #tc .right { position: absolute; right: calc(14px + env(safe-area-inset-right)); top: 64px; bottom: 16px;
   flex-direction: column; justify-content: flex-start; align-items: flex-end; gap: 12px; }
-#tc .top { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); gap: 10px; }
+#tc .top { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); }
+#tc .top button { padding: 12px 22px; font-size: 13px; letter-spacing: 0.1em; }
+#tc .corner { position: absolute; top: 10px; left: calc(14px + env(safe-area-inset-left)); }
 #tc .slider { width: 64px; flex: 1; max-height: 240px; position: relative; }
 #tc .slider .fill { position: absolute; left: 6px; right: 6px; bottom: 6px; border-radius: 9px;
   background: rgba(184, 255, 199, 0.35); }
 #tc .slider span, #tc .stick span { position: absolute; left: 0; right: 0; top: 6px; text-align: center;
   font-size: 11px; letter-spacing: 0.1em; }
-#tc .stick { width: 132px; height: 132px; border-radius: 50%; position: relative; display: none; }
+#tc .stick { position: absolute; left: calc(110px + env(safe-area-inset-left)); bottom: 20px;
+  width: 132px; height: 132px; border-radius: 50%; display: none; }
 #tc.no-gyro .stick { display: block; }
-#tc.no-gyro .slider { max-height: 150px; }
 #tc .stick .knob { position: absolute; width: 48px; height: 48px; left: 42px; top: 42px; border-radius: 50%;
   background: rgba(184, 255, 199, 0.5); }
 #tc .gun { width: 104px; height: 104px; border-radius: 50%; font-size: 16px; }
@@ -129,13 +140,18 @@ html[data-tf-mode="over"] #tc .over, html[data-tf-mode="dialog"] #tc .dialog { d
 #tc .small { padding: 8px 14px; font-size: 12px; letter-spacing: 0.08em; }
 #tc .center { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); gap: 14px; }
 #tc .center button { padding: 14px 26px; font-size: 16px; letter-spacing: 0.12em; }
+#tc .pausebox { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  flex-direction: column; align-items: center; gap: 16px; }
+#tc .pausebox .resume { padding: 22px 64px; font-size: 22px; letter-spacing: 0.16em; }
+#tc .quit { padding: 10px 20px; font-size: 13px; letter-spacing: 0.1em; }
 #tc .dialog { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); gap: 10px;
   align-items: center; }
 #tc .dialog input { pointer-events: auto; width: min(60vw, 340px); padding: 12px 14px; font: 20px system-ui, sans-serif;
   color: #ffbf33; background: rgba(6, 10, 14, 0.9); border: 2px solid #ffbf33; border-radius: 10px; }
 #tc .dialog button { padding: 12px 18px; }
-#tc .turn { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-  background: rgba(6, 10, 14, 0.92); font-size: 18px; letter-spacing: 0.1em; pointer-events: auto; }
+#tc .turn { position: fixed; inset: 0; display: none; flex-direction: column; gap: 28px;
+  align-items: center; justify-content: center; text-align: center; padding: 24px;
+  background: rgba(6, 10, 14, 0.94); font-size: 18px; letter-spacing: 0.1em; pointer-events: auto; }
 @media (orientation: portrait) { body.playing #tc .turn { display: flex; } }
 `;
 
@@ -144,6 +160,21 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text) node.textContent = text;
   return node;
+}
+
+/** Back to the start page, without starting a round there. */
+function quitButton() {
+  const button = el('button', 'quit', 'QUIT TO START');
+  button.type = 'button';
+  button.addEventListener('click', () => {
+    try {
+      localStorage.removeItem('timefighter.autostart');
+    } catch {
+      // Nothing stored.
+    }
+    location.replace(location.pathname);
+  });
+  return button;
 }
 
 /** A button that counts its taps into state[key]. */
@@ -179,6 +210,7 @@ function build() {
     publish();
   };
   slider.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
     slider.setPointerCapture(event.pointerId);
     setThrust(event);
   });
@@ -207,6 +239,7 @@ function build() {
     publish();
   };
   stick.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
     stick.setPointerCapture(event.pointerId);
     moveStick(event);
   });
@@ -221,7 +254,31 @@ function build() {
   };
   stick.addEventListener('pointerup', releaseStick);
   stick.addEventListener('pointercancel', releaseStick);
-  left.append(stick, slider);
+  // Yaw: held like the arrow keys.
+  const yaw = el('div', 'yaw');
+  for (const [text, direction] of [
+    ['◀', -1],
+    ['▶', 1],
+  ]) {
+    const button = el('button', '', text);
+    button.type = 'button';
+    button.setAttribute('aria-label', direction < 0 ? 'Yaw left' : 'Yaw right');
+    const set = (on) => (event) => {
+      event.preventDefault();
+      if (on) button.setPointerCapture(event.pointerId);
+      state.y = on ? direction : state.y === direction ? 0 : state.y;
+      button.classList.toggle('on', on);
+      publish();
+    };
+    button.addEventListener('pointerdown', set(true));
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      button.addEventListener(type, set(false));
+    }
+    yaw.append(button);
+  }
+  left.append(slider, yaw);
+  const stickArea = el('div', 'group play');
+  stickArea.append(stick);
 
   // Right: gun, missile, a slot for a third weapon, next target.
   const right = el('div', 'group play right');
@@ -247,21 +304,29 @@ function build() {
   right.append(gun, tapButton('missile', 'MISSILE', 'm'), slot, tapButton('small', 'TARGET', 'n'));
 
   // Top: pause and recenter.
+  // Top centre: recenter, used often. Pause in the left corner, away from
+  // the right thumb's weapons.
   const top = el('div', 'group play top');
-  const center = el('button', 'small', 'RECENTER');
+  const center = el('button', '', 'RECENTER');
   center.type = 'button';
   center.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     recenter();
   });
-  top.append(tapButton('small', 'PAUSE', 'x'), center);
+  top.append(center);
+  const corner = el('div', 'group play corner');
+  corner.append(tapButton('small', 'PAUSE', 'x'));
 
-  const paused = el('div', 'group paused center');
+  const paused = el('div', 'group paused pausebox');
   const invert = tapButton('', 'INVERT PITCH: OFF', 'i');
-  paused.append(tapButton('', 'RESUME', 'x'), invert);
+  paused.append(quitButton(), tapButton('resume', 'RESUME', 'x'), invert);
 
   const over = el('div', 'group over center');
-  over.append(tapButton('', 'FLY AGAIN', 'a'), tapButton('', 'MENU', 'M'));
+  over.append(
+    tapButton('', 'FLY AGAIN', 'a'),
+    tapButton('', 'MENU', 'M'),
+    tapButton('', 'SAVE SCORE', 's'),
+  );
 
   // The name: a real field, so the phone's keyboard opens when it is tapped.
   const dialog = el('div', 'group dialog');
@@ -289,8 +354,9 @@ function build() {
   const cancel = tapButton('', '✕', 'esc');
   dialog.append(field, ok, cancel);
 
-  const turn = el('div', 'turn', 'TURN YOUR PHONE SIDEWAYS');
-  overlay.append(left, right, top, paused, over, dialog, turn);
+  const turn = el('div', 'turn');
+  turn.append(el('div', '', 'TURN YOUR PHONE SIDEWAYS'), quitButton());
+  overlay.append(left, stickArea, right, top, corner, paused, over, dialog, turn);
   document.body.append(overlay);
 
   // The game says what it shows, and whether pitch is inverted.
@@ -322,7 +388,18 @@ let overlay = null;
  */
 export function startTouch() {
   if (!coarse) return;
-  overlay ??= build();
+  if (!overlay) {
+    overlay = build();
+    // In the background (another app, the lock screen): pause.
+    const away = () => {
+      state.h += 1;
+      publish();
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') away();
+    });
+    window.addEventListener('pagehide', away);
+  }
   document.body.classList.add('playing');
   publish();
 
