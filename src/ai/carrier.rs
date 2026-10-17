@@ -16,6 +16,10 @@ pub const LAUNCH_INTERVAL: f32 = 20.0;
 /// ... and from waking to the first (the crew scrambles).
 pub const FIRST_LAUNCH_DELAY: f32 = 3.0;
 
+/// A carrier launches at most this many fighters in all, whatever the
+/// level: the most enemies a round can bring stays fixed (for the score).
+pub const MAX_LAUNCHES_PER_CARRIER: u32 = 12;
+
 /// The lookouts spot the player within this distance, all round (m).
 pub const CARRIER_SPOT_RANGE: f32 = 2_500.0;
 
@@ -112,7 +116,8 @@ pub(super) fn launch_fighters(
         }
         carrier.cooldown -= dt;
         carrier.launched.retain(|f| alive.contains(*f));
-        let room = (carrier.launched.len() as u32) < carrier.spec.max_alive;
+        let room = (carrier.launched.len() as u32) < carrier.spec.max_alive
+            && carrier.count < MAX_LAUNCHES_PER_CARRIER;
         if carrier.cooldown > 0.0 || !room || carrier.spec.fighters.is_empty() {
             continue;
         }

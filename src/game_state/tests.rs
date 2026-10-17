@@ -1714,3 +1714,30 @@ fn a_zeppelin_launches_fighters_that_count_as_enemies() {
     assert!(fighters(&mut app).is_empty());
     assert_eq!(round(&app).enemies_left(&mission), 0);
 }
+
+#[test]
+fn the_largest_round_counts_twelve_fighters_per_carrier() {
+    use crate::ai::MAX_LAUNCHES_PER_CARRIER;
+    let params = crate::game_state::DifficultyParams {
+        bomber_waves: 1,
+        zeppelins: 1,
+        zeppelin_fighters: 6,
+        ..default()
+    };
+    let mission = Mission::battle(Difficulty::Custom(params));
+    assert_eq!(MAX_LAUNCHES_PER_CARRIER, 12);
+    assert_eq!(mission.max_enemy_count(), mission.enemy_count() + 12);
+    let none = Mission::battle(Difficulty::Custom(crate::game_state::DifficultyParams {
+        zeppelin_fighters: 0,
+        ..params
+    }));
+    assert_eq!(none.max_enemy_count(), none.enemy_count());
+    assert_eq!(
+        Mission::battle(Difficulty::Insane).max_enemy_count(),
+        35 + 3 * 12
+    );
+    assert_eq!(
+        Mission::hunt(Difficulty::Insane).max_enemy_count(),
+        Mission::hunt(Difficulty::Insane).enemy_count()
+    );
+}

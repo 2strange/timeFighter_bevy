@@ -344,11 +344,7 @@ fn spawn_hud(mut commands: Commands, keys: Res<CombatKeys>) {
                     text("", 22.0, Color::srgb(0.9, 0.9, 0.9)),
                     TextLayout::justify(Justify::Center),
                 ));
-                screen.spawn(text(
-                    "Enter or R: fly again",
-                    18.0,
-                    Color::srgb(0.75, 0.75, 0.75),
-                ));
+                screen.spawn(text("R: fly again", 18.0, Color::srgb(0.75, 0.75, 0.75)));
             });
         });
 }

@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 use super::{Difficulty, GameSettings, MAX_ZEPPELIN_FIGHTERS, PilotMix};
 use crate::{
-    ai::{CarrierSpec, EnemyKind, EnemyTuning, PilotSkill},
+    ai::{CarrierSpec, EnemyKind, EnemyTuning, MAX_LAUNCHES_PER_CARRIER, PilotSkill},
     combat::CombatRng,
     flight::PLAYER_SPAWN,
 };
@@ -363,6 +363,21 @@ impl Mission {
 
     pub fn enemy_count(&self) -> u32 {
         self.waves.iter().map(WaveSpec::enemy_count).sum()
+    }
+
+    /// The most enemies the round can bring: its waves plus every fighter
+    /// its carriers may launch ([`MAX_LAUNCHES_PER_CARRIER`] each, none for
+    /// a carrier without a hangar).
+    pub fn max_enemy_count(&self) -> u32 {
+        let launches: u32 = self
+            .waves
+            .iter()
+            .flat_map(|w| &w.groups)
+            .filter_map(|g| g.carrier.as_ref())
+            .filter(|c| c.max_alive > 0 && !c.fighters.is_empty())
+            .map(|_| MAX_LAUNCHES_PER_CARRIER)
+            .sum();
+        self.enemy_count() + launches
     }
 
     /// The same waves entering at random places, different for every

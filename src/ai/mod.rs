@@ -22,7 +22,7 @@ use bevy::prelude::*;
 pub use bomber::{BomberPhase, BomberPilot, bomber_bundle, zeppelin_parts};
 pub use carrier::{
     CARRIER_SPOT_RANGE, Carrier, CarrierSpec, FIRST_LAUNCH_DELAY, FighterLaunched, LAUNCH_DROP,
-    LAUNCH_INTERVAL,
+    LAUNCH_INTERVAL, MAX_LAUNCHES_PER_CARRIER,
 };
 pub use obstacles::ObstacleMap;
 pub use tactics::{AttackSlots, FlightGroup, HOLDING_RADIUS, sees};

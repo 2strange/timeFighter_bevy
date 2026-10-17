@@ -1164,3 +1164,65 @@ fn a_zeppelin_launches_only_once_it_spots_the_player() {
     }
     assert_eq!(fighters(&mut app), 1);
 }
+
+#[test]
+fn a_zeppelin_launches_twelve_fighters_at_most() {
+    use super::{
+        Carrier, CarrierSpec, Enemy, FighterLaunched, LAUNCH_INTERVAL, MAX_LAUNCHES_PER_CARRIER,
+    };
+    let mut app = app(10.0, false);
+    let zeppelin = app
+        .world_mut()
+        .spawn((
+            super::bomber_bundle(
+                EnemyKind::Zeppelin,
+                EnemyTuning::default(),
+                Transform::from_xyz(0.0, 800.0, 0.0),
+                0,
+            ),
+            super::zeppelin_parts(),
+            Carrier::new(
+                CarrierSpec {
+                    fighters: vec![EnemyKind::Bf109K4],
+                    max_alive: 6,
+                },
+                PilotSkill::ROOKIE,
+                EnemyTuning::default(),
+                0,
+            ),
+        ))
+        .id();
+    app.world_mut().write_message(crate::combat::Hit {
+        projectile: Entity::PLACEHOLDER,
+        target: zeppelin,
+        point: Vec3::ZERO,
+        team: Team::Player,
+        weapon: crate::combat::Weapon::Gun,
+        damage: 1.0,
+    });
+    let mut launched = 0;
+    // Every fighter is gone again at once: only the total holds it back.
+    for _ in 0..(20.0 * LAUNCH_INTERVAL * 10.0) as u32 {
+        app.update();
+        launched += app
+            .world_mut()
+            .resource_mut::<Messages<FighterLaunched>>()
+            .drain()
+            .count() as u32;
+        let fighters: Vec<Entity> = app
+            .world_mut()
+            .query::<(Entity, &Enemy)>()
+            .iter(app.world())
+            .filter(|(_, e)| e.kind == EnemyKind::Bf109K4)
+            .map(|(entity, _)| entity)
+            .collect();
+        for fighter in fighters {
+            app.world_mut().despawn(fighter);
+        }
+    }
+    assert_eq!(launched, MAX_LAUNCHES_PER_CARRIER);
+    assert_eq!(
+        app.world().get::<Carrier>(zeppelin).unwrap().count,
+        MAX_LAUNCHES_PER_CARRIER
+    );
+}
