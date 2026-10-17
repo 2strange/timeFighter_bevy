@@ -23,6 +23,7 @@ impl Plugin for CombatVisualsPlugin {
                     dress_projectiles,
                     // Same frame as the player's wreck explosion.
                     dress_effects.after(super::wreck::WreckSystems),
+                    dress_smoke,
                     dress_bombs,
                 ),
             )
@@ -183,6 +184,24 @@ enum EffectPart {
     Smoke,
     /// Flies off with this velocity (m/s), falling.
     Debris(Vec3),
+}
+
+/// Smoke puffs share one low-poly ball and the explosions' smoke material.
+fn dress_smoke(
+    mut commands: Commands,
+    visuals: Option<Res<EffectVisuals>>,
+    added: Query<Entity, Added<super::smoke::SmokePuff>>,
+) {
+    let Some(visuals) = visuals else {
+        return;
+    };
+    for puff in &added {
+        commands.entity(puff).insert((
+            Mesh3d(visuals.ball.clone()),
+            MeshMaterial3d(visuals.smoke.clone()),
+            NotShadowCaster,
+        ));
+    }
 }
 
 fn dress_effects(

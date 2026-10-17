@@ -649,7 +649,10 @@ fn kills_explode_and_hits_flash_where_they_happen() {
             .collect::<Vec<_>>()
     };
     let now = effects(&mut app);
-    assert!(now.contains(&(super::EffectKind::Spark, point)), "{now:?}");
+    assert!(
+        now.contains(&(super::EffectKind::MissileBurst, point)),
+        "{now:?}"
+    );
     assert!(
         now.iter()
             .any(|(kind, at)| *kind == super::EffectKind::Explosion
@@ -1039,4 +1042,155 @@ fn the_zeppelin_is_hit_along_its_whole_length() {
     assert!(hit_at(-110.0), "bow");
     assert!(hit_at(110.0), "stern");
     assert!(!hit_at(160.0), "past the stern");
+}
+
+// --- Missile bursts and smoke trails ---------------------------------------
+
+fn effects_of(app: &mut App, kind: super::EffectKind) -> Vec<Vec3> {
+    app.world_mut()
+        .query::<(&super::Effect, &Transform)>()
+        .iter(app.world())
+        .filter(|(e, _)| e.kind == kind)
+        .map(|(_, t)| t.translation)
+        .collect()
+}
+
+fn hit(app: &mut App, target: Entity, point: Vec3, weapon: Weapon, damage: f32) {
+    app.world_mut().write_message(Hit {
+        projectile: Entity::PLACEHOLDER,
+        target,
+        point,
+        team: Team::Player,
+        weapon,
+        damage,
+    });
+    app.update();
+}
+
+#[test]
+fn every_missile_hit_bursts_even_when_the_target_survives() {
+    let mut app = app();
+    spawn_player(&mut app, high_up());
+    // A tough target: one missile is not enough.
+    let bomber = spawn_target(&mut app, Vec3::new(0.0, 1_000.0, -500.0));
+    app.world_mut().get_mut::<Health>(bomber).unwrap().current = 50.0;
+    let point = Vec3::new(2.0, 1_000.0, -497.0);
+    hit(&mut app, bomber, point, Weapon::Missile, 30.0);
+    assert!(!app.world().get::<Health>(bomber).unwrap().is_dead());
+    assert_eq!(
+        effects_of(&mut app, super::EffectKind::MissileBurst),
+        vec![point]
+    );
+    assert!(effects_of(&mut app, super::EffectKind::Explosion).is_empty());
+
+    // A gun round only flashes.
+    let gun_at = Vec3::new(-1.0, 1_000.0, -498.0);
+    hit(&mut app, bomber, gun_at, Weapon::Gun, 1.0);
+    assert!(effects_of(&mut app, super::EffectKind::Spark).contains(&gun_at));
+    assert_eq!(
+        effects_of(&mut app, super::EffectKind::MissileBurst).len(),
+        1
+    );
+
+    // The killing missile: its burst plus the big explosion.
+    hit(&mut app, bomber, point, Weapon::Missile, 30.0);
+    assert_eq!(
+        effects_of(&mut app, super::EffectKind::MissileBurst).len(),
+        2
+    );
+    assert_eq!(effects_of(&mut app, super::EffectKind::Explosion).len(), 1);
+    assert!(super::EffectKind::MissileBurst.size() < super::EffectKind::Explosion.size());
+}
+
+#[test]
+fn a_missile_striking_a_building_bursts_a_gun_round_does_not() {
+    let mut app = app();
+    let jet = spawn_player(&mut app, high_up());
+    let wall = spawn_world_box(&mut app, Vec3::new(0.0, 50.0, -300.0), Vec3::splat(50.0));
+    let munition = |weapon| Munition {
+        shooter: jet,
+        team: Team::Player,
+        weapon,
+        damage: 50.0,
+        fuse_radius: 0.0,
+        last_position: Vec3::ZERO,
+    };
+    let missile = app.world_mut().spawn(munition(Weapon::Missile)).id();
+    let round = app.world_mut().spawn(munition(Weapon::Gun)).id();
+    let at = Vec3::new(0.0, 60.0, -250.0);
+    for projectile in [missile, round] {
+        app.world_mut().write_message(ProjectileHit {
+            projectile,
+            target: wall,
+            point: at,
+        });
+    }
+    app.update();
+    assert_eq!(
+        effects_of(&mut app, super::EffectKind::MissileBurst),
+        vec![at]
+    );
+    assert!(effects_of(&mut app, super::EffectKind::Spark).is_empty());
+}
+
+fn active_puffs(app: &mut App) -> Vec<Vec3> {
+    app.world_mut()
+        .query::<(&super::smoke::SmokePuff, &Transform)>()
+        .iter(app.world())
+        .filter(|(p, _)| p.is_active())
+        .map(|(_, t)| t.translation)
+        .collect()
+}
+
+/// Puffs after `seconds` behind one enemy at `fraction` of its health.
+fn smoke_after(fraction: f32, seconds: f32) -> (App, Entity, Vec<Vec3>) {
+    let mut app = app();
+    let at = Vec3::new(0.0, 1_000.0, -500.0);
+    let enemy = spawn_target(&mut app, at);
+    {
+        let mut health = app.world_mut().get_mut::<Health>(enemy).unwrap();
+        health.current = health.max * fraction;
+    }
+    run_for(&mut app, seconds);
+    let puffs = active_puffs(&mut app);
+    (app, enemy, puffs)
+}
+
+#[test]
+fn enemies_below_half_health_trail_smoke_more_the_worse_they_are() {
+    let (_, _, healthy) = smoke_after(0.8, 1.0);
+    assert!(healthy.is_empty(), "smoke above half health");
+    let (_, _, hurt) = smoke_after(0.4, 1.0);
+    let (_, _, wrecked) = smoke_after(0.05, 1.0);
+    assert!(!hurt.is_empty(), "no smoke at 40 %");
+    assert!(
+        wrecked.len() > hurt.len() * 2,
+        "{} vs {}",
+        wrecked.len(),
+        hurt.len()
+    );
+    // At the aircraft's tail, rising a little.
+    let at = Vec3::new(0.0, 1_000.0, -500.0);
+    assert!(hurt.iter().all(|p| p.distance(at) < 20.0), "{hurt:?}");
+}
+
+#[test]
+fn smoke_comes_from_a_fixed_pool_and_clears_after_the_aircraft_is_gone() {
+    let (mut app, enemy, _) = smoke_after(0.0, 0.1);
+    // Nearly dead for a long time: never more puffs than the pool.
+    run_for(&mut app, 5.0);
+    let pool = app
+        .world_mut()
+        .query::<&super::smoke::SmokePuff>()
+        .iter(app.world())
+        .count();
+    assert_eq!(pool, super::smoke::POOL_SIZE);
+    assert!(!active_puffs(&mut app).is_empty());
+
+    app.world_mut().despawn(enemy);
+    run_for(&mut app, 2.0);
+    assert!(
+        active_puffs(&mut app).is_empty(),
+        "smoke outlived its puffs"
+    );
 }
