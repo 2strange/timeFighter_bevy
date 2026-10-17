@@ -161,15 +161,16 @@ impl Difficulty {
             (GameMode::Protect, Difficulty::Normal) => 16,
             (GameMode::Protect, Difficulty::Hard) => 12,
             (GameMode::Protect, Difficulty::Insane) => 12,
-            // Battle: bombers take two missiles, fighters one. Super Easy
-            // has a reserve (24 for 20 needed), Easy just enough (20), Normal
-            // and up leave a share of the targets to the gun (24 of 30, 16
-            // of 36, 16 of 48).
+            // Battle: bombers take two missiles, fighters one, the zeppelin
+            // (Normal and up) about nine. Super Easy has a reserve (24 for
+            // 20 needed), Easy just enough (20), Normal stays doable (32 for
+            // 30 + 9), Hard and Insane leave much to the gun (20 for 36 + 9
+            // and 48 + 9).
             (GameMode::Battle, Difficulty::SuperEasy) => 24,
             (GameMode::Battle, Difficulty::Easy) => 20,
-            (GameMode::Battle, Difficulty::Normal) => 24,
-            (GameMode::Battle, Difficulty::Hard) => 16,
-            (GameMode::Battle, Difficulty::Insane) => 16,
+            (GameMode::Battle, Difficulty::Normal) => 32,
+            (GameMode::Battle, Difficulty::Hard) => 20,
+            (GameMode::Battle, Difficulty::Insane) => 20,
         };
         DifficultyParams { missiles, ..params }
     }
@@ -193,6 +194,7 @@ impl Difficulty {
                 bomber_waves: 2,
                 wave_interval: 150.0,
                 city_loss: 0.4,
+                zeppelin: false,
                 ..base
             },
             Difficulty::Easy => DifficultyParams {
@@ -208,6 +210,7 @@ impl Difficulty {
                 bomber_waves: 2,
                 wave_interval: 130.0,
                 city_loss: 0.35,
+                zeppelin: false,
                 ..base
             },
             Difficulty::Normal => base,
@@ -287,6 +290,8 @@ pub struct DifficultyParams {
     pub wave_interval: f32,
     /// The round is lost once this share of the city centre is destroyed.
     pub city_loss: f32,
+    /// Battle ends with the zeppelin as the last wave.
+    pub zeppelin: bool,
 }
 
 impl Default for DifficultyParams {
@@ -307,6 +312,7 @@ impl Default for DifficultyParams {
             bombers_per_wave: 4,
             wave_interval: 110.0,
             city_loss: 0.3,
+            zeppelin: true,
         }
     }
 }

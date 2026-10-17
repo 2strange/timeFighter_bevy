@@ -21,8 +21,8 @@ use crate::{
     ai::Enemy,
     camera::{CameraSystems, ChaseCamera},
     combat::{
-        AircraftVelocity, CombatConfig, CombatKeys, Destroyed, Gun, Health, Hit, LockOn, LockState,
-        MissileRack, Team, gun_lead, in_seeker_cone, key_labels,
+        AircraftVelocity, CombatConfig, CombatKeys, Destroyed, GoingDown, Gun, Health, Hit, LockOn,
+        LockState, MissileRack, Team, gun_lead, in_seeker_cone, key_labels,
     },
     flight::{FlightState, PlayerAircraft},
     game_state::{Mission, Round, RoundPhase, RoundSystems},
@@ -383,6 +383,7 @@ fn update_texts(
     mission: Res<Mission>,
     city: Option<Res<CityHealth>>,
     feedback: Res<Feedback>,
+    going_down: Query<&Enemy, With<GoingDown>>,
     player: Query<
         (
             &FlightState,
@@ -410,18 +411,24 @@ fn update_texts(
                 let city_text = city.map_or(String::new(), |(intact, _)| {
                     format!("    CITY {:.0} %", intact * 100.0)
                 });
+                // A burning wreck on its way down: where will it hit?
+                let falling = going_down.iter().next().map_or(String::new(), |e| {
+                    format!("    {} GOING DOWN", e.kind.display_name().to_uppercase())
+                });
                 let tint = match city {
+                    _ if !falling.is_empty() => ALERT,
                     Some((intact, limit)) if intact < limit + 0.1 => ALERT,
                     _ => HUD,
                 };
                 (
                     format!(
-                        "{} ({})    ENEMIES {}{}    {}",
+                        "{} ({})    ENEMIES {}{}    {}{}",
                         mission.mode.display_name(),
                         mission.difficulty.display_name().to_uppercase(),
                         round.enemies_left(&mission),
                         city_text,
-                        format_time(round.elapsed)
+                        format_time(round.elapsed),
+                        falling
                     ),
                     tint,
                 )

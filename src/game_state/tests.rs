@@ -977,23 +977,37 @@ fn battle_waves_are_bombers_with_a_fighter_escort() {
         .iter()
         .map(|d| Mission::battle(*d, &MissionConfig::default()).enemy_count())
         .collect();
-    // SE 2×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane 4×(4+4).
-    assert_eq!(totals, vec![12, 12, 18, 24, 32]);
+    // SE 2×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane
+    // 4×(4+4); from Normal on plus the zeppelin with a double escort.
+    assert_eq!(totals, vec![12, 12, 18 + 5, 24 + 9, 32 + 9]);
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
         let mission = Mission::battle(difficulty, &MissionConfig::default());
         assert_eq!(mission.mode, GameMode::Battle);
         assert_eq!(mission.city_loss, Some(params.city_loss));
-        for wave in &mission.waves {
+        let bomber_waves = params.bomber_waves as usize;
+        assert_eq!(
+            mission.waves.len(),
+            bomber_waves + usize::from(params.zeppelin)
+        );
+        for (i, wave) in mission.waves.iter().enumerate() {
             let [bombers, escort] = &wave.groups[..] else {
                 panic!("two groups per wave");
             };
             assert!(bombers.members.iter().all(|k| k.is_bomber()));
-            assert_eq!(bombers.count(), params.bombers_per_wave);
             assert!(escort.members.iter().all(|k| !k.is_bomber()));
-            assert_eq!(escort.count(), params.flight_size);
             assert_eq!(escort.escorts, Some(0));
+            if i < bomber_waves {
+                assert_eq!(bombers.count(), params.bombers_per_wave);
+                assert_eq!(escort.count(), params.flight_size);
+            } else {
+                // The last wave: the zeppelin and a double escort.
+                assert_eq!(bombers.members, vec![EnemyKind::Zeppelin]);
+                assert_eq!(escort.count(), 2 * params.flight_size);
+            }
         }
+        let zeppelin_levels = !matches!(difficulty, Difficulty::SuperEasy | Difficulty::Easy);
+        assert_eq!(params.zeppelin, zeppelin_levels, "{difficulty:?}");
     }
     let second = Mission::battle(
         Difficulty::Hard,
@@ -1021,7 +1035,7 @@ fn battle_missiles_follow_the_two_for_a_bomber_one_for_a_fighter_rule() {
         .iter()
         .map(|d| d.params_for(GameMode::Battle).missiles)
         .collect();
-    assert_eq!(missiles, vec![24, 20, 24, 16, 16]);
+    assert_eq!(missiles, vec![24, 20, 32, 20, 20]);
 }
 
 #[test]
@@ -1321,4 +1335,50 @@ fn levels_set_gun_ammunition_speed_and_flights() {
             "{difficulty:?}"
         );
     }
+}
+
+#[test]
+fn the_battle_is_only_won_once_the_zeppelin_wreck_has_hit_the_ground() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Normal),
+        true,
+    );
+    let mission = app.world().resource::<Mission>().clone();
+    // Down with every wave as it comes, the zeppelin last.
+    for _ in 0..mission.waves.len() {
+        shoot_down_all(&mut app);
+        app.update();
+    }
+    let falling = app
+        .world_mut()
+        .query_filtered::<&Enemy, With<crate::combat::GoingDown>>()
+        .iter(app.world())
+        .map(|e| e.kind)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        falling,
+        vec![crate::ai::EnemyKind::Zeppelin],
+        "burning on its way down"
+    );
+    assert_eq!(
+        round(&app).enemies_left(&mission),
+        0,
+        "already counts as down"
+    );
+    run_for(&mut app, 5.0);
+    assert_eq!(
+        round(&app).phase,
+        RoundPhase::Running,
+        "not before the impact"
+    );
+    run_for(&mut app, 40.0);
+    // It came down north of the centre: the city stands, the battle is won.
+    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
+    let wrecks = app
+        .world_mut()
+        .query_filtered::<(), With<crate::combat::GoingDown>>()
+        .iter(app.world())
+        .count();
+    assert_eq!(wrecks, 0);
 }

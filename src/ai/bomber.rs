@@ -10,8 +10,8 @@ use super::{
 };
 use crate::{
     combat::{
-        AircraftType, AircraftVelocity, BombSpec, Health, Hitbox, Team, TurretMount, Turrets,
-        bomb_bundle, fall_time,
+        AircraftType, AircraftVelocity, BombSpec, FallsWhenDestroyed, GoingDown, Health,
+        HitCapsule, Hitbox, Team, TurretMount, Turrets, bomb_bundle, fall_time,
     },
     physics::Layer,
 };
@@ -19,6 +19,70 @@ use crate::{
 /// Bombs per run and the gap between two of them in a stick (s).
 pub const BOMBS_PER_RUN: u32 = 6;
 pub const DROP_INTERVAL: f32 = 0.35;
+
+/// Bombs a `kind` drops per run and the gap between two (s): the zeppelin
+/// lays a long carpet.
+pub fn stick(kind: EnemyKind) -> (u32, f32) {
+    match kind {
+        EnemyKind::Zeppelin => (20, 0.6),
+        _ => (BOMBS_PER_RUN, DROP_INTERVAL),
+    }
+}
+
+/// Radius of the zeppelin's hull in its middle part (m).
+const ZEPPELIN_HULL_RADIUS: f32 = 21.8;
+
+/// The zeppelin's hit zone along its length and its burning fall: it goes
+/// down slowly where it is shot and wrecks what lies below (r 150 m).
+pub fn zeppelin_parts() -> impl Bundle {
+    // The hull's middle radius (the model's own collider uses the same);
+    // the capsule's round ends reach nose and tail.
+    let size = EnemyKind::Zeppelin.model().size();
+    let radius = ZEPPELIN_HULL_RADIUS;
+    (
+        HitCapsule {
+            half_length: 0.5 * size.length() - radius,
+            radius,
+        },
+        FallsWhenDestroyed {
+            impact_radius: 200.0,
+            impact_strength: 1.0,
+        },
+    )
+}
+
+/// Where a gunner named `name` looks (model frame) and how wide, or `None`
+/// if this kind does not man that position.
+fn mount_facing(kind: EnemyKind, name: &str) -> Option<(Vec3, f32)> {
+    let wide = 80_f32.to_radians();
+    let cone = 75_f32.to_radians();
+    if kind == EnemyKind::Zeppelin {
+        // All round on the airship.
+        if name.contains("top") {
+            return Some((Vec3::Y, wide));
+        }
+        if name.contains("tail") {
+            return Some((Vec3::Z, cone));
+        }
+        if name.contains("front") {
+            return Some((Vec3::NEG_Z, wide));
+        }
+        if name.contains("rear") {
+            return Some((Vec3::Z, wide));
+        }
+        if name.contains("gondola") {
+            return Some((Vec3::NEG_Y, wide));
+        }
+        return None;
+    }
+    if name.contains("front") {
+        Some((Vec3::NEG_Z, cone))
+    } else if name.contains("rear") {
+        Some((Vec3::Z, cone))
+    } else {
+        None
+    }
+}
 /// After a run the flight flies on this long (s) before turning back.
 pub const EGRESS_TIME: f32 = 25.0;
 /// Aim points lie within this distance of the city centre (m).
@@ -72,23 +136,18 @@ pub fn bomber_bundle(
     flight: u32,
 ) -> impl Bundle {
     let stats = kind.stats().tuned(tuning);
-    // Front and rear gunners; each covers a cone of 75° around its axis.
+    // Front and rear gunners (the zeppelin mans more), each covering a cone
+    // around its axis.
     let mounts = kind
         .model()
         .gun_mounts()
         .iter()
         .filter_map(|m| {
-            let facing = if m.name.contains("front") {
-                Vec3::NEG_Z
-            } else if m.name.contains("rear") {
-                Vec3::Z
-            } else {
-                return None;
-            };
+            let (facing, arc) = mount_facing(kind, m.name)?;
             Some(TurretMount {
                 position: m.position,
                 facing,
-                arc: 75_f32.to_radians(),
+                arc,
             })
         })
         .collect();
@@ -100,7 +159,7 @@ pub fn bomber_bundle(
                 phase: BomberPhase::Approach,
                 run: 0,
                 target: target_point(flight, 0),
-                bombs_left: BOMBS_PER_RUN,
+                bombs_left: stick(kind).0,
                 drop_cooldown: 0.0,
                 phase_time: 0.0,
                 altitude: transform.translation.y,
@@ -141,7 +200,7 @@ pub(super) fn fly_bombers(
             &mut Transform,
             &mut AircraftVelocity,
         ),
-        Without<EnemyPilot>,
+        (Without<EnemyPilot>, Without<GoingDown>),
     >,
 ) {
     let dt = time.delta_secs().clamp(0.0, 0.1);
@@ -181,7 +240,7 @@ pub(super) fn fly_bombers(
             if lead.run != pilot.run {
                 pilot.run = lead.run;
                 pilot.target = lead.target;
-                pilot.bombs_left = BOMBS_PER_RUN;
+                pilot.bombs_left = stick(enemy.kind).0;
             }
             pilot.phase = lead.phase;
         }
@@ -215,7 +274,7 @@ pub(super) fn fly_bombers(
                         pilot.phase = BomberPhase::Approach;
                         pilot.run += 1;
                         pilot.target = target_point(group.map_or(0, |g| g.id), pilot.run);
-                        pilot.bombs_left = BOMBS_PER_RUN;
+                        pilot.bombs_left = stick(enemy.kind).0;
                     }
                     let level = Vec3::new(forward.x, 0.0, forward.z).normalize_or(Vec3::NEG_Z);
                     (
@@ -244,7 +303,7 @@ pub(super) fn fly_bombers(
                     velocity.0,
                 ));
                 pilot.bombs_left -= 1;
-                pilot.drop_cooldown = DROP_INTERVAL;
+                pilot.drop_cooldown = stick(enemy.kind).1;
             }
         }
 
@@ -261,5 +320,106 @@ pub(super) fn fly_bombers(
             speed,
             dt,
         );
+    }
+}
+
+/// How a burning wreck goes down: it sinks faster and faster, drifts to
+/// one side, slows down, wobbles. About 20 s from 700 m (it sinks with
+/// a constant 3 m/s² more).
+const WRECK_SINK_ACCEL: f32 = 3.0;
+const WRECK_DRIFT: f32 = 12.0;
+const WRECK_SLOWDOWN: f32 = 0.06;
+/// Seconds between two fire bursts on the hull.
+const WRECK_FIRE_INTERVAL: f32 = 0.4;
+
+/// Flies destroyed aircraft that go down slowly ([`GoingDown`]) until
+/// they hit something; then they wreck the city below. They no longer
+/// fire, bomb or take hits.
+#[allow(clippy::type_complexity)]
+pub(super) fn fly_wrecks(
+    mut commands: Commands,
+    time: Res<Time>,
+    obstacles: Res<ObstacleMap>,
+    mut crashes: MessageReader<crate::physics::EnemyCrashed>,
+    mut wrecks: Query<(
+        Entity,
+        &mut GoingDown,
+        &FallsWhenDestroyed,
+        &mut Transform,
+        &mut AircraftVelocity,
+        Option<&HitCapsule>,
+        Has<Turrets>,
+    )>,
+    mut damage: MessageWriter<crate::world::damage::DamageArea>,
+) {
+    let dt = time.delta_secs().clamp(0.0, 0.1);
+    let crashed: Vec<Entity> = crashes.read().map(|c| c.enemy).collect();
+    for (entity, mut wreck, falls, mut transform, mut velocity, capsule, armed) in &mut wrecks {
+        if armed {
+            // Gunners gone; only the world still collides with it.
+            commands.entity(entity).remove::<Turrets>().insert(
+                bevy_rapier3d::prelude::CollisionGroups::new(
+                    crate::physics::Layer::Enemy.group(),
+                    crate::physics::Layer::World.group(),
+                ),
+            );
+        }
+        let t0 = wreck.time;
+        wreck.time += dt;
+        let t = wreck.time;
+        let forward = transform.forward().as_vec3();
+        let side = forward.cross(Vec3::Y).normalize_or(Vec3::X);
+        let level = Vec3::new(velocity.0.x, 0.0, velocity.0.z) * (1.0 - WRECK_SLOWDOWN * dt);
+        let drift = side * WRECK_DRIFT * (t * 0.35).sin();
+        let sink = WRECK_SINK_ACCEL * t * t * 0.5 - WRECK_SINK_ACCEL * t0 * t0 * 0.5;
+        velocity.0 = level;
+        transform.translation += (level + drift) * dt - Vec3::Y * sink;
+        // Unsteady: rolls and pitches nose down a little more over time.
+        let wobble =
+            Quat::from_rotation_z(0.25 * (t * 0.9).sin() * dt) * Quat::from_rotation_x(-0.02 * dt);
+        transform.rotation = (transform.rotation * wobble).normalize();
+
+        // Fire along the hull.
+        if (t / WRECK_FIRE_INTERVAL).floor() != (t0 / WRECK_FIRE_INTERVAL).floor() {
+            let along = capsule.map_or(0.0, |c| c.half_length) * (t * 1.7).sin();
+            let at = transform.translation + transform.rotation * Vec3::new(0.0, 0.0, along);
+            commands.spawn((
+                Name::new("Effect"),
+                crate::combat::Effect {
+                    kind: crate::combat::EffectKind::Explosion,
+                    age: 0.0,
+                },
+                Transform::from_translation(at),
+            ));
+        }
+
+        // The lowest point of the hull meets the ground or a roof.
+        let half_height = capsule.map_or(0.0, |c| c.radius);
+        let p = transform.translation;
+        let ground = obstacles.height_at(p.x, p.z);
+        if crashed.contains(&entity) || p.y - half_height <= ground {
+            // The whole hull comes down: blasts along its length, at street
+            // level, so towers and low houses below it all count.
+            let axis = transform.rotation * Vec3::Z;
+            let axis = Vec3::new(axis.x, 0.0, axis.z).normalize_or(Vec3::Z);
+            let half_length = capsule.map_or(0.0, |c| c.half_length);
+            for offset in [-1.0, 0.0, 1.0] {
+                let point = Vec3::new(p.x, 0.0, p.z) + axis * half_length * offset;
+                damage.write(crate::world::damage::DamageArea {
+                    point,
+                    radius: falls.impact_radius,
+                    strength: falls.impact_strength,
+                });
+                commands.spawn((
+                    Name::new("Effect"),
+                    crate::combat::Effect {
+                        kind: crate::combat::EffectKind::BigExplosion,
+                        age: 0.0,
+                    },
+                    Transform::from_translation(point + Vec3::Y * ground.max(0.0)),
+                ));
+            }
+            commands.entity(entity).despawn();
+        }
     }
 }

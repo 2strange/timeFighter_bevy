@@ -18,7 +18,7 @@ use std::f32::consts::PI;
 
 use bevy::prelude::*;
 
-pub use bomber::{BomberPhase, BomberPilot, bomber_bundle};
+pub use bomber::{BomberPhase, BomberPilot, bomber_bundle, zeppelin_parts};
 pub use obstacles::ObstacleMap;
 pub use tactics::{AttackSlots, FlightGroup, HOLDING_RADIUS, sees};
 pub use visuals::EnemyVisualsPlugin;
@@ -48,8 +48,8 @@ pub enum EnemyKind {
     Me264,
     Ju390,
     Ju287,
-    /// Battle's end boss, registered with model, guns, engines and collider;
-    /// provisional stats until its behaviour is built.
+    /// The end boss of Battle: a 245 m airship with its own model, guns,
+    /// engine pods and collider.
     Zeppelin,
 }
 
@@ -145,16 +145,17 @@ impl EnemyKind {
                 turn_rate: 0.22,
                 ..EnemyKind::Lancaster.stats()
             },
-            // Provisional: slow and very tough. Hits count by distance from
-            // the centre for now, which misses most of a 245 m hull.
+            // Very slow, very tough (about nine missiles or a lot of gun),
+            // barely turns; gunners all round. Hits count along its hull
+            // (HitCapsule), not by distance from the centre.
             EnemyKind::Zeppelin => EnemyStats {
-                health: 2_000.0,
+                health: 900.0,
                 hitbox_radius: self.model().size().span() * 0.5,
-                min_speed: 30.0,
-                cruise_speed: 40.0,
-                max_speed: 50.0,
+                min_speed: 22.0,
+                cruise_speed: 30.0,
+                max_speed: 34.0,
                 acceleration: 2.0,
-                turn_rate: 0.05,
+                turn_rate: 0.06,
                 ..EnemyKind::Lancaster.stats()
             },
         }
@@ -177,6 +178,7 @@ impl EnemyKind {
                 | EnemyKind::Me264
                 | EnemyKind::Ju390
                 | EnemyKind::Ju287
+                | EnemyKind::Zeppelin
         )
     }
 
@@ -548,7 +550,7 @@ impl Plugin for AiPlugin {
                 (
                     obstacles::rebuild_obstacles,
                     tactics::assign_attack_slots,
-                    (fly_enemies, bomber::fly_bombers),
+                    (fly_enemies, bomber::fly_bombers, bomber::fly_wrecks),
                 )
                     .chain()
                     .in_set(AiSystems),

@@ -304,6 +304,37 @@ impl Mission {
                 escorts: Some(0),
             });
         }
+        // Normal and up: the zeppelin closes the battle, with a double
+        // escort, on a straight course over the centre from the north.
+        if params.zeppelin {
+            let (lead, heading) = ZEPPELIN_ENTRY;
+            let i = mission.waves.len();
+            let tuning = mission.waves[0].groups[0].tuning;
+            let escort_heading = heading.normalize_or(Vec3::NEG_Z);
+            mission.waves.push(WaveSpec {
+                trigger: WaveTrigger::AfterSecondsOrCleared(i as f32 * params.wave_interval),
+                groups: vec![
+                    SpawnGroup {
+                        members: vec![EnemyKind::Zeppelin],
+                        lead,
+                        heading,
+                        formation: Formation::Vic { spacing: 300.0 },
+                        skill: PilotSkill::VETERAN,
+                        tuning,
+                        escorts: None,
+                    },
+                    SpawnGroup {
+                        members: config.set.fighters(2 * params.flight_size),
+                        lead: lead - escort_heading * ESCORT_TRAIL + Vec3::Y * ESCORT_ABOVE,
+                        heading,
+                        formation: Formation::Vic { spacing: 45.0 },
+                        skill: PilotSkill::VETERAN,
+                        tuning,
+                        escorts: Some(0),
+                    },
+                ],
+            });
+        }
         mission.mode = GameMode::Battle;
         mission
     }
@@ -312,6 +343,10 @@ impl Mission {
         self.waves.iter().map(WaveSpec::enemy_count).sum()
     }
 }
+
+/// Where the zeppelin enters: north of the centre, close enough that at
+/// 30 m/s it is over the city in under two minutes, heading south.
+const ZEPPELIN_ENTRY: (Vec3, Vec3) = (Vec3::new(0.0, 700.0, -3_200.0), Vec3::Z);
 
 /// Where an escort enters relative to its bombers: this far behind (m) ...
 const ESCORT_TRAIL: f32 = 400.0;

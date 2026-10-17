@@ -82,6 +82,34 @@ pub struct Hitbox {
     pub gun_radius: f32,
 }
 
+/// A long hit zone instead of the spheres: a capsule along the aircraft's
+/// own Z axis (nose −Z), for an airship 245 m long but only 46 m wide.
+/// Gun rounds count within `radius`, missile fuses within `radius` plus
+/// their fuse radius.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct HitCapsule {
+    /// Half the length of the capsule's core segment (m).
+    pub half_length: f32,
+    pub radius: f32,
+}
+
+/// Marks an aircraft that does not explode at zero health but goes down
+/// slowly, burning ([`GoingDown`]), and does its damage where it hits.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct FallsWhenDestroyed {
+    /// Blast on impact: radius (m) and strength (1.0 destroys).
+    pub impact_radius: f32,
+    pub impact_strength: f32,
+}
+
+/// A destroyed aircraft on its way down. Counted as shot down already; it
+/// is removed when it hits the ground or a building.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct GoingDown {
+    /// Seconds since it was destroyed.
+    pub time: f32,
+}
+
 /// World-space velocity (m/s) of an aircraft. Weapons inherit it, missiles
 /// lead with it. The player's copy is taken from [`FlightState`] every
 /// frame; enemies write their own. (Projectiles use Rapier's `Velocity`.)

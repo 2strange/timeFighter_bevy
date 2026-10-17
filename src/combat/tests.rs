@@ -974,3 +974,69 @@ fn enemy_rounds_still_need_the_jets_collider() {
     let health = app.world().get::<Health>(jet).unwrap();
     assert_eq!(health.current, health.max);
 }
+
+#[test]
+fn segment_and_capsule_sweeps_find_the_closest_approach() {
+    use super::hits::{closest_points_on_segments, sweep_hits_capsule};
+    // Crossing segments.
+    let (a, b) = closest_points_on_segments(
+        Vec3::new(-1.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 2.0, -1.0),
+        Vec3::new(0.0, 2.0, 1.0),
+    );
+    assert!(a.distance(Vec3::ZERO) < 1e-5 && b.distance(Vec3::new(0.0, 2.0, 0.0)) < 1e-5);
+    // A round flying across a long capsule near its end hits, past the end misses.
+    let (c0, c1) = (Vec3::new(0.0, 0.0, -100.0), Vec3::new(0.0, 0.0, 100.0));
+    let across = |z: f32| {
+        sweep_hits_capsule(
+            Vec3::new(-50.0, 0.0, z),
+            Vec3::new(50.0, 0.0, z),
+            c0,
+            c1,
+            20.0,
+        )
+    };
+    assert!(across(110.0).is_some(), "rounded end");
+    assert!(across(125.0).is_none(), "beyond the end");
+}
+
+#[test]
+fn the_zeppelin_is_hit_along_its_whole_length() {
+    use crate::ai::{EnemyKind, EnemyTuning, bomber_bundle, zeppelin_parts};
+    let hit_at = |along: f32| {
+        let mut app = app();
+        // The airship lies across the round's path, nose −Z.
+        let target = app
+            .world_mut()
+            .spawn((
+                bomber_bundle(
+                    EnemyKind::Zeppelin,
+                    EnemyTuning::default(),
+                    Transform::from_xyz(0.0, 1_000.0, -600.0),
+                    0,
+                ),
+                zeppelin_parts(),
+            ))
+            .id();
+        app.update();
+        let shooter = app.world_mut().spawn_empty().id();
+        // From the side (−X), crossing the hull `along` metres from its centre.
+        app.world_mut().spawn(super::weapons::round_bundle(
+            shooter,
+            Team::Player,
+            &super::GunSpec::JET_CANNON,
+            Vec3::new(-300.0, 1_000.0, -600.0 + along),
+            Vec3::X * super::GunSpec::JET_CANNON.muzzle_speed,
+        ));
+        for _ in 0..30 {
+            app.update();
+        }
+        let health = app.world().get::<Health>(target).unwrap();
+        health.current < health.max
+    };
+    assert!(hit_at(0.0), "middle");
+    assert!(hit_at(-110.0), "bow");
+    assert!(hit_at(110.0), "stern");
+    assert!(!hit_at(160.0), "past the stern");
+}
