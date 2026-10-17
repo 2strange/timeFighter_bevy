@@ -2,7 +2,8 @@
 // Renders still images of the normalised aircraft models on the CPU: no GPU,
 // no browser. A small rasteriser with a depth buffer, perspective-correct
 // texture lookup and flat Lambert shading (the game's low-poly look),
-// supersampled and written as WebP with a transparent background.
+// supersampled and written as WebP with a transparent background, or as
+// JPG/PNG composited between a background and an overlay SVG (share images).
 //
 // Usage:
 //   node render.mjs [--scenes scenes.json] [--assets ../../assets/aircraft]
@@ -11,8 +12,18 @@
 // scenes.json: { "<name>": { "width", "height", "view": { "yaw", "pitch" },
 //   "aircraft": [{ "model", "at": [x,y,z], "yaw", "pitch", "roll" }] } }
 // Angles in degrees; the camera frames all aircraft from the view angles.
+// Optional per scene:
+//   "camera": { "eye": [x,y,z], "target": [x,y,z], "fov" }  fixed camera, no framing
+//   "light": { "dir": [x,y,z], "color": [r,g,b], "ambient", "sky": [r,g,b] }
+//   "haze": { "color": [r,g,b], "near", "far", "max" }      fades distant faces
+//   "background", "overlay": SVG files (next to scenes.json) under/over the planes
+//   "format": "webp" | "jpg" | "png", "quality"
+//   "also": [{ "name", "width", "height", "format" }]        resized copies
+// SVG text uses only the fonts in ./fonts (Orbitron, OFL).
 
 import { readFile, mkdir } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
@@ -24,8 +35,18 @@ const scenesPath = path.resolve(args.scenes ?? path.join(here, 'scenes.json'));
 const assetDir = path.resolve(args.assets ?? path.join(here, '..', '..', 'assets', 'aircraft'));
 const outDir = path.resolve(args.out ?? path.join(here, '..', '..', 'web', 'img'));
 const SUPERSAMPLE = 3;
-const LIGHT = normalize([-0.45, 0.75, -0.5]); // towards the light
-const AMBIENT = 0.42;
+const LIGHT = { dir: [-0.45, 0.75, -0.5], color: [1, 1, 1], ambient: 0.42, sky: [1, 1, 1] };
+
+// Point fontconfig (used by librsvg for SVG text) at the bundled fonts only,
+// so the share image looks the same on every machine.
+const fontConfig = path.join(os.tmpdir(), 'render-aircraft-fonts.conf');
+writeFileSync(
+  fontConfig,
+  `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig>` +
+    `<dir>${path.join(here, 'fonts')}</dir>` +
+    `<cachedir>${path.join(os.tmpdir(), 'render-aircraft-fontcache')}</cachedir></fontconfig>`,
+);
+process.env.FONTCONFIG_FILE = fontConfig;
 
 const scenes = JSON.parse(await readFile(scenesPath, 'utf8'));
 await mkdir(outDir, { recursive: true });
@@ -48,13 +69,31 @@ for (const [name, scene] of Object.entries(scenes)) {
     }
   }
   const image = render(triangles, scene);
-  const file = path.join(outDir, `${name}.webp`);
-  await sharp(image.data, { raw: { width: image.width, height: image.height, channels: 4 } })
-    .resize(scene.width, scene.height, { kernel: 'lanczos3' })
-    .webp({ quality: 82, alphaQuality: 90 })
-    .toFile(file);
+  let picture = sharp(image.data, { raw: { width: image.width, height: image.height, channels: 4 } })
+    .resize(scene.width, scene.height, { kernel: 'lanczos3' });
+  if (scene.background || scene.overlay) {
+    const planes = await picture.png().toBuffer();
+    const base = scene.background
+      ? sharp(await readFile(path.join(path.dirname(scenesPath), scene.background)))
+      : sharp({ create: { width: scene.width, height: scene.height, channels: 4, background: '#0000' } });
+    const layers = [{ input: planes }];
+    if (scene.overlay) layers.push({ input: await readFile(path.join(path.dirname(scenesPath), scene.overlay)) });
+    picture = sharp(await base.resize(scene.width, scene.height).composite(layers).png().toBuffer());
+  }
+  await write(picture, name, scene.format, scene.quality, `${triangles.length} triangles`);
+  for (const copy of scene.also ?? []) {
+    await write(picture.clone().resize(copy.width, copy.height, { kernel: 'lanczos3' }), copy.name, copy.format, copy.quality, `copy of ${name}`);
+  }
+}
+
+async function write(picture, name, format = 'webp', quality, note) {
+  const ext = format === 'jpg' ? 'jpg' : format;
+  const file = path.join(outDir, `${name}.${ext}`);
+  if (format === 'jpg') await picture.jpeg({ quality: quality ?? 82, optimiseCoding: true, trellisQuantisation: true }).toFile(file);
+  else if (format === 'png') await picture.png({ compressionLevel: 9, palette: false }).toFile(file);
+  else await picture.webp({ quality: quality ?? 82, alphaQuality: 90 }).toFile(file);
   const size = (await readFile(file)).length;
-  console.log(`${name}: ${triangles.length} triangles -> ${path.relative(process.cwd(), file)} (${(size / 1024).toFixed(1)} kB)`);
+  console.log(`${name}: ${note} -> ${path.relative(process.cwd(), file)} (${(size / 1024).toFixed(1)} kB)`);
 }
 
 // --- Models -------------------------------------------------------------------
@@ -130,7 +169,10 @@ function sample(texture, u, v) {
 function render(triangles, scene) {
   const width = scene.width * SUPERSAMPLE;
   const height = scene.height * SUPERSAMPLE;
-  const fov = ((scene.fov ?? 30) * Math.PI) / 180;
+  const fov = ((scene.camera?.fov ?? scene.fov ?? 30) * Math.PI) / 180;
+  const sun = { ...LIGHT, ...scene.light };
+  const toLight = normalize(sun.dir);
+  const haze = scene.haze;
 
   // Frame everything: bounding sphere seen from the view direction.
   let lo = [Infinity, Infinity, Infinity];
@@ -150,7 +192,9 @@ function render(triangles, scene) {
     Math.sin(pitch),
     -Math.cos(yaw) * Math.cos(pitch),
   ];
-  const forward = direction.map((v) => -v);
+  const forward = scene.camera
+    ? normalize(sub(scene.camera.target, scene.camera.eye))
+    : direction.map((v) => -v);
   const right = normalize(cross(forward, [0, 1, 0]));
   const up = cross(right, forward);
   const focal = height / 2 / Math.tan(fov / 2);
@@ -159,9 +203,9 @@ function render(triangles, scene) {
   // Start from the bounding sphere, then tighten: move the camera so the
   // projected outline fills the frame (up to `margin`) and is centred.
   let distance = radius / Math.sin(fov / 2);
-  let eye = add(centre, direction.map((v) => v * distance));
+  let eye = scene.camera ? scene.camera.eye : add(centre, direction.map((v) => v * distance));
   const corners = triangles.flatMap((t) => t.p);
-  for (let pass = 0; pass < 12; pass++) {
+  for (let pass = 0; pass < (scene.camera ? 0 : 12); pass++) {
     let [minX, maxX, minY, maxY] = [Infinity, -Infinity, Infinity, -Infinity];
     for (const p of corners) {
       const d = sub(p, eye);
@@ -199,7 +243,8 @@ function render(triangles, scene) {
     // Flat shading with the face normal turned towards the camera.
     let n = normalize(cross(sub(t.p[1], t.p[0]), sub(t.p[2], t.p[0])));
     if (dot(n, sub(eye, t.p[0])) < 0) n = n.map((v) => -v);
-    const light = AMBIENT + (1 - AMBIENT) * Math.max(0, dot(n, LIGHT));
+    const diffuse = (1 - sun.ambient) * Math.max(0, dot(n, toLight));
+    const light = [0, 1, 2].map((k) => sun.ambient * sun.sky[k] + diffuse * sun.color[k]);
 
     const minX = Math.max(0, Math.floor(Math.min(s[0][0], s[1][0], s[2][0])));
     const maxX = Math.min(width - 1, Math.ceil(Math.max(s[0][0], s[1][0], s[2][0])));
@@ -228,9 +273,10 @@ function render(triangles, scene) {
         }
         if (rgba[3] < 128) continue;
         depth[o] = z;
-        color[o * 4] = rgba[0] * light;
-        color[o * 4 + 1] = rgba[1] * light;
-        color[o * 4 + 2] = rgba[2] * light;
+        const fade = haze ? haze.max * Math.min(1, Math.max(0, (z - haze.near) / (haze.far - haze.near))) : 0;
+        for (let k = 0; k < 3; k++) {
+          color[o * 4 + k] = rgba[k] * light[k] * (1 - fade) + (haze ? haze.color[k] * fade : 0);
+        }
         color[o * 4 + 3] = 255;
       }
     }
