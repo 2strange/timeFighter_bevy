@@ -26,7 +26,7 @@ pub const MAX_BOMBER_VOICES: usize = 4;
 pub const MAX_ZEPPELIN_VOICES: usize = 2;
 
 /// Music volume: very quiet, under the menu.
-const MUSIC_VOLUME: f32 = 0.12;
+const MUSIC_VOLUME: f32 = 0.108;
 /// Distance at which a sound is at half volume (m).
 const HALF_VOLUME_DISTANCE: f32 = 400.0;
 /// Quieter than this is not played at all.
@@ -36,7 +36,7 @@ const GUN_HOLD: f32 = 0.12;
 /// Enemy gun bursts are heard at most this often (s) ...
 const ENEMY_GUN_INTERVAL: f32 = 0.25;
 /// An empty gun clicks at most this often while the trigger is held (s).
-const GUN_EMPTY_INTERVAL: f32 = 0.25;
+const GUN_EMPTY_INTERVAL: f32 = 0.3;
 /// The search tone's volume once the missiles are gone: it still helps to
 /// aim the gun, quieter.
 const EMPTY_SEARCH_VOLUME: f32 = 0.7;
@@ -376,7 +376,7 @@ fn mix(
         (Some(LockState::Locked { .. }), true) => out.loops.push(LoopMix {
             voice: Voice::LockTone,
             clip: Clip::LockTone,
-            volume: master * 0.4,
+            volume: master * 0.32,
             speed: 1.0,
         }),
         (Some(LockState::Tracking { .. } | LockState::Locked { .. }), false) => {
@@ -437,7 +437,7 @@ fn mix(
                 let v = heard(cue.position);
                 enemy_gun = Some(enemy_gun.map_or(v, |e: f32| e.max(v)));
             }
-            Sound::MissileLaunch => out.shots.push(shot(Clip::Missile, 0.7)),
+            Sound::MissileLaunch => out.shots.push(shot(Clip::Missile, 0.56)),
             Sound::Explosion => {
                 state.explosions += 1;
                 let clip = if state.explosions.is_multiple_of(2) {
@@ -482,7 +482,7 @@ fn mix(
         state.enemy_gun_rest = ENEMY_GUN_INTERVAL;
         out.shots.push(OneShot {
             clip: Clip::Gun,
-            volume: master * 0.5 * v,
+            volume: master * 0.45 * v,
             speed: 1.0,
         });
     }

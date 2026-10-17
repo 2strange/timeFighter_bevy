@@ -28,3 +28,5 @@ Short loops stay WAV: compressed loops click at the seam.
 | click_kenney_click_002.ogg | menu click | Kenney, Interface Sounds: click_002.ogg | CC0 1.0 | no |
 | music_drive.ogg | menu music | synthesized for TimeFighter | own work (CC0 1.0) | yes |
 | player_hit.ogg | hits on the player's jet | Kenney, Impact Sounds: impactMetal_light_001.ogg | CC0 1.0 | no |
+| gun_empty.ogg | trigger on an empty gun | Kenney, Interface Sounds: toggle_004.ogg | CC0 1.0 | no |
+| missile_empty.ogg | missile asked for, none left | synthesized for TimeFighter | own work (CC0 1.0) | no |
