@@ -416,13 +416,13 @@ fn custom_rounds_stay_local() {
 }
 
 #[test]
-fn n_opens_the_name_field_and_escape_leaves_it() {
+fn c_opens_the_name_field_and_escape_leaves_it() {
     let mut app = game();
     app.world_mut()
         .resource_mut::<Store>()
         .set(NAME_KEY, "VIPER");
     end_round(&mut app, Outcome::ShotDown);
-    tap(&mut app, KeyCode::KeyN);
+    tap(&mut app, KeyCode::KeyC);
     assert!(state(&app).editing);
     tap(&mut app, KeyCode::Backspace);
     tap(&mut app, KeyCode::Escape);

@@ -12,7 +12,7 @@
 //!
 //! Keys on the result screen: the first Enter submits (or, without a
 //! stored name, opens the name field); R restarts at once and submits on
-//! the way; N edits the name. While the name field is open it takes every
+//! the way; C changes the name (N is the sound). While the name field is open it takes every
 //! key, so nothing else reacts to typing.
 
 pub mod board;
@@ -346,9 +346,9 @@ fn result_keys(
             }
             keys.clear_just_pressed(KeyCode::Enter);
             keys.clear_just_pressed(KeyCode::NumpadEnter);
-        } else if keys.just_pressed(KeyCode::KeyN) {
+        } else if keys.just_pressed(KeyCode::KeyC) {
             state.editing = true;
-            keys.clear_just_pressed(KeyCode::KeyN);
+            keys.clear_just_pressed(KeyCode::KeyC);
         }
     }
 }
@@ -559,7 +559,7 @@ pub fn panel_lines(state: &ScoreState, store: &Store) -> Vec<(String, String, Co
     let hints: Vec<String> = match (&state.submitted, state.editing) {
         (_, true) => vec!["Type your name".into(), "Enter: save  Esc: back".into()],
         (None, false) if state.field.name().is_none() => vec!["Enter: type your name".into()],
-        (None, false) => vec!["Enter: save score".into(), "N: change name".into()],
+        (None, false) => vec!["Enter: save score".into(), "C: change name".into()],
         (Some(submitted), false) => {
             let local = submitted
                 .local_place

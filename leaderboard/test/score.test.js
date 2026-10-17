@@ -63,6 +63,21 @@ test('kills beyond the mission, or a victory without all of them, are refused', 
   assert.equal(checkSubmission(alien, limits).reason, 'unknown enemy ufo');
 });
 
+test('fighters launched by zeppelins count up to the hangar limit', () => {
+  const vector = vectors.find((v) => v.mode === 'battle' && v.level === 'normal');
+  const level = limits.battle.normal;
+  assert.ok(level.fighters_max > level.fighters);
+  const extra = submission(vector);
+  const launched = level.fighters_max - level.fighters;
+  extra.breakdown.kills.me309.missile = (extra.breakdown.kills.me309.missile ?? 0) + launched;
+  extra.duration_s += 3 * launched;
+  extra.score = score(extra.breakdown, extra.duration_s, level);
+  assert.ok(checkSubmission(extra, limits).ok, checkSubmission(extra, limits).reason);
+  extra.breakdown.kills.me309.missile += 1;
+  extra.score = score(extra.breakdown, extra.duration_s, level);
+  assert.match(checkSubmission(extra, limits).reason, /more fighters/);
+});
+
 test('rounds faster than plausible are refused', () => {
   const vector = vectors[0];
   const kills = Object.values(vector.breakdown.kills)

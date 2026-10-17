@@ -76,10 +76,12 @@ export function checkBreakdown(breakdown, level) {
   }
   if (typeof victory !== 'boolean') return 'bad victory';
   const counts = classCounts(kills);
+  // Zeppelins may launch fighters on top of the waves (fighters_max).
+  const most = { fighters: level.fighters_max, bombers: level.bombers, zeppelins: level.zeppelins };
   for (const cls of ['fighters', 'bombers', 'zeppelins']) {
-    if (counts[cls] > level[cls]) return `more ${cls} than the mission has`;
-    // A victory means everything is down.
-    if (victory && counts[cls] !== level[cls]) return 'victory without every kill';
+    if (counts[cls] > most[cls]) return `more ${cls} than the mission has`;
+    // A victory means everything is down, the waves at least.
+    if (victory && counts[cls] < level[cls]) return 'victory without every kill';
   }
   if (!count(zeppelins_outside, counts.zeppelins)) return 'bad zeppelin bonus';
   if (!count(missiles_left, level.missiles)) return 'bad missiles';

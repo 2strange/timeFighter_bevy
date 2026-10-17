@@ -179,14 +179,20 @@ pub fn level_factor(difficulty: Difficulty) -> f32 {
 /// Enemies in a mission by class.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MissionSize {
+    /// In the waves.
     pub fighters: u32,
     pub bombers: u32,
     pub zeppelins: u32,
+    /// Fighters the zeppelins may launch on top, at most.
+    pub launched_max: u32,
 }
 
 impl MissionSize {
     pub fn of(mission: &Mission) -> Self {
-        let mut size = Self::default();
+        let mut size = Self {
+            launched_max: mission.max_enemy_count() - mission.enemy_count(),
+            ..Self::default()
+        };
         for kind in mission
             .waves
             .iter()
@@ -317,8 +323,9 @@ pub fn sheet_json(sheet: &ScoreSheet) -> String {
 }
 
 /// `leaderboard/limits.json`: per mode and level the factor, the par time,
-/// the missiles on board and the enemies by class. The worker checks
-/// submissions against it.
+/// the missiles on board and the enemies by class (`fighters` in the
+/// waves, `fighters_max` with what the zeppelins can launch). The worker
+/// checks submissions against it.
 pub fn limits_json() -> String {
     let mut modes = Vec::new();
     for mode in GameMode::ALL {
@@ -332,12 +339,13 @@ pub fn limits_json() -> String {
             let size = MissionSize::of(&Mission::from_settings(&settings));
             let level = Level::of(&settings);
             levels.push(format!(
-                "    \"{}\": {{ \"factor\": {}, \"par_s\": {}, \"missiles\": {}, \"fighters\": {}, \"bombers\": {}, \"zeppelins\": {}, \"city\": {} }}",
+                "    \"{}\": {{ \"factor\": {}, \"par_s\": {}, \"missiles\": {}, \"fighters\": {}, \"fighters_max\": {}, \"bombers\": {}, \"zeppelins\": {}, \"city\": {} }}",
                 level_key(difficulty),
                 level.factor,
                 level.par_s,
                 difficulty.params_for(mode).missiles,
                 size.fighters,
+                size.fighters + size.launched_max,
                 size.bombers,
                 size.zeppelins,
                 mode != GameMode::Hunt,

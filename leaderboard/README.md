@@ -7,8 +7,8 @@ player's browser.
 - `POST /scores` takes a finished round (name, mode, level, score,
   duration, breakdown), **recomputes the score from the breakdown** with the
   game's rules and checks it against the mission (`limits.json`: enemies by
-  class, missiles, par time; a victory needs every kill; at least 15 s + 3 s
-  per kill). Accepted scores go on the all-time list and the week's list.
+  class, plus up to 12 fighters per zeppelin that launches them; missiles,
+  par time; a victory needs every kill; at least 15 s + 3 s per kill). Accepted scores go on the all-time list and the week's list.
 - `GET /scores?mode=hunt&level=normal&period=all|week&limit=10` returns the
   best entries (at most 100 are kept per list).
 - Stored per score: pilot name, score, date (mode and level are in the key).
