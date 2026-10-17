@@ -24,7 +24,7 @@ pub struct GunSpec {
 
 impl GunSpec {
     /// The jet's cannon: fast and tight, 1.3 s of flight (about 1.6 km).
-    /// Three hits bring down a Spitfire. Faster rounds need less lead, so
+    /// Three hits bring down a fighter. Faster rounds need less lead, so
     /// fast WWII fighters stay hittable.
     pub const JET_CANNON: GunSpec = GunSpec {
         rate: 20.0,
@@ -132,7 +132,7 @@ impl Default for CombatConfig {
                 launch_kick: 40.0,
                 max_speed: 750.0,
                 boost: 350.0,
-                // About 25 g: twice what a turning Spitfire pulls, so a
+                // About 25 g: twice what a turning fighter pulls, so a
                 // well-aimed missile mostly hits, a late break can still
                 // shake it.
                 max_lateral_accel: 250.0,

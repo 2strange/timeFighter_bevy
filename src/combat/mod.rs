@@ -150,7 +150,7 @@ pub enum CrashInto {
     Obstacle,
 }
 
-/// Type name of an aircraft ("Spitfire"), for messages such as "rammed by".
+/// Type name of an aircraft ("Me 309"), for messages such as "rammed by".
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AircraftType(pub &'static str);
 

@@ -71,7 +71,7 @@ fn spawn_target(app: &mut App, position: Vec3) -> Entity {
                 gun_radius: 0.0,
             },
             AircraftVelocity::default(),
-            AircraftModel::Spitfire.body(Layer::Enemy),
+            AircraftModel::Me309.body(Layer::Enemy),
             Transform::from_translation(position),
         ))
         .id()
@@ -608,7 +608,7 @@ fn crossing_target_destroyed(lead: bool) -> bool {
             .before(super::CombatSystems::Aim),
     );
     spawn_player(&mut app, high_up());
-    // A Spitfire crossing 500 m ahead at 170 m/s.
+    // A fighter crossing 500 m ahead at 170 m/s.
     let target = spawn_target(&mut app, Vec3::new(-150.0, 1_000.0, -500.0));
     app.world_mut()
         .entity_mut(target)
@@ -621,7 +621,7 @@ fn crossing_target_destroyed(lead: bool) -> bool {
 }
 
 #[test]
-fn aiming_at_the_lead_point_hits_a_crossing_spitfire_and_aiming_at_it_does_not() {
+fn aiming_at_the_lead_point_hits_a_crossing_fighter_and_aiming_at_it_does_not() {
     assert!(crossing_target_destroyed(true), "lead aim missed");
     assert!(!crossing_target_destroyed(false), "direct aim hit anyway");
 }
@@ -919,38 +919,38 @@ fn round_hits(kind: crate::ai::EnemyKind, gun_radius: f32, offset: Vec3) -> bool
 #[test]
 fn gun_rounds_count_on_the_whole_silhouette_wings_included() {
     use crate::ai::EnemyKind;
-    let spitfire = EnemyKind::Spitfire.gun_radius();
-    let lancaster = EnemyKind::Lancaster.gun_radius();
+    let fighter = EnemyKind::Me309.gun_radius();
+    let bomber = EnemyKind::He177.gun_radius();
     // Out on the wing, inside the model's silhouette (its box reaches
-    // 1.64 m up) but above the collider's thin wing plate.
+    // 1.75 m up) but above the collider's thin wing plate.
     let wing = Vec3::new(4.0, 1.2, 0.0);
     assert!(
-        !round_hits(EnemyKind::Spitfire, 0.0, wing),
+        !round_hits(EnemyKind::Me309, 0.0, wing),
         "the collider alone takes it"
     );
     assert!(
-        round_hits(EnemyKind::Spitfire, spitfire, wing),
+        round_hits(EnemyKind::Me309, fighter, wing),
         "wing hit not counted"
     );
     assert!(
-        round_hits(EnemyKind::Spitfire, spitfire, Vec3::ZERO),
+        round_hits(EnemyKind::Me309, fighter, Vec3::ZERO),
         "centre hit"
     );
     // Clearly outside the span: no hit.
     assert!(!round_hits(
-        EnemyKind::Spitfire,
-        spitfire,
-        Vec3::new(spitfire + 1.5, 0.0, 0.0)
+        EnemyKind::Me309,
+        fighter,
+        Vec3::new(fighter + 1.5, 0.0, 0.0)
     ));
     // A bomber's outer wing.
     assert!(round_hits(
-        EnemyKind::Lancaster,
-        lancaster,
+        EnemyKind::He177,
+        bomber,
         Vec3::new(12.0, 0.8, 0.0)
     ));
     assert!(
-        (spitfire - 5.09).abs() < 0.01 && (lancaster - 15.24).abs() < 0.05,
-        "{spitfire} {lancaster}"
+        (fighter - 5.33).abs() < 0.01 && (bomber - 15.59).abs() < 0.05,
+        "{fighter} {bomber}"
     );
 }
 

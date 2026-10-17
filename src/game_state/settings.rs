@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 
 use super::GameMode;
-use crate::{ai::EnemyKind, world::Lighting};
+use crate::world::Lighting;
 
 /// The player's choices. A round reads them when it starts, so changes
 /// apply from the next round on.
@@ -16,117 +16,6 @@ pub struct GameSettings {
     pub mode: GameMode,
     pub difficulty: Difficulty,
     pub lighting: Lighting,
-}
-
-/// Technical choices behind the modes, not offered in the menu (yet).
-#[derive(Resource, Clone, Copy, Debug, PartialEq)]
-pub struct MissionConfig {
-    /// Which aircraft the enemy flies.
-    pub set: EnemySet,
-    /// The bomber type of Protect in the first set: `EnemyKind::Lancaster`
-    /// (default) or `EnemyKind::B17`, both with their own model, size and
-    /// gunners.
-    pub bomber: EnemyKind,
-}
-
-impl Default for MissionConfig {
-    fn default() -> Self {
-        Self {
-            set: EnemySet::Second,
-            bomber: EnemyKind::Lancaster,
-        }
-    }
-}
-
-impl MissionConfig {
-    /// The configuration asked for in the page's query (`?set=first`) or,
-    /// natively, on the command line (`--set=first`); defaults otherwise.
-    pub fn from_query(query: &str) -> Self {
-        let set = query
-            .trim_start_matches('?')
-            .split('&')
-            .chain(query.split_whitespace())
-            .filter_map(|part| part.trim_start_matches("--").strip_prefix("set="))
-            .find_map(EnemySet::from_name)
-            .unwrap_or_default();
-        Self { set, ..default() }
-    }
-
-    /// From the page URL in the browser, from the command line otherwise.
-    pub fn detect() -> Self {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let query = web_sys::window()
-                .and_then(|w| w.location().search().ok())
-                .unwrap_or_default();
-            Self::from_query(&query)
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Self::from_query(&std::env::args().skip(1).collect::<Vec<_>>().join(" "))
-        }
-    }
-}
-
-/// The enemy's aircraft.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum EnemySet {
-    /// Spitfires, and Lancasters or B-17s (`?set=first`).
-    First,
-    /// The default: mixed pairs of Bf 109 K-4 (leading, a little slower)
-    /// and Me 309; bomber flights of a Ju 390 leading He 177s. Looks better
-    /// and costs less to draw.
-    #[default]
-    Second,
-}
-
-impl EnemySet {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "first" => Some(EnemySet::First),
-            "second" => Some(EnemySet::Second),
-            _ => None,
-        }
-    }
-
-    /// Fighter flight number `flight` of `flights`, `count` aircraft in
-    /// formation order. In the second set the pilots pick the type: rookies
-    /// fly the Bf 109, veterans the Me 309. Mixed flights alternate with the
-    /// slower Bf 109 leading; rookies-then-veterans sends Bf 109 flights
-    /// first, Me 309 flights after.
-    pub fn fighters(
-        self,
-        count: u32,
-        pilots: PilotMix,
-        flight: usize,
-        flights: usize,
-    ) -> Vec<EnemyKind> {
-        (0..count)
-            .map(|i| match (self, pilots) {
-                (EnemySet::First, _) => EnemyKind::Spitfire,
-                (EnemySet::Second, PilotMix::Rookies) => EnemyKind::Bf109K4,
-                (EnemySet::Second, PilotMix::Veterans) => EnemyKind::Me309,
-                (EnemySet::Second, PilotMix::Mixed) if i % 2 == 0 => EnemyKind::Bf109K4,
-                (EnemySet::Second, PilotMix::Mixed) => EnemyKind::Me309,
-                (EnemySet::Second, PilotMix::RookiesThenVeterans) if 2 * flight < flights => {
-                    EnemyKind::Bf109K4
-                }
-                (EnemySet::Second, PilotMix::RookiesThenVeterans) => EnemyKind::Me309,
-            })
-            .collect()
-    }
-
-    /// A bomber flight of `count`, in formation order (`bomber` is the
-    /// first set's type).
-    pub fn bombers(self, count: u32, bomber: EnemyKind) -> Vec<EnemyKind> {
-        (0..count)
-            .map(|i| match self {
-                EnemySet::First => bomber,
-                EnemySet::Second if i == 0 => EnemyKind::Ju390,
-                EnemySet::Second => EnemyKind::He177,
-            })
-            .collect()
-    }
 }
 
 /// How hard a round is.

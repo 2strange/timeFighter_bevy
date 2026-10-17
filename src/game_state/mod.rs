@@ -8,10 +8,12 @@ mod settings;
 #[cfg(test)]
 mod tests;
 
-pub use mission::{Formation, GameMode, Mission, SpawnGroup, WaveSpec, WaveTrigger};
+pub use mission::{
+    Formation, GameMode, Mission, SpawnGroup, WaveSpec, WaveTrigger, bomber_flight, fighter_flight,
+};
 pub use pause::{Pause, PausePlugin, TriggerHold};
 pub use round::{
     Outcome, RESTART_KEYS, RestartRound, Round, RoundPhase, RoundPlugin, RoundStats, RoundSystems,
     weapons_free,
 };
-pub use settings::{Difficulty, DifficultyParams, EnemySet, GameSettings, MissionConfig, PilotMix};
+pub use settings::{Difficulty, DifficultyParams, GameSettings, PilotMix};
