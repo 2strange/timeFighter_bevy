@@ -28,6 +28,12 @@
 //   "target_triangles": n    - simplify (meshoptimizer) to about n triangles;
 //                              normals are dropped first so faces can merge
 //                              (the game computes flat normals, low-poly look)
+//   "textures": [{ "material", "image", "size", "trim" }]
+//                            - replace the base colour texture of materials
+//                              whose name matches with an image (PNG or SVG,
+//                              path relative to the manifest), rendered at
+//                              size x size, with "trim" its transparent
+//                              margins cut first; e.g. a tail emblem
 //   "max_texture": px        - downscale textures to at most px per side and
 //                              store them as PNG (the game decodes only PNG)
 //   "mounts": [{ "name", "nodes" | "materials", "pick" }]
@@ -93,7 +99,12 @@ for (const entry of manifest.aircraft) {
   if (!ALLOWED_LICENSES.includes(license.license)) {
     fail(`${entry.name}: licence "${license.license}" is not allowed (${ALLOWED_LICENSES.join(', ')})`);
   }
-  credits.push({ ...license, file: `${entry.name}.glb`, simplified: Boolean(entry.target_triangles) });
+  credits.push({
+    ...license,
+    file: `${entry.name}.glb`,
+    simplified: Boolean(entry.target_triangles),
+    textures: (entry.textures ?? []).length > 0,
+  });
 
   const doc = await io.read(path.join(source, 'scene.gltf'));
   const report = await normalize(doc, entry);
@@ -118,6 +129,7 @@ async function normalize(doc, entry) {
 
   const pose = choosePose(doc, scene, entry);
   for (const animation of root.listAnimations()) animation.dispose();
+  await replaceTextures(root, entry);
 
   // Remember each mesh node's ancestry, so mounts and drops can match the
   // names of groups that flattening removes.
@@ -242,6 +254,29 @@ function dropParts(root, scene, paths, entry) {
         if (byMaterial.test(prim.getMaterial()?.getName() ?? '')) prim.dispose();
       }
     }
+  }
+}
+
+/// Swaps base colour textures for the manifest's images ("textures").
+async function replaceTextures(root, entry) {
+  for (const spec of entry.textures ?? []) {
+    const pattern = new RegExp(spec.material);
+    const file = path.resolve(path.dirname(manifestPath), spec.image);
+    const size = spec.size ?? 256;
+    let image = await sharp(await readFile(file), { density: 300 }).png().toBuffer();
+    if (spec.trim) image = await sharp(image).trim().toBuffer();
+    const png = await sharp(image)
+      .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .png()
+      .toBuffer();
+    let replaced = 0;
+    for (const material of root.listMaterials()) {
+      const texture = material.getBaseColorTexture();
+      if (!texture || !pattern.test(material.getName())) continue;
+      texture.setImage(new Uint8Array(png)).setMimeType('image/png');
+      replaced += 1;
+    }
+    if (!replaced) fail(`${entry.name}: no material matches "${spec.material}" for ${spec.image}`);
   }
 }
 
@@ -522,7 +557,7 @@ function formatReport(entry, report, out) {
 
 function formatCredits(credits) {
   const rows = credits.map(
-    (c) => `- **${c.file}**: "${c.title}" (${c.url}) by ${c.author}, licensed under ${c.license} (${c.licenseUrl}). Rescaled, reoriented and recentred${c.simplified ? '; simplified, interior and small parts reduced' : ''}.`,
+    (c) => `- **${c.file}**: "${c.title}" (${c.url}) by ${c.author}, licensed under ${c.license} (${c.licenseUrl}). Rescaled, reoriented and recentred${c.simplified ? '; simplified, interior and small parts reduced' : ''}${c.textures ? '; emblem replaced' : ''}.`,
   );
   return `# Aircraft model credits\n\nThe models in this folder are based on the following works:\n\n${rows.join('\n')}\n`;
 }
