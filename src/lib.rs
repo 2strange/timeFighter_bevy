@@ -44,7 +44,7 @@ impl Plugin for GamePlugin {
             ai::EnemyVisualsPlugin,
             game_state::RoundPlugin,
             hud::HudPlugin,
-            audio::SoundHooksPlugin,
+            audio::GameAudioPlugin,
         ));
     }
 }

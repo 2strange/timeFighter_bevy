@@ -1741,3 +1741,39 @@ fn the_largest_round_counts_twelve_fighters_per_carrier() {
         Mission::hunt(Difficulty::Insane).enemy_count()
     );
 }
+
+#[test]
+fn bombers_and_wrecks_sound_bigger_than_fighters() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Custom(crate::game_state::DifficultyParams {
+            bomber_waves: 1,
+            bombers_per_wave: 3,
+            flight_size: 2,
+            zeppelins: 1,
+            zeppelin_fighters: 0,
+            ..default()
+        })),
+        false,
+    );
+    let cues = |app: &App, sound: Sound| {
+        app.world()
+            .resource::<Messages<SoundCue>>()
+            .iter_current_update_messages()
+            .filter(|c| c.sound == sound)
+            .count()
+    };
+    shoot_down_all(&mut app);
+    assert_eq!(cues(&app, Sound::BigExplosion), 3, "three bombers");
+    assert_eq!(cues(&app, Sound::Explosion), 2, "two escorts");
+    // The zeppelin: a big explosion when hit, another when the wreck lands.
+    app.update();
+    shoot_down_all(&mut app);
+    assert_eq!(cues(&app, Sound::BigExplosion), 1);
+    let mut impacts = 0;
+    for _ in 0..(60.0 / FRAME.as_secs_f32()) as u32 {
+        app.update();
+        impacts += cues(&app, Sound::WreckImpact);
+    }
+    assert_eq!(impacts, 1, "the wreck hits the ground once");
+}
