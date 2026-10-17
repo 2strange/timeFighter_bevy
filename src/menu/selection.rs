@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use super::rows::{Choice, Row};
 use crate::{
-    game_state::{Difficulty, DifficultyParams, GameMode, GameSettings},
+    game_state::{Difficulty, DifficultyParams, GameMode, GameSettings, PilotMix},
     world::Lighting,
 };
 
@@ -43,6 +43,14 @@ impl MenuMode {
     }
 }
 
+/// Who flies the enemies, in menu order, with the menu's label.
+const PILOT_MIXES: [(PilotMix, &str); 4] = [
+    (PilotMix::Rookies, "Rookies"),
+    (PilotMix::Mixed, "Mixed"),
+    (PilotMix::RookiesThenVeterans, "Rookies first"),
+    (PilotMix::Veterans, "Veterans"),
+];
+
 /// The adjustable values of a custom difficulty, with the steps offered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CustomField {
@@ -51,9 +59,11 @@ pub enum CustomField {
     FlightSize,
     EnemySpeed,
     EnemyAccuracy,
+    Pilots,
     Attackers,
     LockTime,
     UnlimitedGun,
+    GunAmmo,
     BomberWaves,
     BombersPerWave,
     WaveInterval,
@@ -61,15 +71,17 @@ pub enum CustomField {
 }
 
 impl CustomField {
-    pub const ALL: [CustomField; 12] = [
+    pub const ALL: [CustomField; 14] = [
         CustomField::Missiles,
         CustomField::Enemies,
         CustomField::FlightSize,
         CustomField::EnemySpeed,
         CustomField::EnemyAccuracy,
+        CustomField::Pilots,
         CustomField::Attackers,
         CustomField::LockTime,
         CustomField::UnlimitedGun,
+        CustomField::GunAmmo,
         CustomField::BomberWaves,
         CustomField::BombersPerWave,
         CustomField::WaveInterval,
@@ -94,9 +106,11 @@ impl CustomField {
             CustomField::FlightSize => "Flight size",
             CustomField::EnemySpeed => "Enemy speed",
             CustomField::EnemyAccuracy => "Enemy aim",
+            CustomField::Pilots => "Enemy pilots",
             CustomField::Attackers => "Attacking at once",
             CustomField::LockTime => "Missile lock time",
             CustomField::UnlimitedGun => "Unlimited gun",
+            CustomField::GunAmmo => "Gun ammo",
             CustomField::BomberWaves => "Bomber waves",
             CustomField::BombersPerWave => "Bombers per wave",
             CustomField::WaveInterval => "Time between waves",
@@ -111,9 +125,11 @@ impl CustomField {
             CustomField::FlightSize => "flight",
             CustomField::EnemySpeed => "speed",
             CustomField::EnemyAccuracy => "aim",
+            CustomField::Pilots => "pilots",
             CustomField::Attackers => "attackers",
             CustomField::LockTime => "lock",
             CustomField::UnlimitedGun => "gun",
+            CustomField::GunAmmo => "ammo",
             CustomField::BomberWaves => "waves",
             CustomField::BombersPerWave => "bombers",
             CustomField::WaveInterval => "interval",
@@ -124,15 +140,21 @@ impl CustomField {
     /// Values offered, within the ranges the round accepts.
     fn steps(self) -> &'static [f32] {
         match self {
-            // Includes every level's count in every mode (e.g. 14, 16, 24).
+            // Includes every level's count in every mode (e.g. 8, 16, 24).
             CustomField::Missiles => &[0., 2., 4., 6., 8., 10., 12., 14., 16., 20., 24., 30., 40.],
             CustomField::Enemies => &[1., 2., 4., 6., 8., 10., 12., 16., 20., 24.],
             CustomField::FlightSize => &[1., 2., 3., 4., 5., 6.],
-            CustomField::EnemySpeed => &[0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
+            CustomField::EnemySpeed => &[
+                0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2,
+                1.25, 1.3, 1.35, 1.4, 1.45, 1.5,
+            ],
             CustomField::EnemyAccuracy => &[0.25, 0.5, 0.7, 0.85, 1.0, 1.2, 1.5, 2.0],
+            // Index into PILOT_MIXES.
+            CustomField::Pilots => &[0., 1., 2., 3.],
             CustomField::Attackers => &[1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12.],
             CustomField::LockTime => &[0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
             CustomField::UnlimitedGun => &[0., 1.],
+            CustomField::GunAmmo => &[500., 1000., 1500., 2000., 3000.],
             CustomField::BomberWaves => &[1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12.],
             CustomField::BombersPerWave => &[1., 2., 3., 4., 5., 6., 7., 8.],
             CustomField::WaveInterval => &[
@@ -146,6 +168,10 @@ impl CustomField {
     fn step_label(self, value: f32) -> String {
         match self {
             CustomField::UnlimitedGun => if value > 0.5 { "On" } else { "Off" }.into(),
+            CustomField::Pilots => PILOT_MIXES
+                .get(value.round() as usize)
+                .map_or("", |(_, label)| label)
+                .into(),
             CustomField::LockTime => format!("{value:.1} s"),
             CustomField::WaveInterval => format!("{value:.0} s"),
             CustomField::CityLoss => format!("{:.0} %", value * 100.0),
@@ -164,9 +190,14 @@ impl CustomField {
             CustomField::FlightSize => params.flight_size as f32,
             CustomField::EnemySpeed => params.enemy_speed,
             CustomField::EnemyAccuracy => params.enemy_accuracy,
+            CustomField::Pilots => PILOT_MIXES
+                .iter()
+                .position(|(mix, _)| *mix == params.pilots)
+                .unwrap_or(0) as f32,
             CustomField::Attackers => params.attackers as f32,
             CustomField::LockTime => params.lock_time,
             CustomField::UnlimitedGun => f32::from(u8::from(params.unlimited_gun)),
+            CustomField::GunAmmo => params.gun_ammo as f32,
             CustomField::BomberWaves => params.bomber_waves as f32,
             CustomField::BombersPerWave => params.bombers_per_wave as f32,
             CustomField::WaveInterval => params.wave_interval,
@@ -181,9 +212,15 @@ impl CustomField {
             CustomField::FlightSize => params.flight_size = value.round() as u32,
             CustomField::EnemySpeed => params.enemy_speed = value,
             CustomField::EnemyAccuracy => params.enemy_accuracy = value,
+            CustomField::Pilots => {
+                if let Some((mix, _)) = PILOT_MIXES.get(value.round() as usize) {
+                    params.pilots = *mix;
+                }
+            }
             CustomField::Attackers => params.attackers = value.round() as u32,
             CustomField::LockTime => params.lock_time = value,
             CustomField::UnlimitedGun => params.unlimited_gun = value > 0.5,
+            CustomField::GunAmmo => params.gun_ammo = value.round() as u32,
             CustomField::BomberWaves => params.bomber_waves = value.round() as u32,
             CustomField::BombersPerWave => params.bombers_per_wave = value.round() as u32,
             CustomField::WaveInterval => params.wave_interval = value,
@@ -306,7 +343,9 @@ impl MenuSelection {
                 .iter()
                 .filter(|f| bombers || !f.bombers_only())
                 // Battle's total comes from its waves (bombers plus escort).
-                .filter(|f| !(self.mode == MenuMode::Battle && **f == CustomField::Enemies));
+                .filter(|f| !(self.mode == MenuMode::Battle && **f == CustomField::Enemies))
+                // Ammunition only counts while the gun is limited.
+                .filter(|f| !(self.custom.unlimited_gun && **f == CustomField::GunAmmo));
             rows.extend(fields.map(|&field| {
                 Row {
                     id: RowId::Custom(field),
@@ -639,9 +678,11 @@ mod tests {
                 CustomField::FlightSize => (1.0, 6.0),
                 CustomField::EnemySpeed => (0.5, 1.5),
                 CustomField::EnemyAccuracy => (0.25, 2.0),
+                CustomField::Pilots => (0.0, (PILOT_MIXES.len() - 1) as f32),
                 CustomField::Attackers => (1.0, 12.0),
                 CustomField::LockTime => (0.2, 3.0),
                 CustomField::UnlimitedGun => (0.0, 1.0),
+                CustomField::GunAmmo => (50.0, 9_999.0),
                 CustomField::BomberWaves => (1.0, 12.0),
                 CustomField::BombersPerWave => (1.0, 8.0),
                 CustomField::WaveInterval => (60.0, 300.0),
@@ -675,8 +716,38 @@ mod tests {
             MenuSelection::default()
         );
         // Values between steps snap to the nearest step.
-        let snapped = MenuSelection::from_line("missiles=7;speed=0.93");
+        let snapped = MenuSelection::from_line("missiles=7;speed=0.91;ammo=1200");
         assert_eq!(snapped.custom.missiles, 6);
         assert_eq!(snapped.custom.enemy_speed, 0.9);
+        assert_eq!(snapped.custom.gun_ammo, 1_000);
+    }
+
+    #[test]
+    fn gun_ammo_shows_only_with_a_limited_gun() {
+        let mut selection = MenuSelection::default();
+        let has = |s: &MenuSelection| {
+            s.rows()
+                .iter()
+                .any(|r| r.id == RowId::Custom(CustomField::GunAmmo))
+        };
+        // Easy shoots without limit: no ammunition row.
+        selection.select(RowId::Difficulty, 1);
+        selection.select(RowId::Difficulty, CUSTOM_LEVEL);
+        assert!(selection.custom.unlimited_gun);
+        assert!(!has(&selection));
+
+        selection.select(RowId::Custom(CustomField::UnlimitedGun), 0);
+        assert!(has(&selection));
+        let ammo = CustomField::GunAmmo
+            .steps()
+            .iter()
+            .position(|v| *v == 3000.0)
+            .unwrap();
+        selection.select(RowId::Custom(CustomField::GunAmmo), ammo);
+        let Difficulty::Custom(params) = selection.settings().difficulty else {
+            panic!("custom expected");
+        };
+        assert_eq!(params.gun_ammo, 3_000);
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
     }
 }
