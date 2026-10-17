@@ -891,8 +891,9 @@ fn battle_waves_are_bombers_with_a_fighter_escort() {
         .map(|d| Mission::battle(*d).enemy_count())
         .collect();
     // SE 2×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane
-    // 4×(4+4); from Normal on plus the zeppelin with a double escort.
-    assert_eq!(totals, vec![12, 12, 18 + 5, 24 + 9, 32 + 9]);
+    // 4×(4+4); from Normal on plus zeppelins with a double escort each
+    // (Insane three).
+    assert_eq!(totals, vec![12, 12, 18 + 5, 24 + 9, 32 + 3 * 9]);
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
         let mission = Mission::battle(difficulty);
@@ -901,7 +902,7 @@ fn battle_waves_are_bombers_with_a_fighter_escort() {
         let bomber_waves = params.bomber_waves as usize;
         assert_eq!(
             mission.waves.len(),
-            bomber_waves + usize::from(params.zeppelin)
+            bomber_waves + params.zeppelins as usize
         );
         for (i, wave) in mission.waves.iter().enumerate() {
             let [bombers, escort] = &wave.groups[..] else {
@@ -914,13 +915,17 @@ fn battle_waves_are_bombers_with_a_fighter_escort() {
                 assert_eq!(bombers.count(), params.bombers_per_wave);
                 assert_eq!(escort.count(), params.flight_size);
             } else {
-                // The last wave: the zeppelin and a double escort.
+                // The last waves: a zeppelin each, with a double escort.
                 assert_eq!(bombers.members, vec![EnemyKind::Zeppelin]);
                 assert_eq!(escort.count(), 2 * params.flight_size);
             }
         }
-        let zeppelin_levels = !matches!(difficulty, Difficulty::SuperEasy | Difficulty::Easy);
-        assert_eq!(params.zeppelin, zeppelin_levels, "{difficulty:?}");
+        let zeppelins = match difficulty {
+            Difficulty::SuperEasy | Difficulty::Easy => 0,
+            Difficulty::Insane => 3,
+            _ => 1,
+        };
+        assert_eq!(params.zeppelins, zeppelins, "{difficulty:?}");
     }
     let second = Mission::battle(Difficulty::Hard);
     assert_eq!(second.waves[0].groups[0].members[0], EnemyKind::Ju390);
@@ -938,7 +943,7 @@ fn battle_missiles_follow_the_two_for_a_bomber_one_for_a_fighter_rule() {
         .iter()
         .map(|d| d.params_for(GameMode::Battle).missiles)
         .collect();
-    assert_eq!(missiles, vec![24, 20, 32, 20, 20]);
+    assert_eq!(missiles, vec![24, 20, 32, 20, 36]);
 }
 
 #[test]
@@ -1420,4 +1425,41 @@ fn the_pilots_pick_the_fighter_type() {
             .all(|(kind, skill)| Some(*skill) == kind.pilot()),
         "{pilots:?}"
     );
+}
+
+#[test]
+fn several_zeppelins_come_from_different_sides() {
+    let mission = Mission::battle(Difficulty::Insane);
+    let zeppelins: Vec<(Vec3, Vec3)> = mission
+        .waves
+        .iter()
+        .flat_map(|w| &w.groups)
+        .filter(|g| g.members == vec![crate::ai::EnemyKind::Zeppelin])
+        .map(|g| (g.lead, g.heading))
+        .collect();
+    assert_eq!(zeppelins.len(), 3);
+    for (i, a) in zeppelins.iter().enumerate() {
+        for b in &zeppelins[i + 1..] {
+            assert!(a.0.distance(b.0) > 2_000.0, "{a:?} {b:?}");
+        }
+    }
+    // Custom can ask for none or up to three.
+    let custom = |n| {
+        Mission::battle(Difficulty::Custom(crate::game_state::DifficultyParams {
+            zeppelins: n,
+            ..default()
+        }))
+        .enemy_count()
+    };
+    assert_eq!(custom(0) + 5, custom(1), "a zeppelin and its four escorts");
+    assert_eq!(custom(9), custom(3), "clamped to three");
+}
+
+#[test]
+fn gun_assist_is_on_for_the_easy_levels_only() {
+    let assist: Vec<bool> = Difficulty::PRESETS
+        .iter()
+        .map(|d| d.params().gun_assist)
+        .collect();
+    assert_eq!(assist, vec![true, true, false, false, false]);
 }

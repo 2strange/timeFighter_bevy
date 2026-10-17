@@ -304,10 +304,11 @@ impl Mission {
                 escorts: Some(0),
             });
         }
-        // Normal and up: the zeppelin closes the battle, with a double
-        // escort, on a straight course over the centre from the north.
-        if params.zeppelin {
-            let (lead, heading) = ZEPPELIN_ENTRY;
+        // Normal and up: zeppelins close the battle, each in its own wave
+        // with a double escort, on a straight course over the centre from
+        // the north, then the west and the east.
+        for z in 0..params.zeppelins as usize {
+            let (lead, heading) = ZEPPELIN_ENTRIES[z % ZEPPELIN_ENTRIES.len()];
             let i = mission.waves.len();
             let tuning = mission.waves[0].groups[0].tuning;
             let escort_heading = heading.normalize_or(Vec3::NEG_Z);
@@ -344,9 +345,14 @@ impl Mission {
     }
 }
 
-/// Where the zeppelin enters: north of the centre, close enough that at
-/// 30 m/s it is over the city in under two minutes, heading south.
-const ZEPPELIN_ENTRY: (Vec3, Vec3) = (Vec3::new(0.0, 700.0, -3_200.0), Vec3::Z);
+/// Where zeppelins enter, in turn: north, west and east of the centre,
+/// close enough that at 30 m/s they are over the city in under two
+/// minutes, each heading for it.
+const ZEPPELIN_ENTRIES: [(Vec3, Vec3); 3] = [
+    (Vec3::new(0.0, 700.0, -3_200.0), Vec3::Z),
+    (Vec3::new(-3_200.0, 750.0, -600.0), Vec3::X),
+    (Vec3::new(3_200.0, 650.0, -1_200.0), Vec3::NEG_X),
+];
 
 /// Where an escort enters relative to its bombers: this far behind (m) ...
 const ESCORT_TRAIL: f32 = 400.0;
