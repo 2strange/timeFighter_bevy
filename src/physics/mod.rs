@@ -70,11 +70,18 @@ impl Plugin for PhysicsPlugin {
                 remember_aircraft_pose.before(PhysicsSet::SyncBackend),
                 (restore_aircraft_pose, crash::detect_crashes)
                     .chain()
-                    .after(PhysicsSet::Writeback),
+                    .after(PhysicsSet::Writeback)
+                    .in_set(CrashDetection),
             ),
         );
     }
 }
+
+/// Where [`PlayerCrashed`] and [`EnemyCrashed`] are written (in
+/// `PostUpdate`, after the physics step). Reacting right after it shows a
+/// crash in the same frame it happened.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CrashDetection;
 
 /// Marks ground colliders (land, water). The world builds them from its
 /// layout on [`Layer::World`]; this module only defines the marker.
@@ -173,9 +180,14 @@ pub fn aircraft_body(layer: Layer) -> impl Bundle {
 /// frame (see [`CrashSweep`]), so a fast jet cannot pass through a thin
 /// wall between two frames.
 pub fn aircraft_body_sized(layer: Layer, size: AircraftSize) -> impl Bundle {
+    aircraft_body_with(layer, size.collider())
+}
+
+/// Like [`aircraft_body_sized`], with a collider of its own (the airship).
+pub fn aircraft_body_with(layer: Layer, collider: Collider) -> impl Bundle {
     (
         RigidBody::KinematicPositionBased,
-        size.collider(),
+        collider,
         layer.groups(),
         ActiveEvents::COLLISION_EVENTS,
         // Kinematic bodies ignore static and other kinematic ones by

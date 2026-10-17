@@ -8,12 +8,17 @@
 //
 // Usage:
 //   node normalize.mjs --source-root <dir> [--manifest ../aircraft.json]
-//                      [--out ../../assets/aircraft] [--only <name>]
+//                      [--out ../../assets/aircraft]
+//                      [--library ../../models_library/aircraft] [--only <name>]
 //
 // Every manifest entry names a source folder (scene.gltf + license.txt),
 // the real length in metres, and the source's forward/up axes ("+X", "-Z",
 // ...). "auto" lets the script guess and print its reasoning; pin the guess
 // in the manifest once it has been checked visually.
+//
+// "library": true writes the model to the library folder instead of the
+// game's assets (kept for later use, not loaded or deployed). Each folder
+// gets its own mounts.json and CREDITS.md.
 //
 // Optional per entry, for detailed models that must become light enough to
 // fly in numbers:
@@ -32,7 +37,9 @@
 //                              "rear" / "top" / "bottom" the centre of its
 //                              part within 1.5 m of that extreme; "z": [a, b]
 //                              limits the search to that length range (m,
-//                              nose at -Z). Written to mounts.json.
+//                              nose at -Z), "x" and "y" likewise across and
+//                              up (to single out e.g. an engine car on a
+//                              one-mesh airship). Written to mounts.json.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -57,6 +64,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
 const manifestPath = path.resolve(args.manifest ?? path.join(here, '..', 'aircraft.json'));
 const outDir = path.resolve(args.out ?? path.join(here, '..', '..', 'assets', 'aircraft'));
+const libraryDir = path.resolve(
+  args.library ?? path.join(here, '..', '..', 'models_library', 'aircraft'),
+);
 if (!args['source-root']) fail('missing --source-root <dir>');
 const sourceRoot = path.resolve(args['source-root']);
 
@@ -65,12 +75,18 @@ const ALLOWED_LICENSES = ['CC-BY-4.0', 'CC0-1.0', 'CC0'];
 
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 const io = new NodeIO();
-await mkdir(outDir, { recursive: true });
 
-const credits = [];
-const mountsPath = path.join(outDir, 'mounts.json');
-const mounts = existsSync(mountsPath) ? JSON.parse(await readFile(mountsPath, 'utf8')) : {};
+// Per output folder: its credits and mount points.
+const folders = new Map();
+for (const dir of [outDir, libraryDir]) {
+  await mkdir(dir, { recursive: true });
+  const mountsPath = path.join(dir, 'mounts.json');
+  const mounts = existsSync(mountsPath) ? JSON.parse(await readFile(mountsPath, 'utf8')) : {};
+  folders.set(dir, { credits: [], mountsPath, mounts });
+}
 for (const entry of manifest.aircraft) {
+  const dir = entry.library ? libraryDir : outDir;
+  const { credits, mounts } = folders.get(dir);
   if (args.only && args.only !== entry.name) continue;
   const source = path.join(sourceRoot, entry.source);
   const license = parseLicense(await readFile(path.join(source, 'license.txt'), 'utf8'));
@@ -81,18 +97,19 @@ for (const entry of manifest.aircraft) {
 
   const doc = await io.read(path.join(source, 'scene.gltf'));
   const report = await normalize(doc, entry);
-  const out = path.join(outDir, `${entry.name}.glb`);
+  const out = path.join(dir, `${entry.name}.glb`);
   await io.write(out, doc);
   console.log(formatReport(entry, report, out));
   if (Object.keys(report.mounts).length) mounts[entry.name] = report.mounts;
   else delete mounts[entry.name];
 }
 
-await writeFile(mountsPath, JSON.stringify(mounts, null, 2) + '\n');
-
-if (!args.only) {
-  await writeFile(path.join(outDir, 'CREDITS.md'), formatCredits(credits));
-  console.log(`credits: ${path.join(outDir, 'CREDITS.md')}`);
+for (const [dir, { credits, mountsPath, mounts }] of folders) {
+  await writeFile(mountsPath, JSON.stringify(mounts, null, 2) + '\n');
+  if (!args.only) {
+    await writeFile(path.join(dir, 'CREDITS.md'), formatCredits(credits));
+    console.log(`credits: ${path.join(dir, 'CREDITS.md')}`);
+  }
 }
 
 async function normalize(doc, entry) {
@@ -275,8 +292,11 @@ function measureMounts(sources, apply, entry) {
   const result = {};
   for (const { spec, points: raw } of sources) {
     let points = raw.map(apply);
-    if (spec.z) points = points.filter((p) => p[2] >= spec.z[0] && p[2] <= spec.z[1]);
-    if (!points.length) fail(`${entry.name}: mount "${spec.name}" has nothing in its z range`);
+    for (const [k, axis] of ['x', 'y', 'z'].entries()) {
+      const range = spec[axis];
+      if (range) points = points.filter((p) => p[k] >= range[0] && p[k] <= range[1]);
+    }
+    if (!points.length) fail(`${entry.name}: mount "${spec.name}" has nothing in its range`);
     const axis = { front: [2, -1], rear: [2, 1], top: [1, 1], bottom: [1, -1] }[spec.pick];
     if (axis) {
       const [k, sign] = axis;

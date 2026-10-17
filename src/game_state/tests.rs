@@ -11,8 +11,8 @@ use bevy::{
 use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use super::{
-    Difficulty, GameMode, GameSettings, Mission, MissionConfig, Outcome, Pause, PausePlugin,
-    RestartRound, Round, RoundPhase, RoundPlugin, WaveTrigger,
+    Difficulty, GameMode, GameSettings, Mission, Outcome, Pause, PausePlugin, RestartRound, Round,
+    RoundPhase, RoundPlugin, WaveTrigger,
 };
 use crate::{
     ai::{AiPlugin, Enemy},
@@ -34,12 +34,28 @@ fn app() -> (App, Entity) {
 /// The round app with the player's jet placed at `jet_at` before the first
 /// update (the round start moves it to the spawn point).
 fn app_with_jet_at(jet_at: Transform) -> (App, Entity) {
-    // Hard: two flights of four, the layout most tests below assume.
     let settings = GameSettings {
-        difficulty: Difficulty::Hard,
+        difficulty: classic(),
         ..default()
     };
     custom_app(jet_at, settings, false)
+}
+
+/// The layout most tests below assume: two flights of four fighters (a
+/// Bf 109 flight, then a Me 309 flight: rookies then veterans), at designed
+/// speed.
+fn classic() -> Difficulty {
+    Difficulty::Custom(crate::game_state::DifficultyParams {
+        missiles: 6,
+        enemies: 8,
+        flight_size: 4,
+        pilots: crate::game_state::PilotMix::RookiesThenVeterans,
+        enemy_speed: 1.0,
+        enemy_accuracy: 1.0,
+        attackers: 3,
+        lock_time: 1.0,
+        ..default()
+    })
 }
 
 /// The round app for `settings`, optionally with the generated city and
@@ -375,11 +391,12 @@ fn r_does_not_reset_the_jet_during_a_round() {
 }
 
 #[test]
-fn ramming_a_spitfire_loses_the_round_but_counts_the_kill() {
+fn ramming_a_fighter_loses_the_round_but_counts_the_kill() {
     let (mut app, jet) = app();
     let mission = app.world().resource::<Mission>().clone();
     let enemy = enemies(&mut app)[0];
-    // Put one Spitfire right in the jet's path.
+    let rammed = app.world().get::<Enemy>(enemy).unwrap().kind;
+    // Put one fighter right in the jet's path.
     let jet_tf = *app.world().get::<Transform>(jet).unwrap();
     let in_path = Transform::from_translation(jet_tf.translation + jet_tf.forward() * 4.0)
         .with_rotation(jet_tf.rotation);
@@ -389,7 +406,7 @@ fn ramming_a_spitfire_loses_the_round_but_counts_the_kill() {
     let round = round(&app);
     assert_eq!(
         round.phase,
-        RoundPhase::Over(Outcome::Crashed(CrashInto::Aircraft("Spitfire")))
+        RoundPhase::Over(Outcome::Crashed(CrashInto::Aircraft(rammed.display_name())))
     );
     assert_eq!(round.stats.kills, 1);
     assert!(
@@ -535,11 +552,11 @@ fn difficulty_table_matches_the_design() {
         .collect();
     assert_eq!(
         table,
-        vec![(20, 4, 2), (10, 6, 2), (8, 8, 2), (6, 8, 4), (6, 12, 4)]
+        vec![(24, 6, 2), (12, 6, 2), (8, 10, 2), (8, 12, 4), (8, 16, 4)]
     );
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
-        let mission = Mission::hunt(difficulty, &MissionConfig::default());
+        let mission = Mission::hunt(difficulty);
         assert_eq!(mission.enemy_count(), params.enemies, "{difficulty:?}");
         assert_eq!(
             mission.waves.len() as u32,
@@ -557,7 +574,7 @@ fn custom_difficulty_is_clamped_and_splits_uneven_flights() {
         enemy_speed: 9.0,
         ..default()
     });
-    let mission = Mission::hunt(custom, &MissionConfig::default());
+    let mission = Mission::hunt(custom);
     let sizes: Vec<u32> = mission.waves.iter().map(|w| w.enemy_count()).collect();
     assert_eq!(sizes, vec![3, 3, 1]);
     assert!(mission.waves[0].groups[0].tuning.speed <= 2.0);
@@ -618,7 +635,7 @@ fn non_finite_custom_values_count_as_normal() {
     });
     let params = custom.params().clamped();
     assert_eq!((params.enemy_speed, params.enemy_accuracy), (1.0, 1.0));
-    let mission = Mission::hunt(custom, &MissionConfig::default());
+    let mission = Mission::hunt(custom);
     let tuning = mission.waves[0].groups[0].tuning;
     assert_eq!((tuning.speed, tuning.accuracy), (1.0, 1.0));
 }
@@ -648,7 +665,7 @@ fn easy_levels_lock_faster_and_send_fewer_attackers() {
 fn protect_sends_bomber_flights_by_the_table() {
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
-        let mission = Mission::protect(difficulty, &MissionConfig::default());
+        let mission = Mission::protect(difficulty);
         assert_eq!(
             mission.waves.len() as u32,
             params.bomber_waves,
@@ -685,8 +702,12 @@ fn protect_is_won_when_every_bomber_is_down() {
     );
     let mission = app.world().resource::<Mission>().clone();
     assert_eq!(mission.mode, GameMode::Protect);
-    assert_eq!(enemies(&mut app).len(), 4, "one flight of four bombers");
-    shoot_down_all(&mut app);
+    assert_eq!(enemies(&mut app).len(), 4, "a flight of four bombers");
+    // Each wave arrives as soon as the sky is clear.
+    for _ in 0..mission.waves.len() {
+        shoot_down_all(&mut app);
+        app.update();
+    }
     run_for(&mut app, mission.end_delay + 0.5);
     assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
 }
@@ -716,36 +737,6 @@ fn protect_is_lost_when_the_centre_falls_and_a_restart_rebuilds_it() {
 }
 
 #[test]
-fn protect_flies_the_configured_bomber() {
-    for bomber in [crate::ai::EnemyKind::Lancaster, crate::ai::EnemyKind::B17] {
-        let (mut app, _) = custom_app(
-            FlightConfig::default().spawn_transform(),
-            protect(Difficulty::SuperEasy),
-            true,
-        );
-        app.insert_resource(crate::game_state::MissionConfig {
-            bomber,
-            ..default()
-        });
-        app.world_mut().write_message(RestartRound);
-        app.update();
-        let kinds: Vec<_> = app
-            .world_mut()
-            .query::<(&Enemy, &crate::combat::Turrets)>()
-            .iter(app.world())
-            .map(|(e, t)| (e.kind, t.mounts.len()))
-            .collect();
-        assert_eq!(kinds.len(), 4, "{bomber:?}");
-        // Front and rear gunners from the model's mounts.
-        assert!(kinds.iter().all(|k| *k == (bomber, 2)), "{kinds:?}");
-    }
-    assert_eq!(
-        crate::game_state::MissionConfig::default().bomber,
-        crate::ai::EnemyKind::Lancaster
-    );
-}
-
-#[test]
 fn damage_still_queued_from_the_old_round_does_not_hit_the_new_city() {
     let (mut app, _) = custom_app(
         FlightConfig::default().spawn_transform(),
@@ -772,7 +763,7 @@ fn missiles_are_counted_per_mode() {
         .iter()
         .map(|d| d.params_for(GameMode::Protect).missiles)
         .collect();
-    assert_eq!(protect, vec![20, 16, 16, 12, 12]);
+    assert_eq!(protect, vec![24, 16, 16, 12, 12]);
     for difficulty in Difficulty::PRESETS {
         assert_eq!(
             difficulty.params_for(GameMode::Hunt),
@@ -809,23 +800,16 @@ fn a_protect_round_arms_the_jet_with_the_protect_missiles() {
 }
 
 #[test]
-fn the_second_set_flies_mixed_pairs_and_ju_390_led_bombers() {
-    use crate::{ai::EnemyKind, game_state::EnemySet};
-    let config = MissionConfig {
-        set: EnemySet::Second,
-        ..default()
-    };
-    let hunt = Mission::hunt(Difficulty::Hard, &config);
+fn fighters_are_bf_109_and_me_309_bombers_a_ju_390_with_he_177s() {
+    use crate::ai::EnemyKind;
+    // Hard: rookies first (Bf 109 flights), veterans after (Me 309).
+    let hunt = Mission::hunt(Difficulty::Hard);
+    assert_eq!(hunt.waves[0].groups[0].members, vec![EnemyKind::Bf109K4; 4]);
     assert_eq!(
-        hunt.waves[0].groups[0].members,
-        vec![
-            EnemyKind::Bf109K4,
-            EnemyKind::Me309,
-            EnemyKind::Bf109K4,
-            EnemyKind::Me309
-        ]
+        hunt.waves.last().unwrap().groups[0].members,
+        vec![EnemyKind::Me309; 4]
     );
-    let protect = Mission::protect(Difficulty::Normal, &config);
+    let protect = Mission::protect(Difficulty::Normal);
     assert_eq!(
         protect.waves[0].groups[0].members,
         vec![
@@ -842,45 +826,11 @@ fn the_second_set_flies_mixed_pairs_and_ju_390_led_bombers() {
         EnemyKind::Ju390.stats().health,
         2.0 * EnemyKind::He177.stats().health
     );
-    // The first set stays as it was.
-    let first = Mission::hunt(Difficulty::Hard, &MissionConfig::default());
-    assert!(
-        first.waves[0].groups[0]
-            .members
-            .iter()
-            .all(|k| *k == EnemyKind::Spitfire)
-    );
 }
 
 #[test]
-fn the_set_is_chosen_by_url_or_command_line() {
-    use crate::game_state::EnemySet;
-    assert_eq!(
-        MissionConfig::from_query("?set=second").set,
-        EnemySet::Second
-    );
-    assert_eq!(
-        MissionConfig::from_query("?a=1&set=second").set,
-        EnemySet::Second
-    );
-    assert_eq!(
-        MissionConfig::from_query("--showroom --set=second").set,
-        EnemySet::Second
-    );
-    assert_eq!(MissionConfig::from_query("").set, EnemySet::First);
-    assert_eq!(
-        MissionConfig::from_query("?set=nonsense").set,
-        EnemySet::First
-    );
-}
-
-#[test]
-fn a_second_set_round_spawns_the_mixed_flight() {
+fn a_round_spawns_the_first_flight_by_its_pilots() {
     let (mut app, _) = app();
-    app.insert_resource(MissionConfig {
-        set: crate::game_state::EnemySet::Second,
-        ..default()
-    });
     app.world_mut().write_message(RestartRound);
     app.update();
     let mut kinds: Vec<_> = app
@@ -890,22 +840,19 @@ fn a_second_set_round_spawns_the_mixed_flight() {
         .map(|e| format!("{:?}", e.kind))
         .collect();
     kinds.sort();
-    assert_eq!(kinds, vec!["Bf109K4", "Bf109K4", "Me309", "Me309"]);
+    // Rookies first: the first flight is all Bf 109.
+    assert_eq!(kinds, vec!["Bf109K4"; 4]);
     run_for(&mut app, 5.0);
     assert_eq!(round(&app).phase, RoundPhase::Running);
 }
 
 #[test]
-fn a_second_set_protect_round_sends_a_ju_390_with_he_177s() {
+fn a_protect_round_sends_a_ju_390_with_he_177s_and_their_gunners() {
     let (mut app, _) = custom_app(
         FlightConfig::default().spawn_transform(),
         protect(Difficulty::SuperEasy),
         true,
     );
-    app.insert_resource(MissionConfig {
-        set: crate::game_state::EnemySet::Second,
-        ..default()
-    });
     app.world_mut().write_message(RestartRound);
     app.update();
     let mut kinds: Vec<_> = app
@@ -938,45 +885,54 @@ fn battle(difficulty: Difficulty) -> GameSettings {
 
 #[test]
 fn battle_waves_are_bombers_with_a_fighter_escort() {
-    use crate::{ai::EnemyKind, game_state::EnemySet};
+    use crate::ai::EnemyKind;
     let totals: Vec<u32> = Difficulty::PRESETS
         .iter()
-        .map(|d| Mission::battle(*d, &MissionConfig::default()).enemy_count())
+        .map(|d| Mission::battle(*d).enemy_count())
         .collect();
-    // SE 1×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane 4×(4+4).
-    assert_eq!(totals, vec![6, 12, 18, 24, 32]);
+    // SE 2×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane
+    // 4×(4+4); from Normal on plus zeppelins with a double escort each
+    // (Insane three).
+    assert_eq!(totals, vec![12, 12, 18 + 5, 24 + 9, 32 + 3 * 9]);
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
-        let mission = Mission::battle(difficulty, &MissionConfig::default());
+        let mission = Mission::battle(difficulty);
         assert_eq!(mission.mode, GameMode::Battle);
         assert_eq!(mission.city_loss, Some(params.city_loss));
-        for wave in &mission.waves {
+        let bomber_waves = params.bomber_waves as usize;
+        assert_eq!(
+            mission.waves.len(),
+            bomber_waves + params.zeppelins as usize
+        );
+        for (i, wave) in mission.waves.iter().enumerate() {
             let [bombers, escort] = &wave.groups[..] else {
                 panic!("two groups per wave");
             };
             assert!(bombers.members.iter().all(|k| k.is_bomber()));
-            assert_eq!(bombers.count(), params.bombers_per_wave);
             assert!(escort.members.iter().all(|k| !k.is_bomber()));
-            assert_eq!(escort.count(), params.flight_size);
             assert_eq!(escort.escorts, Some(0));
+            if i < bomber_waves {
+                assert_eq!(bombers.count(), params.bombers_per_wave);
+                assert_eq!(escort.count(), params.flight_size);
+            } else {
+                // The last waves: a zeppelin each, with a double escort.
+                assert_eq!(bombers.members, vec![EnemyKind::Zeppelin]);
+                assert_eq!(escort.count(), 2 * params.flight_size);
+            }
         }
+        let zeppelins = match difficulty {
+            Difficulty::SuperEasy | Difficulty::Easy => 0,
+            Difficulty::Insane => 3,
+            _ => 1,
+        };
+        assert_eq!(params.zeppelins, zeppelins, "{difficulty:?}");
     }
-    let second = Mission::battle(
-        Difficulty::Hard,
-        &MissionConfig {
-            set: EnemySet::Second,
-            ..default()
-        },
-    );
+    let second = Mission::battle(Difficulty::Hard);
     assert_eq!(second.waves[0].groups[0].members[0], EnemyKind::Ju390);
     assert_eq!(
         second.waves[0].groups[1].members,
-        vec![
-            EnemyKind::Bf109K4,
-            EnemyKind::Me309,
-            EnemyKind::Bf109K4,
-            EnemyKind::Me309
-        ]
+        vec![EnemyKind::Bf109K4; 4],
+        "Hard: rookie escorts (Bf 109) first"
     );
     assert!(GameMode::ALL.contains(&GameMode::Battle));
 }
@@ -987,7 +943,7 @@ fn battle_missiles_follow_the_two_for_a_bomber_one_for_a_fighter_rule() {
         .iter()
         .map(|d| d.params_for(GameMode::Battle).missiles)
         .collect();
-    assert_eq!(missiles, vec![14, 20, 24, 16, 16]);
+    assert_eq!(missiles, vec![24, 20, 32, 20, 36]);
 }
 
 #[test]
@@ -997,7 +953,7 @@ fn a_battle_round_is_won_when_everything_is_down() {
         battle(Difficulty::SuperEasy),
         true,
     );
-    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 14);
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 24);
     let mut kinds: Vec<bool> = app
         .world_mut()
         .query::<&Enemy>()
@@ -1019,7 +975,10 @@ fn a_battle_round_is_won_when_everything_is_down() {
             .filter(|(e, _)| !e.kind.is_bomber())
             .all(|(_, g)| g.escort == Some(bomber_flight))
     );
-    shoot_down_all(&mut app);
+    for _ in 0..app.world().resource::<Mission>().waves.len() {
+        shoot_down_all(&mut app);
+        app.update();
+    }
     run_for(&mut app, 3.0);
     assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
 }
@@ -1088,4 +1047,419 @@ fn waiting_escorts_stay_with_their_bombers() {
             "escort {distance:.0} m from its bombers"
         );
     }
+}
+
+// --- The player's jet is gone in the frame it is destroyed ----------------
+
+mod instant_wreck {
+    use bevy::prelude::*;
+    use bevy_rapier3d::prelude::{Collider, ColliderDisabled, RigidBody};
+
+    use super::{app, round, run_for};
+    use crate::{
+        combat::{Effect, EffectKind, Health, Hit, Team, Weapon},
+        flight::Wrecked,
+        game_state::{RestartRound, RoundPhase},
+        physics::{Layer, aircraft_body},
+    };
+
+    fn wrecked(app: &App, jet: Entity) -> bool {
+        app.world().get::<Wrecked>(jet).is_some()
+    }
+
+    fn hidden(app: &App, jet: Entity) -> bool {
+        app.world().get::<Visibility>(jet) == Some(&Visibility::Hidden)
+    }
+
+    fn big_explosions(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&Effect>()
+            .iter(app.world())
+            .filter(|e| e.kind == EffectKind::BigExplosion)
+            .count()
+    }
+
+    fn position(app: &App, jet: Entity) -> Vec3 {
+        app.world().get::<Transform>(jet).unwrap().translation
+    }
+
+    /// Flies until the jet is wrecked, checking every frame that it never
+    /// shows inside `inside` without being wrecked. Returns the frame count.
+    fn fly_into(app: &mut App, jet: Entity, inside: impl Fn(Vec3) -> bool) -> u32 {
+        for frame in 1..=240 {
+            app.update();
+            let at = position(app, jet);
+            if wrecked(app, jet) {
+                // Everything happens in the same frame.
+                assert!(hidden(app, jet), "wrecked but still visible");
+                assert_eq!(big_explosions(app), 1, "no explosion in the wreck frame");
+                assert!(app.world().get::<ColliderDisabled>(jet).is_some());
+                return frame;
+            }
+            assert!(
+                !inside(at),
+                "frame {frame}: jet at {at} inside without a crash"
+            );
+        }
+        panic!("never crashed");
+    }
+
+    /// After the wreck: it stays put and hidden for the rest of the round.
+    fn stays_down(app: &mut App, jet: Entity) {
+        let at = position(app, jet);
+        run_for(app, 1.0);
+        assert_eq!(position(app, jet), at, "the wreck flew on");
+        assert!(hidden(app, jet) && wrecked(app, jet));
+        assert!(app.world().get::<Health>(jet).unwrap().is_dead());
+    }
+
+    #[test]
+    fn diving_into_the_ground_explodes_at_once_and_never_resurfaces() {
+        let (mut app, jet) = app();
+        *app.world_mut().get_mut::<Transform>(jet).unwrap() =
+            Transform::from_xyz(0.0, 60.0, 0.0).with_rotation(Quat::from_rotation_x(-0.9));
+        fly_into(&mut app, jet, |p| p.y < 0.0);
+        stays_down(&mut app, jet);
+        run_for(&mut app, 2.0);
+        assert!(matches!(round(&app).phase, RoundPhase::Over(_)));
+    }
+
+    #[test]
+    fn flying_into_a_building_explodes_at_the_wall() {
+        let (mut app, jet) = app();
+        let start = position(&app, jet);
+        let forward = app.world().get::<Transform>(jet).unwrap().forward();
+        // A 200 m block 200 m ahead, across the flight path.
+        let centre = start + forward * 300.0;
+        let half = Vec3::splat(100.0);
+        app.world_mut().spawn((
+            RigidBody::Fixed,
+            Collider::cuboid(half.x, half.y, half.z),
+            Layer::World.groups(),
+            Transform::from_translation(centre),
+        ));
+        fly_into(&mut app, jet, |p| {
+            ((p - centre).abs() - half).max_element() < 0.0
+        });
+        stays_down(&mut app, jet);
+    }
+
+    #[test]
+    fn touching_an_enemy_is_instant_death() {
+        let (mut app, jet) = app();
+        let start = position(&app, jet);
+        let forward = app.world().get::<Transform>(jet).unwrap().forward();
+        let enemy_at = start + forward * 150.0;
+        app.world_mut().spawn((
+            Team::Enemy,
+            Health::full(50.0),
+            aircraft_body(Layer::Enemy),
+            Transform::from_translation(enemy_at),
+        ));
+        fly_into(&mut app, jet, |p| p.distance(enemy_at) < 3.0);
+        stays_down(&mut app, jet);
+    }
+
+    #[test]
+    fn being_shot_down_hides_the_jet_in_the_same_frame() {
+        let (mut app, jet) = app();
+        app.world_mut().write_message(Hit {
+            projectile: Entity::PLACEHOLDER,
+            target: jet,
+            point: Vec3::ZERO,
+            team: Team::Enemy,
+            weapon: Weapon::Gun,
+            damage: 1_000.0,
+        });
+        app.update();
+        assert!(wrecked(&app, jet) && hidden(&app, jet));
+        assert_eq!(big_explosions(&mut app), 1);
+        stays_down(&mut app, jet);
+    }
+
+    #[test]
+    fn enter_on_the_result_screen_restarts_without_a_second_explosion() {
+        let (mut app, jet) = app();
+        *app.world_mut().get_mut::<Transform>(jet).unwrap() =
+            Transform::from_xyz(0.0, 60.0, 0.0).with_rotation(Quat::from_rotation_x(-0.9));
+        fly_into(&mut app, jet, |p| p.y < 0.0);
+        // Wait for the result screen, as a player would.
+        run_for(&mut app, 3.0);
+        assert!(matches!(round(&app).phase, RoundPhase::Over(_)));
+
+        let deaths = |app: &App| {
+            app.world()
+                .resource::<Messages<crate::combat::Destroyed>>()
+                .iter_current_update_messages()
+                .filter(|d| d.team == Team::Player)
+                .count()
+        };
+        super::hold(&mut app, KeyCode::Enter);
+        let mut later_deaths = 0;
+        let mut later_explosions = 0;
+        for frame in 0..90 {
+            app.update();
+            if frame == 1 {
+                super::release(&mut app, KeyCode::Enter);
+            }
+            later_deaths += deaths(&app);
+            later_explosions = later_explosions.max(big_explosions(&mut app));
+            assert!(
+                !wrecked(&app, jet) || frame == 0,
+                "frame {frame}: wrecked again"
+            );
+        }
+        assert_eq!(later_deaths, 0, "the jet died again after the restart");
+        assert_eq!(later_explosions, 0, "a new explosion after the restart");
+        assert_eq!(round(&app).phase, RoundPhase::Running);
+        assert!(!hidden(&app, jet));
+        let before = position(&app, jet);
+        run_for(&mut app, 0.5);
+        assert!(
+            position(&app, jet).distance(before) > 10.0,
+            "jet does not fly"
+        );
+    }
+
+    #[test]
+    fn restarting_after_a_win_does_not_crash_on_the_way_back_to_the_spawn() {
+        let (mut app, jet) = app();
+        let spawn = position(&app, jet);
+        // Somewhere else, with a wall between there and the spawn point.
+        let away = spawn + Vec3::new(0.0, 0.0, -1_000.0);
+        app.world_mut().spawn((
+            RigidBody::Fixed,
+            Collider::cuboid(300.0, 300.0, 20.0),
+            Layer::World.groups(),
+            Transform::from_translation(spawn + Vec3::new(0.0, 0.0, -500.0)),
+        ));
+        for _ in 0..3 {
+            *app.world_mut().get_mut::<Transform>(jet).unwrap() = Transform::from_translation(away);
+            app.update();
+        }
+        app.world_mut()
+            .resource_mut::<crate::game_state::Round>()
+            .phase = RoundPhase::Ending {
+            outcome: crate::game_state::Outcome::Victory,
+            left: 0.1,
+        };
+        run_for(&mut app, 0.5);
+        assert!(matches!(round(&app).phase, RoundPhase::Over(_)));
+        super::hold(&mut app, KeyCode::Enter);
+        for frame in 0..60 {
+            app.update();
+            if frame == 1 {
+                super::release(&mut app, KeyCode::Enter);
+            }
+            assert!(
+                !wrecked(&app, jet),
+                "frame {frame}: crashed after the restart"
+            );
+        }
+        assert_eq!(round(&app).phase, RoundPhase::Running);
+    }
+
+    #[test]
+    fn a_new_round_brings_the_jet_back() {
+        let (mut app, jet) = app();
+        *app.world_mut().get_mut::<Transform>(jet).unwrap() =
+            Transform::from_xyz(0.0, 60.0, 0.0).with_rotation(Quat::from_rotation_x(-0.9));
+        fly_into(&mut app, jet, |p| p.y < 0.0);
+        app.world_mut().write_message(RestartRound);
+        run_for(&mut app, 0.2);
+        assert!(!wrecked(&app, jet), "still wrecked after the restart");
+        assert!(!hidden(&app, jet));
+        assert!(app.world().get::<ColliderDisabled>(jet).is_none());
+        let before = position(&app, jet);
+        run_for(&mut app, 0.5);
+        assert!(
+            position(&app, jet).distance(before) > 10.0,
+            "jet does not fly"
+        );
+        assert_eq!(round(&app).phase, RoundPhase::Running);
+    }
+}
+
+#[test]
+fn levels_set_gun_ammunition_speed_and_flights() {
+    let table: Vec<(Option<u32>, f32, u32, u32)> = Difficulty::PRESETS
+        .iter()
+        .map(|d| {
+            let p = d.params();
+            (
+                (!p.unlimited_gun).then_some(p.gun_ammo),
+                p.enemy_speed,
+                p.enemies.div_ceil(p.flight_size),
+                p.attackers,
+            )
+        })
+        .collect();
+    assert_eq!(
+        table,
+        vec![
+            (None, 0.5, 3, 1),
+            (None, 0.6, 3, 1),
+            (Some(2_000), 0.75, 5, 2),
+            (Some(1_000), 0.9, 3, 3),
+            (Some(500), 1.0, 4, 4),
+        ]
+    );
+    assert_eq!(Difficulty::SuperEasy.params().bomber_waves, 2);
+
+    // The round loads the gun accordingly.
+    for (difficulty, ammo) in [
+        (Difficulty::SuperEasy, None),
+        (Difficulty::Normal, Some(2_000)),
+        (Difficulty::Insane, Some(500)),
+    ] {
+        let (mut app, jet) = app();
+        app.insert_resource(GameSettings {
+            difficulty,
+            ..default()
+        });
+        app.world_mut().write_message(RestartRound);
+        app.update();
+        assert_eq!(
+            app.world().get::<Gun>(jet).unwrap().ammo,
+            ammo,
+            "{difficulty:?}"
+        );
+    }
+}
+
+#[test]
+fn the_battle_is_only_won_once_the_zeppelin_wreck_has_hit_the_ground() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Normal),
+        true,
+    );
+    let mission = app.world().resource::<Mission>().clone();
+    // Down with every wave as it comes, the zeppelin last.
+    for _ in 0..mission.waves.len() {
+        shoot_down_all(&mut app);
+        app.update();
+    }
+    let falling = app
+        .world_mut()
+        .query_filtered::<&Enemy, With<crate::combat::GoingDown>>()
+        .iter(app.world())
+        .map(|e| e.kind)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        falling,
+        vec![crate::ai::EnemyKind::Zeppelin],
+        "burning on its way down"
+    );
+    assert_eq!(
+        round(&app).enemies_left(&mission),
+        0,
+        "already counts as down"
+    );
+    run_for(&mut app, 5.0);
+    assert_eq!(
+        round(&app).phase,
+        RoundPhase::Running,
+        "not before the impact"
+    );
+    run_for(&mut app, 40.0);
+    // It came down north of the centre: the city stands, the battle is won.
+    assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
+    let wrecks = app
+        .world_mut()
+        .query_filtered::<(), With<crate::combat::GoingDown>>()
+        .iter(app.world())
+        .count();
+    assert_eq!(wrecks, 0);
+}
+
+#[test]
+fn the_pilots_pick_the_fighter_type() {
+    use crate::{
+        ai::{EnemyKind, PilotSkill},
+        game_state::{PilotMix, fighter_flight},
+    };
+    use EnemyKind::{Bf109K4 as Bf, Me309 as Me};
+    assert_eq!(fighter_flight(4, PilotMix::Rookies, 0, 2), vec![Bf; 4]);
+    assert_eq!(fighter_flight(4, PilotMix::Veterans, 0, 2), vec![Me; 4]);
+    // Mixed: alternating, the slower Bf 109 leads.
+    assert_eq!(
+        fighter_flight(4, PilotMix::Mixed, 0, 2),
+        vec![Bf, Me, Bf, Me]
+    );
+    assert_eq!(
+        fighter_flight(2, PilotMix::RookiesThenVeterans, 0, 3),
+        vec![Bf; 2]
+    );
+    assert_eq!(
+        fighter_flight(2, PilotMix::RookiesThenVeterans, 2, 3),
+        vec![Me; 2]
+    );
+    // The type brings its pilot; bombers have none of their own.
+    assert_eq!(Bf.pilot(), Some(PilotSkill::ROOKIE));
+    assert_eq!(Me.pilot(), Some(PilotSkill::VETERAN));
+    assert_eq!(EnemyKind::He177.pilot(), None);
+
+    // In a round, a mixed flight's members fly with their type's pilot.
+    let (mut app, _) = app();
+    app.insert_resource(GameSettings {
+        difficulty: Difficulty::Custom(crate::game_state::DifficultyParams {
+            pilots: PilotMix::Mixed,
+            flight_size: 4,
+            ..default()
+        }),
+        ..default()
+    });
+    app.world_mut().write_message(RestartRound);
+    app.update();
+    let pilots: Vec<(EnemyKind, PilotSkill)> = app
+        .world_mut()
+        .query::<(&Enemy, &crate::ai::EnemyPilot)>()
+        .iter(app.world())
+        .map(|(e, p)| (e.kind, p.skill))
+        .collect();
+    assert_eq!(pilots.len(), 4);
+    assert!(
+        pilots
+            .iter()
+            .all(|(kind, skill)| Some(*skill) == kind.pilot()),
+        "{pilots:?}"
+    );
+}
+
+#[test]
+fn several_zeppelins_come_from_different_sides() {
+    let mission = Mission::battle(Difficulty::Insane);
+    let zeppelins: Vec<(Vec3, Vec3)> = mission
+        .waves
+        .iter()
+        .flat_map(|w| &w.groups)
+        .filter(|g| g.members == vec![crate::ai::EnemyKind::Zeppelin])
+        .map(|g| (g.lead, g.heading))
+        .collect();
+    assert_eq!(zeppelins.len(), 3);
+    for (i, a) in zeppelins.iter().enumerate() {
+        for b in &zeppelins[i + 1..] {
+            assert!(a.0.distance(b.0) > 2_000.0, "{a:?} {b:?}");
+        }
+    }
+    // Custom can ask for none or up to three.
+    let custom = |n| {
+        Mission::battle(Difficulty::Custom(crate::game_state::DifficultyParams {
+            zeppelins: n,
+            ..default()
+        }))
+        .enemy_count()
+    };
+    assert_eq!(custom(0) + 5, custom(1), "a zeppelin and its four escorts");
+    assert_eq!(custom(9), custom(3), "clamped to three");
+}
+
+#[test]
+fn gun_assist_is_on_for_the_easy_levels_only() {
+    let assist: Vec<bool> = Difficulty::PRESETS
+        .iter()
+        .map(|d| d.params().gun_assist)
+        .collect();
+    assert_eq!(assist, vec![true, true, false, false, false]);
 }

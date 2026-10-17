@@ -21,6 +21,7 @@ mod tests;
 mod turrets;
 mod visuals;
 mod weapons;
+mod wreck;
 
 use bevy::prelude::*;
 
@@ -35,7 +36,7 @@ pub use weapons::{Gun, Missile, MissileRack, Munition, Trigger, Weapon, gun_lead
 
 use crate::{
     flight::{FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft},
-    physics::{EnemyCrashed, PlayerCrashed, ProjectileHit},
+    physics::{CrashDetection, EnemyCrashed, PlayerCrashed, ProjectileHit},
     world::damage::DamageArea,
 };
 
@@ -81,6 +82,34 @@ pub struct Hitbox {
     pub gun_radius: f32,
 }
 
+/// A long hit zone instead of the spheres: a capsule along the aircraft's
+/// own Z axis (nose −Z), for an airship 245 m long but only 46 m wide.
+/// Gun rounds count within `radius`, missile fuses within `radius` plus
+/// their fuse radius.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct HitCapsule {
+    /// Half the length of the capsule's core segment (m).
+    pub half_length: f32,
+    pub radius: f32,
+}
+
+/// Marks an aircraft that does not explode at zero health but goes down
+/// slowly, burning ([`GoingDown`]), and does its damage where it hits.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct FallsWhenDestroyed {
+    /// Blast on impact: radius (m) and strength (1.0 destroys).
+    pub impact_radius: f32,
+    pub impact_strength: f32,
+}
+
+/// A destroyed aircraft on its way down. Counted as shot down already; it
+/// is removed when it hits the ground or a building.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct GoingDown {
+    /// Seconds since it was destroyed.
+    pub time: f32,
+}
+
 /// World-space velocity (m/s) of an aircraft. Weapons inherit it, missiles
 /// lead with it. The player's copy is taken from [`FlightState`] every
 /// frame; enemies write their own. (Projectiles use Rapier's `Velocity`.)
@@ -121,7 +150,7 @@ pub enum CrashInto {
     Obstacle,
 }
 
-/// Type name of an aircraft ("Spitfire"), for messages such as "rammed by".
+/// Type name of an aircraft ("Me 309"), for messages such as "rammed by".
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AircraftType(pub &'static str);
 
@@ -238,17 +267,34 @@ impl Plugin for CombatPlugin {
                     (
                         hits::projectile_hits,
                         hits::proximity_hits,
-                        hits::player_crashes,
-                        hits::enemy_crashes,
                         hits::remember_positions,
                     )
                         .chain()
                         .in_set(CombatSystems::DetectHits),
                     hits::apply_hits.in_set(CombatSystems::Resolve),
+                    // Shot down: hidden and exploding in this frame.
+                    (wreck::wreck_player, wreck::restore_player)
+                        .chain()
+                        .after(CombatSystems::Resolve)
+                        .in_set(wreck::WreckSystems),
                     (effects::spawn_effects, effects::age_effects)
                         .chain()
                         .after(CombatSystems::Resolve),
                 ),
+            )
+            // Crashes are handled right where the physics reports them, so
+            // the frame that shows the impact shows the explosion, not a
+            // jet half inside a building (and enemies vanish just as fast).
+            .add_systems(
+                PostUpdate,
+                (
+                    hits::player_crashes,
+                    hits::enemy_crashes,
+                    wreck::wreck_player,
+                )
+                    .chain()
+                    .after(CrashDetection)
+                    .in_set(wreck::WreckSystems),
             );
     }
 }

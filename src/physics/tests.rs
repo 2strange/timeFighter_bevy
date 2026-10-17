@@ -407,12 +407,12 @@ fn thin_deck_and_wall_stop_a_jet_at_500_m_s_and_10_fps() {
 }
 
 #[test]
-fn player_and_spitfire_collide() {
+fn player_and_fighter_collide() {
     let mut app = app(30);
     let enemy = app
         .world_mut()
         .spawn((
-            AircraftModel::Spitfire.body(Layer::Enemy),
+            AircraftModel::Bf109K4.body(Layer::Enemy),
             Cruise(Vec3::new(0.0, 0.0, 150.0)),
             Transform::from_xyz(0.0, 300.0, -400.0),
         ))
@@ -442,7 +442,7 @@ fn enemy_crashing_into_the_world_is_an_enemy_crash() {
     let enemy = app
         .world_mut()
         .spawn((
-            AircraftModel::Spitfire.body(Layer::Enemy),
+            AircraftModel::Bf109K4.body(Layer::Enemy),
             Cruise(Vec3::new(0.0, 0.0, -300.0)),
             Transform::from_xyz(0.0, 50.0, 0.0),
         ))

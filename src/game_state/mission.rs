@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use super::{Difficulty, GameSettings, MissionConfig, PilotMix};
+use super::{Difficulty, GameSettings, PilotMix};
 use crate::ai::{EnemyKind, EnemyTuning, PilotSkill};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -134,7 +134,7 @@ pub struct Mission {
 
 impl Default for Mission {
     fn default() -> Self {
-        Self::hunt(Difficulty::default(), &MissionConfig::default())
+        Self::hunt(Difficulty::default())
     }
 }
 
@@ -173,10 +173,10 @@ const BOMBER_ENTRY_POINTS: [(Vec3, Vec3); 5] = [
 ];
 
 impl Mission {
-    /// Mode 1, Hunt: Spitfire flights arriving one after another, each as
+    /// Mode 1, Hunt: fighter flights arriving one after another, each as
     /// the previous one is (nearly) gone. Size, count, pilots and tuning
     /// come from the difficulty.
-    pub fn hunt(difficulty: Difficulty, config: &MissionConfig) -> Self {
+    pub fn hunt(difficulty: Difficulty) -> Self {
         let params = difficulty.params().clamped();
         let flights = params.enemies.div_ceil(params.flight_size);
         let tuning = EnemyTuning {
@@ -206,7 +206,7 @@ impl Mission {
                         WaveTrigger::WhenEnemiesAtMost(params.flight_size / 4)
                     },
                     groups: vec![SpawnGroup {
-                        members: config.set.fighters(count),
+                        members: fighter_flight(count, params.pilots, i as usize, flights as usize),
                         lead,
                         heading,
                         formation: Formation::Vic { spacing: 45.0 },
@@ -227,18 +227,18 @@ impl Mission {
     }
 
     /// The mission for the player's settings.
-    pub fn from_settings(settings: &GameSettings, config: &MissionConfig) -> Self {
+    pub fn from_settings(settings: &GameSettings) -> Self {
         match settings.mode {
-            GameMode::Hunt => Self::hunt(settings.difficulty, config),
-            GameMode::Protect => Self::protect(settings.difficulty, config),
-            GameMode::Battle => Self::battle(settings.difficulty, config),
+            GameMode::Hunt => Self::hunt(settings.difficulty),
+            GameMode::Protect => Self::protect(settings.difficulty),
+            GameMode::Battle => Self::battle(settings.difficulty),
         }
     }
 
     /// Mode 2, Protect: flights of four bombers, one after another (a fixed
     /// interval apart, or as soon as the sky is clear), each flying at the
     /// city centre from a different side and bombing it until shot down.
-    pub fn protect(difficulty: Difficulty, config: &MissionConfig) -> Self {
+    pub fn protect(difficulty: Difficulty) -> Self {
         let params = difficulty.params().clamped();
         let tuning = EnemyTuning {
             speed: params.enemy_speed,
@@ -254,7 +254,7 @@ impl Mission {
                         WaveTrigger::AfterSecondsOrCleared(i as f32 * params.wave_interval)
                     },
                     groups: vec![SpawnGroup {
-                        members: config.set.bombers(params.bombers_per_wave, config.bomber),
+                        members: bomber_flight(params.bombers_per_wave),
                         lead,
                         heading,
                         formation: Formation::Vic { spacing: 60.0 },
@@ -278,9 +278,9 @@ impl Mission {
     /// `flight_size` fighters that fight the player as in Hunt (attack
     /// slots, sight). Won when everything is down; lost when the city
     /// centre falls or the player is shot down.
-    pub fn battle(difficulty: Difficulty, config: &MissionConfig) -> Self {
+    pub fn battle(difficulty: Difficulty) -> Self {
         let params = difficulty.params().clamped();
-        let mut mission = Self::protect(difficulty, config);
+        let mut mission = Self::protect(difficulty);
         let waves = mission.waves.len() as u32;
         for (i, wave) in mission.waves.iter_mut().enumerate() {
             let bombers = wave.groups[0].clone();
@@ -295,13 +295,45 @@ impl Mission {
             };
             // The escort trails the bombers, a little higher.
             wave.groups.push(SpawnGroup {
-                members: config.set.fighters(params.flight_size),
+                members: fighter_flight(params.flight_size, params.pilots, i, waves as usize),
                 lead: bombers.lead - heading * ESCORT_TRAIL + Vec3::Y * ESCORT_ABOVE,
                 heading,
                 formation: Formation::Vic { spacing: 45.0 },
                 skill,
                 tuning: bombers.tuning,
                 escorts: Some(0),
+            });
+        }
+        // Normal and up: zeppelins close the battle, each in its own wave
+        // with a double escort, on a straight course over the centre from
+        // the north, then the west and the east.
+        for z in 0..params.zeppelins as usize {
+            let (lead, heading) = ZEPPELIN_ENTRIES[z % ZEPPELIN_ENTRIES.len()];
+            let i = mission.waves.len();
+            let tuning = mission.waves[0].groups[0].tuning;
+            let escort_heading = heading.normalize_or(Vec3::NEG_Z);
+            mission.waves.push(WaveSpec {
+                trigger: WaveTrigger::AfterSecondsOrCleared(i as f32 * params.wave_interval),
+                groups: vec![
+                    SpawnGroup {
+                        members: vec![EnemyKind::Zeppelin],
+                        lead,
+                        heading,
+                        formation: Formation::Vic { spacing: 300.0 },
+                        skill: PilotSkill::VETERAN,
+                        tuning,
+                        escorts: None,
+                    },
+                    SpawnGroup {
+                        members: fighter_flight(2 * params.flight_size, params.pilots, i, i + 1),
+                        lead: lead - escort_heading * ESCORT_TRAIL + Vec3::Y * ESCORT_ABOVE,
+                        heading,
+                        formation: Formation::Vic { spacing: 45.0 },
+                        skill: PilotSkill::VETERAN,
+                        tuning,
+                        escorts: Some(0),
+                    },
+                ],
             });
         }
         mission.mode = GameMode::Battle;
@@ -313,7 +345,52 @@ impl Mission {
     }
 }
 
+/// Where zeppelins enter, in turn: north, west and east of the centre,
+/// close enough that at 30 m/s they are over the city in under two
+/// minutes, each heading for it.
+const ZEPPELIN_ENTRIES: [(Vec3, Vec3); 3] = [
+    (Vec3::new(0.0, 700.0, -3_200.0), Vec3::Z),
+    (Vec3::new(-3_200.0, 750.0, -600.0), Vec3::X),
+    (Vec3::new(3_200.0, 650.0, -1_200.0), Vec3::NEG_X),
+];
+
 /// Where an escort enters relative to its bombers: this far behind (m) ...
 const ESCORT_TRAIL: f32 = 400.0;
 /// ... and this much higher (m).
 const ESCORT_ABOVE: f32 = 200.0;
+
+/// Fighter flight number `flight` of `flights`, `count` aircraft in
+/// formation order. The pilots pick the type: rookies fly the Bf 109,
+/// veterans the Me 309. Mixed flights alternate with the slower Bf 109
+/// leading; rookies-then-veterans sends Bf 109 flights first, Me 309
+/// flights after.
+pub fn fighter_flight(
+    count: u32,
+    pilots: PilotMix,
+    flight: usize,
+    flights: usize,
+) -> Vec<EnemyKind> {
+    (0..count)
+        .map(|i| match pilots {
+            PilotMix::Rookies => EnemyKind::Bf109K4,
+            PilotMix::Veterans => EnemyKind::Me309,
+            PilotMix::Mixed if i % 2 == 0 => EnemyKind::Bf109K4,
+            PilotMix::Mixed => EnemyKind::Me309,
+            PilotMix::RookiesThenVeterans if 2 * flight < flights => EnemyKind::Bf109K4,
+            PilotMix::RookiesThenVeterans => EnemyKind::Me309,
+        })
+        .collect()
+}
+
+/// A bomber flight of `count` in formation order: a Ju 390 leading He 177s.
+pub fn bomber_flight(count: u32) -> Vec<EnemyKind> {
+    (0..count)
+        .map(|i| {
+            if i == 0 {
+                EnemyKind::Ju390
+            } else {
+                EnemyKind::He177
+            }
+        })
+        .collect()
+}

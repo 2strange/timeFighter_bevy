@@ -71,7 +71,7 @@ fn spawn_target(app: &mut App, position: Vec3) -> Entity {
                 gun_radius: 0.0,
             },
             AircraftVelocity::default(),
-            AircraftModel::Spitfire.body(Layer::Enemy),
+            AircraftModel::Me309.body(Layer::Enemy),
             Transform::from_translation(position),
         ))
         .id()
@@ -608,7 +608,7 @@ fn crossing_target_destroyed(lead: bool) -> bool {
             .before(super::CombatSystems::Aim),
     );
     spawn_player(&mut app, high_up());
-    // A Spitfire crossing 500 m ahead at 170 m/s.
+    // A fighter crossing 500 m ahead at 170 m/s.
     let target = spawn_target(&mut app, Vec3::new(-150.0, 1_000.0, -500.0));
     app.world_mut()
         .entity_mut(target)
@@ -621,7 +621,7 @@ fn crossing_target_destroyed(lead: bool) -> bool {
 }
 
 #[test]
-fn aiming_at_the_lead_point_hits_a_crossing_spitfire_and_aiming_at_it_does_not() {
+fn aiming_at_the_lead_point_hits_a_crossing_fighter_and_aiming_at_it_does_not() {
     assert!(crossing_target_destroyed(true), "lead aim missed");
     assert!(!crossing_target_destroyed(false), "direct aim hit anyway");
 }
@@ -696,11 +696,13 @@ fn city_app() -> App {
 fn crash_cause_at(position: Vec3) -> Option<DestroyCause> {
     let mut app = city_app();
     spawn_player(&mut app, Transform::from_translation(position));
+    // Crashes are resolved in the frame they happen, possibly already in
+    // the update that armed the jet.
     for _ in 0..5 {
-        app.update();
         if let Some(d) = read::<Destroyed>(&app).first() {
             return Some(d.cause);
         }
+        app.update();
     }
     None
 }
@@ -917,38 +919,38 @@ fn round_hits(kind: crate::ai::EnemyKind, gun_radius: f32, offset: Vec3) -> bool
 #[test]
 fn gun_rounds_count_on_the_whole_silhouette_wings_included() {
     use crate::ai::EnemyKind;
-    let spitfire = EnemyKind::Spitfire.gun_radius();
-    let lancaster = EnemyKind::Lancaster.gun_radius();
+    let fighter = EnemyKind::Me309.gun_radius();
+    let bomber = EnemyKind::He177.gun_radius();
     // Out on the wing, inside the model's silhouette (its box reaches
-    // 1.64 m up) but above the collider's thin wing plate.
+    // 1.75 m up) but above the collider's thin wing plate.
     let wing = Vec3::new(4.0, 1.2, 0.0);
     assert!(
-        !round_hits(EnemyKind::Spitfire, 0.0, wing),
+        !round_hits(EnemyKind::Me309, 0.0, wing),
         "the collider alone takes it"
     );
     assert!(
-        round_hits(EnemyKind::Spitfire, spitfire, wing),
+        round_hits(EnemyKind::Me309, fighter, wing),
         "wing hit not counted"
     );
     assert!(
-        round_hits(EnemyKind::Spitfire, spitfire, Vec3::ZERO),
+        round_hits(EnemyKind::Me309, fighter, Vec3::ZERO),
         "centre hit"
     );
     // Clearly outside the span: no hit.
     assert!(!round_hits(
-        EnemyKind::Spitfire,
-        spitfire,
-        Vec3::new(spitfire + 1.5, 0.0, 0.0)
+        EnemyKind::Me309,
+        fighter,
+        Vec3::new(fighter + 1.5, 0.0, 0.0)
     ));
     // A bomber's outer wing.
     assert!(round_hits(
-        EnemyKind::Lancaster,
-        lancaster,
+        EnemyKind::He177,
+        bomber,
         Vec3::new(12.0, 0.8, 0.0)
     ));
     assert!(
-        (spitfire - 5.09).abs() < 0.01 && (lancaster - 15.24).abs() < 0.05,
-        "{spitfire} {lancaster}"
+        (fighter - 5.33).abs() < 0.01 && (bomber - 15.59).abs() < 0.05,
+        "{fighter} {bomber}"
     );
 }
 
@@ -971,4 +973,70 @@ fn enemy_rounds_still_need_the_jets_collider() {
     }
     let health = app.world().get::<Health>(jet).unwrap();
     assert_eq!(health.current, health.max);
+}
+
+#[test]
+fn segment_and_capsule_sweeps_find_the_closest_approach() {
+    use super::hits::{closest_points_on_segments, sweep_hits_capsule};
+    // Crossing segments.
+    let (a, b) = closest_points_on_segments(
+        Vec3::new(-1.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 2.0, -1.0),
+        Vec3::new(0.0, 2.0, 1.0),
+    );
+    assert!(a.distance(Vec3::ZERO) < 1e-5 && b.distance(Vec3::new(0.0, 2.0, 0.0)) < 1e-5);
+    // A round flying across a long capsule near its end hits, past the end misses.
+    let (c0, c1) = (Vec3::new(0.0, 0.0, -100.0), Vec3::new(0.0, 0.0, 100.0));
+    let across = |z: f32| {
+        sweep_hits_capsule(
+            Vec3::new(-50.0, 0.0, z),
+            Vec3::new(50.0, 0.0, z),
+            c0,
+            c1,
+            20.0,
+        )
+    };
+    assert!(across(110.0).is_some(), "rounded end");
+    assert!(across(125.0).is_none(), "beyond the end");
+}
+
+#[test]
+fn the_zeppelin_is_hit_along_its_whole_length() {
+    use crate::ai::{EnemyKind, EnemyTuning, bomber_bundle, zeppelin_parts};
+    let hit_at = |along: f32| {
+        let mut app = app();
+        // The airship lies across the round's path, nose −Z.
+        let target = app
+            .world_mut()
+            .spawn((
+                bomber_bundle(
+                    EnemyKind::Zeppelin,
+                    EnemyTuning::default(),
+                    Transform::from_xyz(0.0, 1_000.0, -600.0),
+                    0,
+                ),
+                zeppelin_parts(),
+            ))
+            .id();
+        app.update();
+        let shooter = app.world_mut().spawn_empty().id();
+        // From the side (−X), crossing the hull `along` metres from its centre.
+        app.world_mut().spawn(super::weapons::round_bundle(
+            shooter,
+            Team::Player,
+            &super::GunSpec::JET_CANNON,
+            Vec3::new(-300.0, 1_000.0, -600.0 + along),
+            Vec3::X * super::GunSpec::JET_CANNON.muzzle_speed,
+        ));
+        for _ in 0..30 {
+            app.update();
+        }
+        let health = app.world().get::<Health>(target).unwrap();
+        health.current < health.max
+    };
+    assert!(hit_at(0.0), "middle");
+    assert!(hit_at(-110.0), "bow");
+    assert!(hit_at(110.0), "stern");
+    assert!(!hit_at(160.0), "past the stern");
 }

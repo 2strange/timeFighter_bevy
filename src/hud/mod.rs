@@ -21,8 +21,8 @@ use crate::{
     ai::Enemy,
     camera::{CameraSystems, ChaseCamera},
     combat::{
-        AircraftVelocity, CombatConfig, CombatKeys, Destroyed, Gun, Health, Hit, LockOn, LockState,
-        MissileRack, Team, gun_lead, in_seeker_cone, key_labels,
+        AircraftVelocity, CombatConfig, CombatKeys, Destroyed, GoingDown, Gun, Health, Hit, LockOn,
+        LockState, MissileRack, Team, gun_lead, in_seeker_cone, key_labels,
     },
     flight::{FlightState, PlayerAircraft},
     game_state::{Mission, Round, RoundPhase, RoundSystems},
@@ -58,8 +58,6 @@ const LADDER_RANGE: f32 = 1_000.0;
 const PIPPER_SIZE: f32 = 12.0;
 /// The lead pipper considers targets up to this far off the nose (rad).
 const PIPPER_CONE: f32 = 30.0 * std::f32::consts::PI / 180.0;
-/// Within this distance (m) the pipper fills in: close enough to hit well.
-const PIPPER_GOOD_RANGE: f32 = 900.0;
 
 pub struct HudPlugin;
 
@@ -316,7 +314,6 @@ fn spawn_hud(mut commands: Commands, keys: Res<CombatKeys>) {
                     ..default()
                 },
                 BorderColor::all(TRACKING),
-                BackgroundColor(Color::NONE),
                 Visibility::Hidden,
             ));
 
@@ -383,6 +380,7 @@ fn update_texts(
     mission: Res<Mission>,
     city: Option<Res<CityHealth>>,
     feedback: Res<Feedback>,
+    going_down: Query<&Enemy, With<GoingDown>>,
     player: Query<
         (
             &FlightState,
@@ -410,18 +408,24 @@ fn update_texts(
                 let city_text = city.map_or(String::new(), |(intact, _)| {
                     format!("    CITY {:.0} %", intact * 100.0)
                 });
+                // A burning wreck on its way down: where will it hit?
+                let falling = going_down.iter().next().map_or(String::new(), |e| {
+                    format!("    {} GOING DOWN", e.kind.display_name().to_uppercase())
+                });
                 let tint = match city {
+                    _ if !falling.is_empty() => ALERT,
                     Some((intact, limit)) if intact < limit + 0.1 => ALERT,
                     _ => HUD,
                 };
                 (
                     format!(
-                        "{} ({})    ENEMIES {}{}    {}",
+                        "{} ({})    ENEMIES {}{}    {}{}",
                         mission.mode.display_name(),
                         mission.difficulty.display_name().to_uppercase(),
                         round.enemies_left(&mission),
                         city_text,
-                        format_time(round.elapsed)
+                        format_time(round.elapsed),
+                        falling
                     ),
                     tint,
                 )
@@ -800,13 +804,15 @@ fn place_pipper(
         With<PlayerAircraft>,
     >,
     enemies: Query<(Entity, &Transform, Option<&AircraftVelocity>), With<Enemy>>,
-    mut pipper: Query<(&mut Node, &mut Visibility, &mut BackgroundColor), With<Pipper>>,
+    mission: Res<Mission>,
+    mut pipper: Query<(&mut Node, &mut Visibility), With<Pipper>>,
 ) {
-    let Ok((mut node, mut visibility, mut fill)) = pipper.single_mut() else {
+    let Ok((mut node, mut visibility)) = pipper.single_mut() else {
         return;
     };
     let solution = (|| {
-        if round.outcome().is_some() {
+        // Only with gun assist (easy levels, or chosen in Custom).
+        if round.outcome().is_some() || !mission.difficulty.params().gun_assist {
             return None;
         }
         let (camera, camera_tf) = camera.single().ok()?;
@@ -833,19 +839,13 @@ fn place_pipper(
         let p = camera
             .world_to_viewport(&GlobalTransform::from(*camera_tf), aim)
             .ok()?;
-        Some((p, to_target.length()))
+        Some(p)
     })();
     match solution {
-        Some((p, distance)) => {
+        Some(p) => {
             node.left = px(p.x - PIPPER_SIZE / 2.0);
             node.top = px(p.y - PIPPER_SIZE / 2.0);
             visibility.set_if_neq(Visibility::Visible);
-            let color = if distance <= PIPPER_GOOD_RANGE {
-                TRACKING
-            } else {
-                Color::NONE
-            };
-            fill.set_if_neq(BackgroundColor(color));
         }
         None => {
             visibility.set_if_neq(Visibility::Hidden);

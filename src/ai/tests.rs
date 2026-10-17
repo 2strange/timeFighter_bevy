@@ -69,7 +69,7 @@ fn spawn_ghost_player(
 fn spawn_enemy(app: &mut App, transform: Transform) -> Entity {
     app.world_mut()
         .spawn(enemy_bundle(
-            EnemyKind::Spitfire,
+            EnemyKind::Me309,
             PilotSkill::VETERAN,
             EnemyTuning::default(),
             transform,
@@ -269,7 +269,7 @@ fn enemies_without_a_player_cruise_level_and_stay_in_the_arena() {
 }
 
 #[test]
-fn breaking_spitfire_cannot_shake_a_missile_fired_from_its_six() {
+fn breaking_fighter_cannot_shake_a_missile_fired_from_its_six() {
     let mut app = app(60.0, false);
     let jet = spawn_player(
         &mut app,
@@ -358,7 +358,7 @@ fn rookies_take_longer_than_veterans_to_break() {
         let enemy = app
             .world_mut()
             .spawn(enemy_bundle(
-                EnemyKind::Spitfire,
+                EnemyKind::Me309,
                 skill,
                 EnemyTuning::default(),
                 Transform::from_xyz(0.0, 800.0, -400.0),
@@ -463,7 +463,7 @@ fn bait_run(
             PilotSkill::ROOKIE
         };
         app.world_mut().spawn(enemy_bundle(
-            EnemyKind::Spitfire,
+            EnemyKind::Me309,
             skill,
             EnemyTuning::default(),
             *transform,
@@ -524,7 +524,7 @@ fn ring(count: usize, radius: f32, altitude: f32) -> Vec<Transform> {
 
 #[test]
 fn enemies_never_ram_a_player_flying_straight_into_them() {
-    // Spitfires head-on in the jet's path and right behind it.
+    // Fighters head-on in the jet's path and right behind it.
     let mut enemies = Vec::new();
     for (i, x) in [-30.0, 0.0, 25.0, 60.0].into_iter().enumerate() {
         enemies.push(
@@ -575,7 +575,7 @@ fn slower_difficulty_slows_the_enemies() {
     let tuned = |app: &mut App, speed: f32| {
         app.world_mut()
             .spawn(enemy_bundle(
-                EnemyKind::Spitfire,
+                EnemyKind::Me309,
                 PilotSkill::VETERAN,
                 EnemyTuning {
                     speed,
@@ -590,7 +590,7 @@ fn slower_difficulty_slows_the_enemies() {
         app.update();
     }
     let speed = app.world().get::<super::EnemyFlight>(slow).unwrap().speed;
-    let max = EnemyKind::Spitfire.stats().max_speed;
+    let max = EnemyKind::Me309.stats().max_speed;
     assert!(speed <= max * 0.8 + 0.01, "speed {speed} m/s");
 }
 
@@ -630,13 +630,13 @@ fn non_finite_difficulty_factors_fall_back_to_normal() {
         speed: f32::NAN,
         accuracy: f32::INFINITY,
     };
-    let stats = EnemyKind::Spitfire.stats().tuned(tuning);
-    assert_eq!(stats, EnemyKind::Spitfire.stats());
+    let stats = EnemyKind::Me309.stats().tuned(tuning);
+    assert_eq!(stats, EnemyKind::Me309.stats());
 
     // And such an enemy flies without panicking.
     let mut app = app(60.0, false);
     app.world_mut().spawn(enemy_bundle(
-        EnemyKind::Spitfire,
+        EnemyKind::Me309,
         PilotSkill::VETERAN,
         tuning,
         Transform::from_xyz(0.0, 800.0, 0.0),
@@ -720,7 +720,7 @@ fn spawn_flights(app: &mut App, flights: u32) -> Vec<Entity> {
                 .world_mut()
                 .spawn((
                     enemy_bundle(
-                        EnemyKind::Spitfire,
+                        EnemyKind::Me309,
                         PilotSkill::VETERAN,
                         EnemyTuning::default(),
                         transform,
@@ -863,7 +863,7 @@ fn spawn_bomber_flight(app: &mut App, flight: u32) -> Vec<Entity> {
             app.world_mut()
                 .spawn((
                     super::bomber_bundle(
-                        EnemyKind::Lancaster,
+                        EnemyKind::He177,
                         EnemyTuning::default(),
                         transform,
                         flight,
@@ -969,7 +969,7 @@ fn bomber_gunners_hit_a_close_pursuer_but_not_a_distant_one() {
         let bomber = app
             .world_mut()
             .spawn(super::bomber_bundle(
-                EnemyKind::Lancaster,
+                EnemyKind::He177,
                 EnemyTuning::default(),
                 Transform::from_xyz(0.0, 900.0, 0.0),
                 0,
@@ -1030,4 +1030,75 @@ fn an_attacker_that_loses_the_player_searches_and_gives_up_its_slot() {
         released <= cfg.awareness + cfg.search_time + 0.5,
         "after {released} s"
     );
+}
+
+/// Shoots a zeppelin down at `position` over the generated city and
+/// returns the centre's intact share after its wreck came down.
+fn centre_after_zeppelin_falls_at(position: Vec3) -> (f32, f32) {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        PhysicsPlugin,
+        FlightPlugin,
+        CombatPlugin,
+        AiPlugin,
+        CityPlugin,
+        CityCollidersPlugin,
+        crate::world::damage::CityDamagePlugin,
+    ))
+    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        1.0 / 30.0,
+    )));
+    app.finish();
+    app.update();
+    let zeppelin = app
+        .world_mut()
+        .spawn((
+            super::bomber_bundle(
+                EnemyKind::Zeppelin,
+                EnemyTuning::default(),
+                Transform::from_translation(position),
+                0,
+            ),
+            super::zeppelin_parts(),
+        ))
+        .id();
+    app.update();
+    app.world_mut().write_message(crate::combat::Hit {
+        projectile: Entity::PLACEHOLDER,
+        target: zeppelin,
+        point: position,
+        team: Team::Player,
+        weapon: crate::combat::Weapon::Missile,
+        damage: 10_000.0,
+    });
+    let mut fall_time = 0.0;
+    for frame in 0..(60 * 30) {
+        app.update();
+        if app.world().get_entity(zeppelin).is_err() {
+            fall_time = frame as f32 / 30.0;
+            break;
+        }
+    }
+    assert!(fall_time > 0.0, "the wreck never came down");
+    // Let the city take the blast.
+    for _ in 0..3 {
+        app.update();
+    }
+    let health = app.world().resource::<crate::world::damage::CityHealth>();
+    (health.center_intact_ratio, fall_time)
+}
+
+#[test]
+fn a_zeppelin_wreck_falls_slowly_and_wrecks_the_city_where_it_lands() {
+    let (over_city, fall) = centre_after_zeppelin_falls_at(Vec3::new(0.0, 500.0, 0.0));
+    let (outside, _) = centre_after_zeppelin_falls_at(Vec3::new(0.0, 500.0, 8_000.0));
+    eprintln!("over the centre: {over_city:.2} intact after {fall:.0} s; outside: {outside:.2}");
+    assert!(fall > 10.0, "came down in {fall} s");
+    assert!(
+        over_city < 0.9,
+        "a fall on the centre costs a lot: {over_city}"
+    );
+    assert_eq!(outside, 1.0, "nothing lost outside the city");
 }

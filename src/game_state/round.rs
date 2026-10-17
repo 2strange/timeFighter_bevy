@@ -5,12 +5,12 @@
 
 use bevy::prelude::*;
 
-use super::{GameSettings, Mission, MissionConfig, Pause, TriggerHold, WaveTrigger};
+use super::{GameSettings, Mission, Pause, TriggerHold, WaveTrigger};
 use crate::{
-    ai::{AttackSlots, Enemy, FlightGroup, bomber_bundle, enemy_bundle},
+    ai::{AttackSlots, Enemy, EnemyKind, FlightGroup, bomber_bundle, enemy_bundle, zeppelin_parts},
     combat::{
         Bomb, BombImpact, CombatConfig, CombatSystems, CrashInto, DestroyCause, Destroyed, Effect,
-        Hit, Munition, ShotFired, Team, Weapon, player_loadout,
+        GoingDown, Hit, Munition, ShotFired, Team, Weapon, player_loadout,
     },
     flight::{
         FlightConfig, FlightState, FlightSystems, KeyHelpAppExt, KeyHelpSection, PlayerAircraft,
@@ -137,11 +137,6 @@ impl Plugin for RoundPlugin {
         )
         // The city's damage plugin registers it too.
         .add_message::<RepairCity>();
-        // `?set=second` in the page URL (or `--set=second`) switches the
-        // enemy aircraft, unless a configuration was set up before.
-        if !app.world().contains_resource::<MissionConfig>() {
-            app.insert_resource(MissionConfig::detect());
-        }
         app.init_resource::<GameSettings>()
             .init_resource::<Mission>()
             .init_resource::<Round>()
@@ -259,7 +254,6 @@ fn start_round(
     mut commands: Commands,
     mut round: ResMut<Round>,
     settings: Res<GameSettings>,
-    mission_config: Res<MissionConfig>,
     mut mission: ResMut<Mission>,
     mut combat: ResMut<CombatConfig>,
     mut slots: ResMut<AttackSlots>,
@@ -284,13 +278,14 @@ fn start_round(
         pause.round_over = false;
     }
     // The player's choices apply from this round on.
-    *mission = Mission::from_settings(&settings, &mission_config);
+    *mission = Mission::from_settings(&settings);
     // The whole city stands again. Applies this frame: the start runs
     // before the city's damage systems.
     repair.write(RepairCity);
     let params = settings.difficulty.params_for(settings.mode).clamped();
     combat.player_missiles = params.missiles;
     combat.player_gun_unlimited = params.unlimited_gun;
+    combat.player_gun_ammo = params.gun_ammo;
     combat.lock.time = params.lock_time;
     slots.max = params.attackers;
     for entity in &leftovers {
@@ -391,11 +386,22 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
                     escort: group.escorts.map(|b| (round.next_wave * 16 + b) as u32),
                 };
                 let kind = group.members[slot];
-                if kind.is_bomber() {
+                if kind == EnemyKind::Zeppelin {
+                    commands.spawn((
+                        bomber_bundle(kind, group.tuning, transform, id),
+                        zeppelin_parts(),
+                        flight,
+                    ));
+                } else if kind.is_bomber() {
                     commands.spawn((bomber_bundle(kind, group.tuning, transform, id), flight));
                 } else {
                     commands.spawn((
-                        enemy_bundle(kind, group.skill, group.tuning, transform),
+                        enemy_bundle(
+                            kind,
+                            kind.pilot().unwrap_or(group.skill),
+                            group.tuning,
+                            transform,
+                        ),
                         flight,
                     ));
                 }
@@ -407,7 +413,12 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
 }
 
 /// Victory once every wave has entered and every enemy is down.
-fn decide(mission: Res<Mission>, health: Option<Res<CityHealth>>, mut round: ResMut<Round>) {
+fn decide(
+    mission: Res<Mission>,
+    health: Option<Res<CityHealth>>,
+    going_down: Query<(), With<GoingDown>>,
+    mut round: ResMut<Round>,
+) {
     // Protect: too much of the centre in ruins loses, before anything else.
     if round.is_running()
         && let (Some(loss), Some(health)) = (mission.city_loss, &health)
@@ -419,7 +430,13 @@ fn decide(mission: Res<Mission>, health: Option<Res<CityHealth>>, mut round: Res
         };
         return;
     }
-    if round.is_running() && round.next_wave >= mission.waves.len() && round.enemies_alive() == 0 {
+    // A wreck still on its way down can yet wreck the city: no victory
+    // before it has hit the ground.
+    if round.is_running()
+        && round.next_wave >= mission.waves.len()
+        && round.enemies_alive() == 0
+        && going_down.is_empty()
+    {
         round.phase = RoundPhase::Ending {
             outcome: Outcome::Victory,
             left: mission.end_delay,

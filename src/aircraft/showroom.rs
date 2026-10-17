@@ -2,8 +2,9 @@
 //! checking size and orientation by eye. Runs as its own app mode (browser:
 //! `showroom.html`), without world or flight.
 //!
-//! Pages (keys 1-4 or Tab): the models in the game, a second set, sample
-//! formations, and the zeppelin. Mouse: drag to orbit, wheel to zoom. Keys:
+//! Pages (keys 1-3 or Tab): the jets beside the enemies, sample
+//! formations, and the zeppelin. Only models in the game; the rest are kept
+//! in `models_library/`. Mouse: drag to orbit, wheel to zoom. Keys:
 //! A/D or Left/Right orbit, W/S or Up/Down tilt, Q/E zoom.
 
 use bevy::{
@@ -167,19 +168,9 @@ pub fn scenes() -> Vec<ShowroomScene> {
     use AircraftModel::*;
     vec![
         ShowroomScene::row(
-            "Jets, fighters and bombers in the game",
-            &[
-                F14Tomcat,
-                Mig29,
-                Tu2,
-                F4uCorsair,
-                Spitfire,
-                SpitfireClassic,
-                B17,
-                Lancaster,
-            ],
+            "The jets and their enemies",
+            &[F14Tomcat, Mig29, Bf109K4, Me309, He177, Ju390],
         ),
-        ShowroomScene::row("Second set", &[Bf109K4, Me309, He177, Me264, Ju390, Ju287]),
         ShowroomScene {
             name: "Formations: fighter pair, bomber flight",
             items: vec![
@@ -215,15 +206,10 @@ struct PageContent;
 #[derive(Component)]
 struct ShowroomHelp;
 
-/// Keys 1-4 pick a page, Tab goes to the next.
+/// Keys 1-3 pick a page, Tab goes to the next.
 fn switch_page(keys: Res<ButtonInput<KeyCode>>, mut page: ResMut<ShowroomPage>) {
     let count = scenes().len();
-    let digits = [
-        KeyCode::Digit1,
-        KeyCode::Digit2,
-        KeyCode::Digit3,
-        KeyCode::Digit4,
-    ];
+    let digits = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3];
     for (i, key) in digits.iter().enumerate().take(count) {
         if keys.just_pressed(*key) {
             page.set_if_neq(ShowroomPage(i));
@@ -510,10 +496,13 @@ mod tests {
             );
         }
         let mut app = showroom();
-        crate::test_support::tap(&mut app, KeyCode::Digit2);
-        assert_eq!(app.world().resource::<ShowroomPage>().0, 1);
-        crate::test_support::tap(&mut app, KeyCode::Tab);
+        crate::test_support::tap(&mut app, KeyCode::Digit3);
         assert_eq!(app.world().resource::<ShowroomPage>().0, 2);
+        // Tab wraps round to the first page, then on to the formations.
+        crate::test_support::tap(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<ShowroomPage>().0, 0);
+        crate::test_support::tap(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<ShowroomPage>().0, 1);
         let names: Vec<_> = model_roots(&mut app).into_iter().map(|(_, n)| n).collect();
         assert_eq!(
             names.iter().filter(|n| *n == "He 177").count(),

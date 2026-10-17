@@ -78,8 +78,8 @@ fn result_titles_name_the_cause() {
     assert_eq!(outcome_title(Outcome::Victory), "MISSION COMPLETE");
     assert_eq!(outcome_title(Outcome::ShotDown), "SHOT DOWN");
     assert_eq!(
-        outcome_title(Outcome::Crashed(CrashInto::Aircraft("Spitfire"))),
-        "RAMMED BY SPITFIRE"
+        outcome_title(Outcome::Crashed(CrashInto::Aircraft("Me 309"))),
+        "RAMMED BY ME 309"
     );
     assert_eq!(
         outcome_title(Outcome::Crashed(CrashInto::Building)),
