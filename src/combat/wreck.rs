@@ -9,7 +9,10 @@
 //! A new round (full [`Health`] again) brings the jet back.
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::{ColliderDisabled, RigidBodyDisabled};
+use bevy_rapier3d::{
+    prelude::{ColliderDisabled, RapierRigidBodyHandle, RigidBodyDisabled, WriteRapierContext},
+    rapier::math::Pose,
+};
 
 use super::{Destroyed, Health, Team, effects};
 use crate::flight::{PlayerAircraft, Wrecked};
@@ -45,17 +48,34 @@ pub(super) fn wreck_player(
 
 type PlayerWreck = (With<PlayerAircraft>, With<Wrecked>);
 
-/// A fresh round re-arms the jet with full health: show it again.
+/// A fresh round re-arms the jet with full health (and puts it at the
+/// spawn point): show it again.
+///
+/// The physics body is moved to the spawn point right here, before its
+/// collider is switched back on. Otherwise Rapier would still hold it at the
+/// wreck's pose, inside the ground or building it hit: a kinematic body only
+/// follows its transform with the next simulated step, and while the result
+/// screen pauses the game there is none. Re-enabled there, the collider would
+/// touch the obstacle again and the new round would start with a second crash.
 pub(super) fn restore_player(
     mut commands: Commands,
-    player: Query<(Entity, &Health), PlayerWreck>,
+    mut rapier: WriteRapierContext,
+    player: Query<(Entity, &Health, &Transform, Option<&RapierRigidBodyHandle>), PlayerWreck>,
 ) {
-    for (jet, health) in &player {
-        if !health.is_dead() {
-            commands
-                .entity(jet)
-                .remove::<(Wrecked, ColliderDisabled, RigidBodyDisabled)>()
-                .insert(Visibility::Inherited);
+    for (jet, health, transform, handle) in &player {
+        if health.is_dead() {
+            continue;
         }
+        if let (Ok(mut context), Some(handle)) = (rapier.single_mut(), handle)
+            && let Some(body) = context.rigidbody_set.bodies.get_mut(handle.0)
+        {
+            let pose = Pose::from_parts(transform.translation, transform.rotation);
+            body.set_position(pose, true);
+            body.set_next_kinematic_position(pose);
+        }
+        commands
+            .entity(jet)
+            .remove::<(Wrecked, ColliderDisabled, RigidBodyDisabled)>()
+            .insert(Visibility::Inherited);
     }
 }
