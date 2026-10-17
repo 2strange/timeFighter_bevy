@@ -89,13 +89,29 @@ impl EnemySet {
         }
     }
 
-    /// A fighter flight of `count`, in formation order.
-    pub fn fighters(self, count: u32) -> Vec<EnemyKind> {
+    /// Fighter flight number `flight` of `flights`, `count` aircraft in
+    /// formation order. In the second set the pilots pick the type: rookies
+    /// fly the Bf 109, veterans the Me 309. Mixed flights alternate with the
+    /// slower Bf 109 leading; rookies-then-veterans sends Bf 109 flights
+    /// first, Me 309 flights after.
+    pub fn fighters(
+        self,
+        count: u32,
+        pilots: PilotMix,
+        flight: usize,
+        flights: usize,
+    ) -> Vec<EnemyKind> {
         (0..count)
-            .map(|i| match self {
-                EnemySet::First => EnemyKind::Spitfire,
-                EnemySet::Second if i % 2 == 0 => EnemyKind::Bf109K4,
-                EnemySet::Second => EnemyKind::Me309,
+            .map(|i| match (self, pilots) {
+                (EnemySet::First, _) => EnemyKind::Spitfire,
+                (EnemySet::Second, PilotMix::Rookies) => EnemyKind::Bf109K4,
+                (EnemySet::Second, PilotMix::Veterans) => EnemyKind::Me309,
+                (EnemySet::Second, PilotMix::Mixed) if i % 2 == 0 => EnemyKind::Bf109K4,
+                (EnemySet::Second, PilotMix::Mixed) => EnemyKind::Me309,
+                (EnemySet::Second, PilotMix::RookiesThenVeterans) if 2 * flight < flights => {
+                    EnemyKind::Bf109K4
+                }
+                (EnemySet::Second, PilotMix::RookiesThenVeterans) => EnemyKind::Me309,
             })
             .collect()
     }
