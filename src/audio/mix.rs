@@ -35,6 +35,9 @@ const AUDIBLE: f32 = 0.02;
 const GUN_HOLD: f32 = 0.12;
 /// Enemy gun bursts are heard at most this often (s) ...
 const ENEMY_GUN_INTERVAL: f32 = 0.25;
+/// A missile hit that leaves its target flying bursts at this volume (a
+/// kill: 1).
+const MISSILE_HIT_VOLUME: f32 = 0.7;
 /// An empty gun clicks at most this often while the trigger is held (s).
 const GUN_EMPTY_INTERVAL: f32 = 0.3;
 /// Once the missiles are gone a target coming into the cone gets one
@@ -460,14 +463,20 @@ fn mix(
                 enemy_gun = Some(enemy_gun.map_or(v, |e: f32| e.max(v)));
             }
             Sound::MissileLaunch => out.shots.push(shot(Clip::Missile, 0.5)),
-            Sound::Explosion => {
+            Sound::Explosion | Sound::MissileHit => {
                 state.explosions += 1;
                 let clip = if state.explosions.is_multiple_of(2) {
                     Clip::ExplosionSmall
                 } else {
                     Clip::ExplosionSmallLong
                 };
-                out.shots.push(shot(clip, 1.0));
+                // A burst on a survivor somewhat quieter than a kill.
+                let loudness = if cue.sound == Sound::MissileHit {
+                    MISSILE_HIT_VOLUME
+                } else {
+                    1.0
+                };
+                out.shots.push(shot(clip, loudness));
             }
             Sound::BigExplosion | Sound::WreckImpact => {
                 out.shots.push(shot(Clip::ExplosionBig, 1.0));

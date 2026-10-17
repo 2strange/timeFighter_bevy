@@ -1226,3 +1226,55 @@ fn a_zeppelin_launches_twelve_fighters_at_most() {
         MAX_LAUNCHES_PER_CARRIER
     );
 }
+
+/// Hits of `damage` by `weapon` it takes to bring down a fresh `kind`.
+fn hits_to_kill(kind: EnemyKind, weapon: crate::combat::Weapon, damage: f32) -> u32 {
+    let mut app = app(30.0, false);
+    let mut target = app.world_mut().spawn(super::bomber_bundle(
+        kind,
+        EnemyTuning::default(),
+        Transform::from_xyz(0.0, 800.0, 0.0),
+        0,
+    ));
+    if kind == EnemyKind::Zeppelin {
+        target.insert(super::zeppelin_parts());
+    }
+    let target = target.id();
+    for hits in 1..1_000 {
+        app.world_mut().write_message(crate::combat::Hit {
+            projectile: Entity::PLACEHOLDER,
+            target,
+            point: Vec3::ZERO,
+            team: Team::Player,
+            weapon,
+            damage,
+        });
+        app.update();
+        let dead = app
+            .world()
+            .get::<Health>(target)
+            .is_none_or(|h| h.is_dead());
+        if dead {
+            return hits;
+        }
+    }
+    panic!("{kind:?} never went down");
+}
+
+#[test]
+fn the_zeppelin_shrugs_off_gun_fire_but_not_missiles() {
+    use crate::combat::{CombatConfig, GunSpec, Weapon};
+    let gun = GunSpec::JET_CANNON.damage;
+    let missile = CombatConfig::default().missile.damage;
+    let zeppelin = hits_to_kill(EnemyKind::Zeppelin, Weapon::Gun, gun);
+    let bomber = hits_to_kill(EnemyKind::Ju390, Weapon::Gun, gun);
+    eprintln!("cannon hits: zeppelin {zeppelin}, Ju 390 {bomber}");
+    // Was 53 (900 / 17); now about 2.8 times that.
+    assert_eq!(zeppelin, 148);
+    assert!(zeppelin > 5 * bomber, "far tougher than a bomber");
+    assert_eq!(
+        hits_to_kill(EnemyKind::Zeppelin, Weapon::Missile, missile),
+        9,
+        "missiles as before"
+    );
+}

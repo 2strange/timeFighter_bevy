@@ -262,6 +262,19 @@ fn explosions_bombs_and_guns() {
     small.sort_by_key(|c| *c == Clip::ExplosionSmall);
     assert_eq!(small, vec![Clip::ExplosionSmallLong, Clip::ExplosionSmall]);
 
+    // A missile burst on a survivor: a small explosion, quieter than a kill.
+    cue(&mut app, Sound::MissileHit, Some(Vec3::ZERO));
+    app.update();
+    let burst = shots(&app)[0];
+    cue(&mut app, Sound::Explosion, Some(Vec3::ZERO));
+    app.update();
+    let kill = shots(&app)[0];
+    assert!(matches!(
+        burst.clip,
+        Clip::ExplosionSmall | Clip::ExplosionSmallLong
+    ));
+    assert!((burst.volume / kill.volume - 0.7).abs() < 1e-3);
+
     for (sound, clip) in [
         (Sound::BigExplosion, Clip::ExplosionBig),
         (Sound::WreckImpact, Clip::ExplosionBig),

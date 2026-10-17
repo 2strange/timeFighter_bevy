@@ -10,8 +10,8 @@ use super::{
 };
 use crate::{
     combat::{
-        AircraftType, AircraftVelocity, BombSpec, FallsWhenDestroyed, GoingDown, Health,
-        HitCapsule, Hitbox, Team, TurretMount, Turrets, bomb_bundle, fall_time,
+        AircraftType, AircraftVelocity, BombSpec, FallsWhenDestroyed, GoingDown, GunResistance,
+        Health, HitCapsule, Hitbox, Team, TurretMount, Turrets, bomb_bundle, fall_time,
     },
     physics::Layer,
 };
@@ -32,6 +32,11 @@ pub fn stick(kind: EnemyKind) -> (u32, f32) {
 /// Radius of the zeppelin's hull in its middle part (m).
 const ZEPPELIN_HULL_RADIUS: f32 = 21.8;
 
+/// The zeppelin takes this share of gun damage (hull and gondola alike):
+/// the jet's cannon needs about 148 hits instead of 53, missiles still
+/// nine.
+pub const ZEPPELIN_GUN_RESISTANCE: f32 = 0.36;
+
 /// The zeppelin's hit zone along its length and its burning fall: it goes
 /// down slowly where it is shot and wrecks what lies below (r 150 m).
 pub fn zeppelin_parts() -> impl Bundle {
@@ -48,6 +53,7 @@ pub fn zeppelin_parts() -> impl Bundle {
             impact_radius: 200.0,
             impact_strength: 1.0,
         },
+        GunResistance(ZEPPELIN_GUN_RESISTANCE),
     )
 }
 

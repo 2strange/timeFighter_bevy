@@ -10,8 +10,8 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::{Collider, ColliderDisabled, RigidBodyDisabled};
 
 use super::{
-    AircraftType, CrashInto, DestroyCause, Destroyed, FallsWhenDestroyed, GoingDown, Health, Hit,
-    HitCapsule, Hitbox, Munition, Team, Weapon,
+    AircraftType, CrashInto, DestroyCause, Destroyed, FallsWhenDestroyed, GoingDown, GunResistance,
+    Health, Hit, HitCapsule, Hitbox, Munition, Team, Weapon,
 };
 use crate::{
     flight::PlayerAircraft,
@@ -275,18 +275,24 @@ pub fn apply_hits(
         &Transform,
         Has<PlayerAircraft>,
         Has<FallsWhenDestroyed>,
+        Option<&GunResistance>,
     )>,
     mut destroyed: MessageWriter<Destroyed>,
 ) {
     for hit in hits.read() {
-        let Ok((mut health, team, transform, is_player, falls)) = targets.get_mut(hit.target)
+        let Ok((mut health, team, transform, is_player, falls, resistance)) =
+            targets.get_mut(hit.target)
         else {
             continue;
         };
         if health.is_dead() {
             continue;
         }
-        health.current = (health.current - hit.damage).max(0.0);
+        let damage = match (hit.weapon, resistance) {
+            (Weapon::Gun, Some(resistance)) => hit.damage * resistance.0,
+            _ => hit.damage,
+        };
+        health.current = (health.current - damage).max(0.0);
         if health.is_dead() {
             destroyed.write(Destroyed {
                 entity: hit.target,
