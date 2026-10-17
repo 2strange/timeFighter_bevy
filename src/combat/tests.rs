@@ -696,11 +696,13 @@ fn city_app() -> App {
 fn crash_cause_at(position: Vec3) -> Option<DestroyCause> {
     let mut app = city_app();
     spawn_player(&mut app, Transform::from_translation(position));
+    // Crashes are resolved in the frame they happen, possibly already in
+    // the update that armed the jet.
     for _ in 0..5 {
-        app.update();
         if let Some(d) = read::<Destroyed>(&app).first() {
             return Some(d.cause);
         }
+        app.update();
     }
     None
 }

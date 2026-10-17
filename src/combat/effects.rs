@@ -50,7 +50,7 @@ impl Effect {
     }
 }
 
-fn spawn(commands: &mut Commands, kind: EffectKind, at: Vec3) {
+pub(super) fn spawn(commands: &mut Commands, kind: EffectKind, at: Vec3) {
     commands.spawn((
         Name::new("Effect"),
         Effect { kind, age: 0.0 },
@@ -58,18 +58,16 @@ fn spawn(commands: &mut Commands, kind: EffectKind, at: Vec3) {
     ));
 }
 
-/// Every kill and crash explodes where it happened; every hit flashes.
+/// Every enemy kill and crash explodes where it happened; every hit
+/// flashes. The player's own explosion starts with the wreck, in the frame
+/// of the kill (see `wreck.rs`).
 pub(super) fn spawn_effects(
     mut commands: Commands,
     mut destroyed: MessageReader<Destroyed>,
     mut hits: MessageReader<Hit>,
 ) {
-    for event in destroyed.read() {
-        let kind = match event.team {
-            Team::Player => EffectKind::BigExplosion,
-            Team::Enemy => EffectKind::Explosion,
-        };
-        spawn(&mut commands, kind, event.position);
+    for event in destroyed.read().filter(|d| d.team == Team::Enemy) {
+        spawn(&mut commands, EffectKind::Explosion, event.position);
     }
     for hit in hits.read() {
         spawn(&mut commands, EffectKind::Spark, hit.point);

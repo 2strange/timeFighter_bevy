@@ -242,14 +242,22 @@ fn update_trails(
     cfg: Res<JetFxConfig>,
     flight: Res<FlightConfig>,
     time: Res<Time>,
-    player: Query<(&Transform, &FlightState), With<PlayerAircraft>>,
+    player: Query<(&Transform, &FlightState, Has<super::Wrecked>), With<PlayerAircraft>>,
     camera: Query<&GlobalTransform, With<Camera3d>>,
     mut trails: Query<(&mut VortexTrail, &Mesh3d, &mut Visibility)>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let Ok((jet, state)) = player.single() else {
+    let Ok((jet, state, wrecked)) = player.single() else {
         return;
     };
+    // A destroyed jet leaves no vortices behind: gone at once.
+    if wrecked {
+        for (mut trail, _, mut visibility) in &mut trails {
+            trail.samples.clear();
+            visibility.set_if_neq(Visibility::Hidden);
+        }
+        return;
+    }
     let now = time.elapsed_secs();
     let strength = vortex_strength(&flight, state);
     let eye = camera.iter().next().map(|c| c.translation());

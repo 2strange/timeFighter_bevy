@@ -26,6 +26,12 @@ pub use model::{FlightInput, FlightState, step};
 #[derive(Component, Debug, Default)]
 pub struct PlayerAircraft;
 
+/// The aircraft is destroyed: the flight model no longer moves it, so the
+/// wreck stays where it hit (no diving through the ground and flying on).
+/// Combat sets it in the frame of the kill and removes it on a new round.
+#[derive(Component, Debug, Default, Clone, Copy)]
+pub struct Wrecked;
+
 /// Systems that move aircraft. Anything following an aircraft (camera, HUD)
 /// should run after this set.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -79,7 +85,7 @@ impl Plugin for PlayerFlightPlugin {
 fn fly(
     cfg: Res<FlightConfig>,
     time: Res<Time>,
-    mut aircraft: Query<(&FlightInput, &mut FlightState, &mut Transform)>,
+    mut aircraft: Query<(&FlightInput, &mut FlightState, &mut Transform), Without<Wrecked>>,
 ) {
     let dt = time.delta_secs();
     for (input, mut state, mut transform) in &mut aircraft {

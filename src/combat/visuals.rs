@@ -17,7 +17,15 @@ pub struct CombatVisualsPlugin;
 impl Plugin for CombatVisualsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (load_visuals, load_effect_visuals))
-            .add_systems(PostUpdate, (dress_projectiles, dress_effects, dress_bombs))
+            .add_systems(
+                PostUpdate,
+                (
+                    dress_projectiles,
+                    // Same frame as the player's wreck explosion.
+                    dress_effects.after(super::wreck::WreckSystems),
+                    dress_bombs,
+                ),
+            )
             .add_systems(Update, (point_missiles, animate_effects));
     }
 }
