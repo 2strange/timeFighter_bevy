@@ -294,17 +294,20 @@ fn explosions_bombs_and_guns() {
 
     // Hits on the jet rattle, a few per second at most.
     let mut hits = 0;
+    let mut pitches: Vec<f32> = Vec::new();
     for _ in 0..30 {
         cue(&mut app, Sound::HitPlayer, Some(Vec3::new(0.0, 0.0, -5.0)));
         cue(&mut app, Sound::HitPlayer, Some(Vec3::new(0.0, 0.0, -5.0)));
         app.update();
-        hits += shots(&app)
-            .iter()
-            .filter(|s| s.clip == Clip::PlayerHit)
-            .count();
+        for hit in shots(&app).iter().filter(|s| s.clip == Clip::PlayerHit) {
+            hits += 1;
+            pitches.push(hit.speed);
+        }
     }
     let most = (30.0 * FRAME.as_secs_f32() / super::mix::PLAYER_HIT_INTERVAL).ceil() as usize;
     assert!(hits >= 2 && hits <= most, "{hits} of at most {most}");
+    assert!(pitches.windows(2).all(|p| p[0] != p[1]), "{pitches:?}");
+    assert!(pitches.iter().all(|p| (p - 1.0).abs() <= 0.08));
 
     // A volley of enemy rounds: one gun sound.
     for _ in 0..30 {

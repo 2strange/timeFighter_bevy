@@ -35,8 +35,10 @@ const AUDIBLE: f32 = 0.02;
 const GUN_HOLD: f32 = 0.12;
 /// Enemy gun bursts are heard at most this often (s) ...
 const ENEMY_GUN_INTERVAL: f32 = 0.25;
-/// ... and hits on the player's jet (a volley stays a rattle, not a mush).
-pub const PLAYER_HIT_INTERVAL: f32 = 0.12;
+/// ... and hits on the player's jet (a volley stays a rattle, not a mush),
+/// each a little higher or lower than the last.
+pub const PLAYER_HIT_INTERVAL: f32 = 0.07;
+pub const PLAYER_HIT_PITCH: f32 = 0.06;
 
 /// Every sound file, one per slot. A missing file only stays silent, so a
 /// slot can be filled in later.
@@ -167,6 +169,8 @@ pub struct OneShot {
     pub clip: Clip,
     /// Final volume, master included.
     pub volume: f32,
+    /// Playback speed (1 = as recorded; also the pitch).
+    pub speed: f32,
 }
 
 /// This frame's mix.
@@ -227,6 +231,13 @@ pub fn attenuation(distance: f32) -> f32 {
     1.0 / (1.0 + d * d)
 }
 
+/// A pitch offset in −1..=1 for hit `n`: a fixed, irregular-sounding
+/// sequence (no random source needed).
+fn pitch_step(n: u32) -> f32 {
+    const STEPS: [f32; 5] = [0.0, 0.8, -0.6, 0.3, -1.0];
+    STEPS[n as usize % STEPS.len()]
+}
+
 /// Remembered between frames.
 #[derive(Default)]
 struct MixState {
@@ -235,6 +246,7 @@ struct MixState {
     player_hit_rest: f32,
     /// Alternates the two small explosions.
     explosions: u32,
+    player_hits: u32,
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -297,6 +309,7 @@ fn mix(
             out.shots.push(OneShot {
                 clip: Clip::Click,
                 volume: master * 0.6,
+                speed: 1.0,
             });
         }
     }
@@ -393,6 +406,7 @@ fn mix(
         let shot = |clip, loudness: f32| OneShot {
             clip,
             volume: master * loudness * heard(cue.position),
+            speed: 1.0,
         };
         match cue.sound {
             Sound::PlayerGun => state.gun_hold = GUN_HOLD,
@@ -417,9 +431,11 @@ fn mix(
             Sound::HitPlayer if state.player_hit_rest <= 0.0 => {
                 state.player_hit_rest = PLAYER_HIT_INTERVAL;
                 // In the cockpit: as loud wherever the round struck.
+                state.player_hits = state.player_hits.wrapping_add(1);
                 out.shots.push(OneShot {
                     clip: Clip::PlayerHit,
                     volume: master * 0.8,
+                    speed: 1.0 + PLAYER_HIT_PITCH * pitch_step(state.player_hits),
                 });
             }
             // Tones and hits are loops or have no sound of their own.
@@ -438,6 +454,7 @@ fn mix(
         out.shots.push(OneShot {
             clip: Clip::Gun,
             volume: master * 0.5 * v,
+            speed: 1.0,
         });
     }
     if state.gun_hold > 0.0 {

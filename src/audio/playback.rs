@@ -79,7 +79,9 @@ fn play(
         commands.spawn((
             OneShotSound,
             AudioPlayer::new(handle.clone()),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(shot.volume)),
+            PlaybackSettings::DESPAWN
+                .with_volume(Volume::Linear(shot.volume))
+                .with_speed(shot.speed),
         ));
     }
 }

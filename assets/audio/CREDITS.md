@@ -3,7 +3,7 @@
 Every sound in this folder, where it comes from and under which licence.
 
 Kenney files: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/), from https://kenney.nl
-(packs Sci-Fi Sounds and Interface Sounds); trimmed, looped and level-matched for TimeFighter.
+(packs Sci-Fi Sounds, Interface Sounds and Impact Sounds); trimmed, looped and level-matched for TimeFighter.
 
 Synthesized files: made for TimeFighter with an ffmpeg generator script (noise and oscillators),
 own work, released as CC0 1.0.
@@ -27,3 +27,4 @@ Short loops stay WAV: compressed loops click at the seam.
 | bomb_kenney_low.ogg | bomb impact | Kenney, Sci-Fi Sounds: lowFrequency_explosion_001.ogg | CC0 1.0 | no |
 | click_kenney_click_002.ogg | menu click | Kenney, Interface Sounds: click_002.ogg | CC0 1.0 | no |
 | music_drive.ogg | menu music | synthesized for TimeFighter | own work (CC0 1.0) | yes |
+| player_hit.ogg | hits on the player's jet | Kenney, Impact Sounds: impactMetal_light_001.ogg | CC0 1.0 | no |
