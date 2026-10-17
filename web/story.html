@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The story – TimeFighter</title>
+    <meta name="description" content="A routine sortie, one flash of lightning, and your F-14 breaks into a parallel timeline where propeller bombers are heading for the city." />
+    <link rel="canonical" href="https://timefighter.trendgegner.com/story.html" />
+    <meta name="theme-color" content="#161421" />
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="TimeFighter" />
+    <meta property="og:title" content="The story – TimeFighter" />
+    <meta property="og:url" content="https://timefighter.trendgegner.com/story.html" />
+    <meta property="og:image" content="https://timefighter.trendgegner.com/img/og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <!-- Orbitron (SIL Open Font License, fonts/OFL.txt), served locally: no third-party requests. -->
+    <link rel="preload" href="fonts/Orbitron-Variable.ttf" as="font" type="font/ttf" crossorigin />
+    <style>
+      @font-face {
+        font-family: "Orbitron";
+        src: url("fonts/Orbitron-Variable.ttf") format("truetype");
+        font-weight: 400 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      /* Same palette and sky as the start page (index.html). */
+      :root {
+        --hud: #b8ffc7;
+        --hud-dim: rgba(184, 255, 199, 0.55);
+        --amber: #ffbf33;
+        --ink: #e8f2ea;
+        --panel: rgba(6, 10, 14, 0.78);
+        --sky-top: #142130;
+        --sky-mid: #2c3b4d;
+        --sky-low: #47566a;
+        --glow: rgba(150, 190, 230, 0.25);
+      }
+      body.evening {
+        --sky-top: #161421;
+        --sky-mid: #3a2c3c;
+        --sky-low: #7a4b3f;
+        --glow: rgba(255, 160, 90, 0.35);
+      }
+      html { background: #0b1218; }
+      body {
+        margin: 0; min-height: 100vh; padding: 16px; box-sizing: border-box;
+        display: grid; place-items: center;
+        font: 17px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink);
+        background:
+          radial-gradient(ellipse at 50% 115%, var(--glow), transparent 62%) fixed,
+          linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 58%, var(--sky-low) 100%) fixed;
+      }
+      a { color: var(--hud); text-underline-offset: 3px; }
+      a:hover, a:focus-visible { color: var(--amber); }
+
+      .card {
+        width: min(760px, 100%); box-sizing: border-box;
+        background: var(--panel); border: 1px solid var(--hud-dim);
+      }
+      /* The share picture as the header: jet, formation, wordmark. */
+      .hero { display: block; width: 100%; height: auto; aspect-ratio: 1200 / 630; }
+      .text { padding: 26px 36px 24px; }
+      h1 {
+        margin: 0 0 18px; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
+        font-size: 12px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--hud-dim);
+      }
+      .story { max-width: 60ch; margin: 0 auto; }
+      .story p { margin: 0 0 1em; }
+      .story p:first-child::first-letter {
+        float: left; margin: 0.08em 0.12em 0 0; font-family: "Orbitron", system-ui, sans-serif;
+        font-weight: 800; font-size: 3.1em; line-height: 0.8; color: var(--amber);
+      }
+      .story .last { color: var(--hud); font-weight: 600; }
+
+      .fly {
+        display: block; width: max-content; margin: 22px auto 4px; padding: 12px 40px;
+        font-family: "Orbitron", system-ui, sans-serif; font-weight: 800; font-size: 18px; letter-spacing: 0.2em;
+        color: #0b1218; background: var(--hud); text-decoration: none;
+      }
+      .fly:hover, .fly:focus-visible { color: #0b1218; background: var(--amber); outline: none; }
+
+      @media (max-width: 640px) {
+        body { padding: 10px; font-size: 16px; }
+        .text { padding: 20px 18px 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <a href="./"><img class="hero" src="img/og-image.jpg" alt="TimeFighter: an F-14 Tomcat chasing a formation of propeller bombers and fighters over an evening city" width="1200" height="630" /></a>
+      <div class="text">
+        <h1>The story</h1>
+        <div class="story">
+          <p>
+            A routine training sortie from your home airbase. A storm front that no forecast saw
+            coming, one blinding flash of lightning, and your jet breaks out of the clouds into a
+            parallel timeline.
+          </p>
+          <p>
+            The city below looks familiar, but your airbase is gone, the radio is only static, and
+            a wave of propeller bombers is heading for the rooftops.
+          </p>
+          <p class="last">You are the only thing in the sky that can stop them.</p>
+        </div>
+        <a class="fly" href="./">FLY NOW</a>
+      </div>
+    </main>
+
+    <script>
+      // Day or evening tint as chosen on the start page (same storage key),
+      // else the browser's dark/light preference. Nothing is sent anywhere.
+      let light = '';
+      try {
+        const line = localStorage.getItem('timefighter.menu') ?? '';
+        const pair = line.split(';').find((p) => p.startsWith('light='));
+        light = pair ? pair.slice('light='.length) : '';
+      } catch {
+        // No storage (private window): fall back below.
+      }
+      if (light !== 'day' && light !== 'evening') {
+        light = matchMedia('(prefers-color-scheme: dark)').matches ? 'evening' : 'day';
+      }
+      document.body.classList.toggle('evening', light === 'evening');
+    </script>
+  </body>
+</html>

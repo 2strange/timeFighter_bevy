@@ -87,6 +87,8 @@
         margin: 0 0 24px; max-width: 62ch; font-size: 16px; color: var(--ink);
         border-left: 2px solid var(--amber); padding-left: 14px;
       }
+      .story a { color: var(--hud); white-space: nowrap; text-underline-offset: 3px; }
+      .story a:hover, .story a:focus-visible { color: var(--amber); }
 
       h2 {
         margin: 0 0 10px; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
@@ -100,7 +102,9 @@
         color: var(--ink); background: rgba(255, 255, 255, 0.03); border: 1px solid var(--hud-dim);
         font: inherit;
       }
-      .mode img { width: 100%; aspect-ratio: 2 / 1; object-fit: contain; display: block; }
+      /* height: auto, or the img height attribute fixes the height and the
+         picture turns square in a narrow card. */
+      .mode img { width: 100%; height: auto; aspect-ratio: 2 / 1; object-fit: contain; display: block; }
       /* Name on its own line, the one-liner below. */
       .mode div { display: flex; flex-direction: column; gap: 4px; }
       .mode strong {
@@ -161,12 +165,9 @@
         <h1 class="logo"><span class="time">TIME</span><span class="fighter">FIGHTER</span></h1>
         <p class="tagline">Arcade air combat · another timeline</p>
         <p class="story">
-          A routine training sortie from your home airbase. A storm front that no
-          forecast saw coming, one blinding flash of lightning, and your jet
-          breaks out of the clouds into a parallel timeline. The city below looks
-          familiar, but your airbase is gone, the radio is only static, and a wave
-          of propeller bombers is heading for the rooftops. You are the only thing
-          in the sky that can stop them.
+          A routine sortie, one flash of lightning, and your jet breaks into a parallel
+          timeline. Propeller bombers are heading for the city, and you are the only one who
+          can stop them. <a href="story.html">Read the story</a>
         </p>
 
         <section>
@@ -223,6 +224,7 @@
         <div class="status" id="status" aria-live="polite">Loading the game…</div>
 
         <footer>
+          <a href="story.html">Story</a>
           <a href="showroom.html">Aircraft showroom</a>
           <a href="credits.html">Credits</a>
         </footer>
