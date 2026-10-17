@@ -16,6 +16,7 @@ mod effects;
 pub mod hits;
 mod lock;
 mod rng;
+pub mod smoke;
 #[cfg(test)]
 mod tests;
 mod turrets;
@@ -280,8 +281,12 @@ impl Plugin for CombatPlugin {
                     (effects::spawn_effects, effects::age_effects)
                         .chain()
                         .after(CombatSystems::Resolve),
+                    (smoke::emit_smoke, smoke::age_smoke)
+                        .chain()
+                        .after(CombatSystems::Resolve),
                 ),
             )
+            .add_systems(Startup, smoke::spawn_pool)
             // Crashes are handled right where the physics reports them, so
             // the frame that shows the impact shows the explosion, not a
             // jet half inside a building (and enemies vanish just as fast).
