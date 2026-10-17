@@ -381,3 +381,96 @@ fn save_score_opens_the_dialog_again_after_cancel() {
     set(&mut app, |i| i.save += 1);
     assert!(app.world().resource::<ScoreState>().dialog);
 }
+
+fn over(app: &mut App) {
+    app.world_mut().resource_mut::<Round>().phase = RoundPhase::Over(Outcome::ShotDown);
+    app.update();
+    app.update();
+}
+
+fn keyboard_covers_the_canvas(app: &mut App) {
+    app.world_mut().write_message(bevy::window::WindowOccluded {
+        window: Entity::PLACEHOLDER,
+        occluded: true,
+    });
+    app.update();
+}
+
+#[test]
+fn round_after_round_the_phone_saves_and_flies_again() {
+    let mut app = touch_game();
+    for round in 1..=3 {
+        over(&mut app);
+        assert!(app.world().resource::<ScoreState>().dialog, "round {round}");
+        // The on-screen keyboard can make the canvas count as occluded.
+        keyboard_covers_the_canvas(&mut app);
+        assert!(!paused(&app), "round {round}: no pause from the keyboard");
+        set(&mut app, |i| i.name = Some("Trendgegner".into()));
+        set(&mut app, |i| i.name_ok += 1);
+        assert!(app.world().resource::<ScoreState>().submitted.is_some());
+        // Pause on the result screen: not possible.
+        set(&mut app, |i| i.pause += 1);
+        app.update();
+        assert!(!paused(&app), "round {round}: no pause over the result");
+        // Fly again.
+        set(&mut app, |i| i.again += 1);
+        app.update();
+        assert!(
+            app.world().resource::<Round>().is_running(),
+            "round {round}: flying again"
+        );
+    }
+    let list = app
+        .world()
+        .resource::<crate::score::store::Store>()
+        .get(&crate::score::store::top_key("hunt", "normal"))
+        .unwrap();
+    assert_eq!(list.lines().count(), 3, "{list}");
+}
+
+#[test]
+fn a_pause_from_before_the_end_does_not_cover_the_result() {
+    let mut app = touch_game();
+    set(&mut app, |i| i.pause += 1);
+    app.update();
+    assert!(paused(&app));
+    over(&mut app);
+    assert!(!paused(&app), "the result has the screen");
+    assert_eq!(
+        page_mode(
+            Some(app.world().resource::<Pause>()),
+            Some(app.world().resource::<Round>()),
+            Some(app.world().resource::<ScoreState>())
+        ),
+        PageMode::Dialog
+    );
+}
+
+#[test]
+fn a_custom_round_on_the_phone_lands_on_the_local_list() {
+    let mut app = touch_game();
+    app.world_mut()
+        .resource_mut::<crate::game_state::Mission>()
+        .difficulty = crate::game_state::Difficulty::Custom(default());
+    over(&mut app);
+    // Cancelled first, then saved after all with SAVE SCORE.
+    set(&mut app, |i| i.name_cancel += 1);
+    assert!(!app.world().resource::<ScoreState>().dialog);
+    set(&mut app, |i| i.save += 1);
+    assert!(app.world().resource::<ScoreState>().dialog);
+    set(&mut app, |i| i.name = Some("GOOSE".into()));
+    set(&mut app, |i| i.name_ok += 1);
+    let store = app.world().resource::<crate::score::store::Store>();
+    assert!(
+        store
+            .get(&crate::score::store::top_key("hunt", "custom"))
+            .is_some_and(|l| l.starts_with("GOOSE\t"))
+    );
+}
+
+#[test]
+fn on_a_desktop_hiding_the_window_still_pauses() {
+    let mut app = game();
+    keyboard_covers_the_canvas(&mut app);
+    assert!(paused(&app));
+}

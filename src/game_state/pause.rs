@@ -12,7 +12,11 @@ use bevy::{
     winit::{UpdateMode, WinitSettings},
 };
 
-use crate::flight::{KeyHelpAppExt, KeyHelpSection};
+use super::{Round, RoundPhase};
+use crate::{
+    flight::{KeyHelpAppExt, KeyHelpSection},
+    mobile::{MobileInput, touch},
+};
 
 /// Why the game is paused. Game time runs only when nothing holds it;
 /// further reasons (menus, cut scenes) get their own field.
@@ -126,8 +130,18 @@ impl Plugin for PausePlugin {
     }
 }
 
-fn toggle_pause(keys: Option<Res<ButtonInput<KeyCode>>>, mut pause: ResMut<Pause>) {
-    if pause.menu {
+/// The round is decided: its result comes next, so no pause any more (a
+/// pause screen over the result would hold Fly again).
+fn decided(round: Option<&Round>) -> bool {
+    round.is_some_and(|r| matches!(r.phase, RoundPhase::Ending { .. } | RoundPhase::Over(_)))
+}
+
+fn toggle_pause(
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    round: Option<Res<Round>>,
+    mut pause: ResMut<Pause>,
+) {
+    if pause.menu || decided(round.as_deref()) {
         return;
     }
     if keys.is_some_and(|keys| keys.any_just_pressed([KeyCode::KeyP, KeyCode::Escape])) {
@@ -140,23 +154,32 @@ fn toggle_pause(keys: Option<Res<ButtonInput<KeyCode>>>, mut pause: ResMut<Pause
 /// With the touch overlay, focus does not count: every tap on one of its
 /// buttons takes the focus from the canvas (the overlay reports the page
 /// going to the background itself, see [`crate::mobile`]).
+/// On a phone neither counts: the on-screen keyboard (name dialog) can
+/// make the canvas count as occluded, too.
 fn pause_when_window_hidden(
     mut focus: MessageReader<WindowFocused>,
     mut occlusion: MessageReader<WindowOccluded>,
-    mobile: Option<Res<crate::mobile::MobileInput>>,
+    mobile: Option<Res<MobileInput>>,
+    round: Option<Res<Round>>,
     mut pause: ResMut<Pause>,
 ) {
-    let touch = crate::mobile::touch(mobile.as_deref());
+    let touch = touch(mobile.as_deref());
     let lost_focus = focus.read().any(|event| !event.focused) && !touch;
-    let hidden = occlusion.read().any(|event| event.occluded);
-    if (lost_focus || hidden) && !pause.menu {
+    let hidden = occlusion.read().any(|event| event.occluded) && !touch;
+    if (lost_focus || hidden) && !pause.menu && !decided(round.as_deref()) {
         pause.player = true;
+    }
+    // A pause left over from before the round was decided goes, so only
+    // the result shows and Fly again works.
+    if pause.player && round.is_some_and(|r| matches!(r.phase, RoundPhase::Over(_))) {
+        pause.player = false;
     }
 }
 
 fn apply_pause(
     mut commands: Commands,
     pause: Res<Pause>,
+    mobile: Option<Res<MobileInput>>,
     mut time: ResMut<Time<Virtual>>,
     winit: Option<ResMut<WinitSettings>>,
     running: Option<Res<RunningWinitSettings>>,
@@ -176,7 +199,10 @@ fn apply_pause(
     }
 
     if let Some(mut winit) = winit {
-        match (pause.idle(), running) {
+        // A phone's overlay buttons are no window input: idle redrawing
+        // would answer RESUME only a second later.
+        let idle = pause.idle() && !(touch(mobile.as_deref()) && pause.player);
+        match (idle, running) {
             (true, None) => {
                 commands.insert_resource(RunningWinitSettings(winit.clone()));
                 winit.focused_mode = UpdateMode::reactive_low_power(IDLE_REDRAW);

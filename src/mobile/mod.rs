@@ -268,9 +268,13 @@ fn read_page(mut input: ResMut<MobileInput>) {
 fn press_keys(
     input: Res<MobileInput>,
     keys: Option<ResMut<ButtonInput<KeyCode>>>,
-    (invert, pause): (Option<ResMut<PitchInvert>>, Option<ResMut<Pause>>),
+    invert: Option<ResMut<PitchInvert>>,
+    pause: Option<ResMut<Pause>>,
+    round: Option<Res<Round>>,
     mut pressed: ResMut<Pressed>,
 ) {
+    let decided =
+        round.is_some_and(|r| matches!(r.phase, RoundPhase::Ending { .. } | RoundPhase::Over(_)));
     let Some(mut keys) = keys else {
         return;
     };
@@ -279,10 +283,12 @@ fn press_keys(
     {
         invert.0 = !invert.0;
     }
-    // In the background: pause, as the desktop does on losing focus.
+    // In the background: pause, as the desktop does on losing focus (not
+    // once the round is decided: its result comes next).
     if let (Some(seen), Some(mut pause)) = (&pressed.seen, pause)
         && input.hidden > seen.hidden
         && !pause.menu
+        && !decided
     {
         pause.player = true;
     }

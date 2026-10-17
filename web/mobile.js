@@ -166,13 +166,18 @@ function el(tag, className, text) {
 function quitButton() {
   const button = el('button', 'quit', 'QUIT TO START');
   button.type = 'button';
-  button.addEventListener('click', () => {
+  // On touch-down, not click: with the name field focused, iOS would use
+  // the first tap only to close the keyboard.
+  button.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
     try {
       localStorage.removeItem('timefighter.autostart');
     } catch {
       // Nothing stored.
     }
-    location.replace(location.pathname);
+    // A fresh address, so the page loads anew in any case (also as an
+    // app on the home screen).
+    location.replace(`${location.pathname}?quit=${Date.now()}`);
   });
   return button;
 }
@@ -380,6 +385,7 @@ function build() {
 }
 
 let overlay = null;
+let gyroAsked = false;
 
 /**
  * Called from the start button's click (a user gesture): asks for motion
@@ -411,6 +417,9 @@ export function startTouch() {
       .catch(() => {});
   }
 
+  // Motion access once per page: a second start must not add listeners.
+  if (gyroAsked) return;
+  gyroAsked = true;
   const noGyro = () => {
     overlay.classList.add('no-gyro');
     state.src = 'stick';
