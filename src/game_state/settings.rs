@@ -162,10 +162,10 @@ impl Difficulty {
             (GameMode::Protect, Difficulty::Hard) => 12,
             (GameMode::Protect, Difficulty::Insane) => 12,
             // Battle: bombers take two missiles, fighters one. Super Easy
-            // and Easy have (nearly) enough (18 / 20 for 20 / 20 needed),
-            // Normal and up leave a share of the targets to the gun (24 of
-            // 30, 16 of 36, 16 of 48).
-            (GameMode::Battle, Difficulty::SuperEasy) => 18,
+            // has a reserve (24 for 20 needed), Easy just enough (20), Normal
+            // and up leave a share of the targets to the gun (24 of 30, 16
+            // of 36, 16 of 48).
+            (GameMode::Battle, Difficulty::SuperEasy) => 24,
             (GameMode::Battle, Difficulty::Easy) => 20,
             (GameMode::Battle, Difficulty::Normal) => 24,
             (GameMode::Battle, Difficulty::Hard) => 16,
@@ -293,7 +293,7 @@ impl Default for DifficultyParams {
     /// Normal.
     fn default() -> Self {
         Self {
-            missiles: 10,
+            missiles: 8,
             enemies: 10,
             flight_size: 2,
             pilots: PilotMix::Mixed,

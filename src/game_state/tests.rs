@@ -556,7 +556,7 @@ fn difficulty_table_matches_the_design() {
         .collect();
     assert_eq!(
         table,
-        vec![(24, 6, 2), (12, 6, 2), (10, 10, 2), (8, 12, 4), (8, 16, 4)]
+        vec![(24, 6, 2), (12, 6, 2), (8, 10, 2), (8, 12, 4), (8, 16, 4)]
     );
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
@@ -828,7 +828,7 @@ fn a_protect_round_arms_the_jet_with_the_protect_missiles() {
     app.update();
     assert_eq!(
         app.world().get::<MissileRack>(jet).unwrap().count,
-        10,
+        8,
         "Hunt"
     );
 }
@@ -1021,7 +1021,7 @@ fn battle_missiles_follow_the_two_for_a_bomber_one_for_a_fighter_rule() {
         .iter()
         .map(|d| d.params_for(GameMode::Battle).missiles)
         .collect();
-    assert_eq!(missiles, vec![18, 20, 24, 16, 16]);
+    assert_eq!(missiles, vec![24, 20, 24, 16, 16]);
 }
 
 #[test]
@@ -1031,7 +1031,7 @@ fn a_battle_round_is_won_when_everything_is_down() {
         battle(Difficulty::SuperEasy),
         true,
     );
-    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 18);
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 24);
     let mut kinds: Vec<bool> = app
         .world_mut()
         .query::<&Enemy>()
