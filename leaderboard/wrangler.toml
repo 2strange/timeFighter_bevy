@@ -1,0 +1,18 @@
+# TimeFighter hall of fame. No secrets in here: set RATE_SALT with
+# `npx wrangler secret put RATE_SALT` (optional), see README.md.
+name = "timefighter-leaderboard"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+ALLOWED_ORIGIN = "https://timefighter.trendgegner.com"
+
+[[kv_namespaces]]
+binding = "SCORES"
+# Replace with the id of your KV namespace (README.md, step 1).
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Custom domain (README.md, step 3); remove to use the workers.dev address.
+[[routes]]
+pattern = "api.timefighter.trendgegner.com"
+custom_domain = true

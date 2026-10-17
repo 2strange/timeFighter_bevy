@@ -12,6 +12,7 @@ pub mod game_state;
 pub mod hud;
 pub mod menu;
 pub mod physics;
+pub mod score;
 pub mod world;
 
 #[cfg(test)]
@@ -45,6 +46,7 @@ impl Plugin for GamePlugin {
             game_state::RoundPlugin,
             hud::HudPlugin,
             audio::GameAudioPlugin,
+            score::ScorePlugin,
         ));
     }
 }

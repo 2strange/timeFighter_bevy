@@ -1,0 +1,10 @@
+{
+  "name": "timefighter-leaderboard",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker for TimeFighter's online hall of fame",
+  "scripts": {
+    "test": "node --test",
+    "deploy": "npx wrangler@4 deploy"
+  }
+}

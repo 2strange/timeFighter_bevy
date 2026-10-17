@@ -247,7 +247,7 @@ impl DifficultyParams {
         // designed"; `clamp` alone would keep NaN.
         let factor = |f: f32, lo: f32, hi: f32| if f.is_finite() { f.clamp(lo, hi) } else { 1.0 };
         Self {
-            missiles: self.missiles.min(99),
+            missiles: self.missiles.min(100),
             gun_ammo: self.gun_ammo.clamp(50, 9_999),
             enemies: self.enemies.clamp(1, 48),
             flight_size: self.flight_size.clamp(1, 8),
