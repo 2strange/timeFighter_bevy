@@ -52,4 +52,4 @@ Serve `dist/` with any static-file server.
 
 ## License
 
-The code is available under the [MIT License](LICENSE). Aircraft models are licensed separately under CC-BY-4.0; see the [aircraft credits](assets/aircraft/CREDITS.md) for authors and sources.
+The code is available under the [MIT License](LICENSE). Aircraft models are licensed separately under CC-BY-4.0; see the [aircraft credits](assets/aircraft/CREDITS.md) for authors and sources. Sounds are CC0; see the [sound credits](assets/audio/CREDITS.md).

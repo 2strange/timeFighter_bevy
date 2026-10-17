@@ -239,7 +239,10 @@ fn mix(
     pause: Option<Res<Pause>>,
     round: Option<Res<Round>>,
     flight: Option<Res<FlightConfig>>,
-    keys: Option<Res<ButtonInput<KeyCode>>>,
+    menu_moves: (
+        Option<Res<crate::menu::Menu>>,
+        Option<Res<crate::menu::MenuSelection>>,
+    ),
     mut cues: MessageReader<SoundCue>,
     player: Query<
         (
@@ -278,8 +281,12 @@ fn mix(
             volume: master * MUSIC_VOLUME,
             speed: 1.0,
         });
-        // A click for every key or button press in the menu.
-        if pause.menu && keys.is_some_and(|k| k.get_just_pressed().next().is_some()) {
+        // A click whenever the menu's cursor moves or a choice changes.
+        let moved = |r: Option<bool>| r.unwrap_or(false);
+        let (cursor, selection) = &menu_moves;
+        let clicked = moved(cursor.as_ref().map(|c| c.is_changed() && !c.is_added()))
+            || moved(selection.as_ref().map(|s| s.is_changed() && !s.is_added()));
+        if pause.menu && clicked {
             out.shots.push(OneShot {
                 clip: Clip::Click,
                 volume: master * 0.6,

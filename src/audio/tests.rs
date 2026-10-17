@@ -223,7 +223,14 @@ fn pause_is_silent_and_the_menu_plays_quiet_music() {
     assert_eq!(m.loops.len(), 1, "only the music: {m:?}");
     let music = m.voice(Voice::Music).unwrap();
     assert!(music.volume < 0.15, "very quiet: {}", music.volume);
-    tap(&mut app, KeyCode::ArrowDown);
+    // A click as the menu's choice changes (not when it appears).
+    app.insert_resource(crate::menu::MenuSelection::default());
+    app.update();
+    assert!(mix(&app).shots.is_empty());
+    app.world_mut()
+        .resource_mut::<crate::menu::MenuSelection>()
+        .set_changed();
+    app.update();
     assert_eq!(
         mix(&app).shots.iter().map(|s| s.clip).collect::<Vec<_>>(),
         vec![Clip::Click]

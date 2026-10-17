@@ -202,6 +202,34 @@
       </main>
     </div>
 
+    <script>
+      // Browsers keep an audio context silent until the page gets a click or
+      // a key. The game opens its context while starting, which may count as
+      // too late (Safari): wake every context on the next click or key.
+      (() => {
+        const Native = window.AudioContext || window.webkitAudioContext;
+        if (!Native) return;
+        const contexts = [];
+        const Tracked = new Proxy(Native, {
+          construct(target, args) {
+            const context = new target(...args);
+            contexts.push(context);
+            return context;
+          },
+        });
+        window.AudioContext = Tracked;
+        window.webkitAudioContext = Tracked;
+        const wake = () => {
+          for (const context of contexts) {
+            if (context.state === 'suspended') context.resume().catch(() => {});
+          }
+        };
+        for (const type of ['pointerdown', 'keydown', 'touchend']) {
+          window.addEventListener(type, wake, { capture: true });
+        }
+      })();
+    </script>
+
     <script type="module">
       import init from './timefighter.js';
 
