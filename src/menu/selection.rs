@@ -378,9 +378,9 @@ impl MenuSelection {
         *self != before
     }
 
-    /// Applies a start request from the start page (`mode` and `level`,
-    /// by name like `protect` / `hard` or by index); unknown values are
-    /// ignored.
+    /// Applies a start request from the start page (`mode`, `level` and
+    /// `light`, by name like `protect` / `hard` / `evening`, levels also by
+    /// index); unknown values are ignored.
     pub fn apply_request(&mut self, request: &str) {
         for (key, value) in super::storage::parse(request) {
             let value = value.to_lowercase();
@@ -391,6 +391,14 @@ impl MenuSelection {
                         .find(|m| m.available() && m.label().eq_ignore_ascii_case(&value))
                     {
                         self.mode = mode;
+                    }
+                }
+                "light" => {
+                    if let Some(lighting) = Lighting::ALL
+                        .into_iter()
+                        .find(|l| l.label().eq_ignore_ascii_case(&value))
+                    {
+                        self.lighting = lighting;
                     }
                 }
                 "level" => {

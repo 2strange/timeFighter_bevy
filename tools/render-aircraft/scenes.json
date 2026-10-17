@@ -1,0 +1,98 @@
+{
+  "mode-hunt": {
+    "width": 480,
+    "height": 270,
+    "fov": 26,
+    "view": {
+      "yaw": 40,
+      "pitch": 12
+    },
+    "aircraft": [
+      {
+        "model": "bf109k4",
+        "at": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -8,
+        "pitch": 4,
+        "roll": -22
+      }
+    ]
+  },
+  "mode-protect": {
+    "width": 480,
+    "height": 270,
+    "fov": 26,
+    "view": {
+      "yaw": 34,
+      "pitch": 14
+    },
+    "aircraft": [
+      {
+        "model": "ju390",
+        "at": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "model": "he177",
+        "at": [
+          -36,
+          -5,
+          28
+        ]
+      }
+    ]
+  },
+  "mode-battle": {
+    "width": 480,
+    "height": 270,
+    "fov": 26,
+    "view": {
+      "yaw": 34,
+      "pitch": 14
+    },
+    "aircraft": [
+      {
+        "model": "ju390",
+        "at": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "model": "he177",
+        "at": [
+          -36,
+          -5,
+          28
+        ]
+      },
+      {
+        "model": "bf109k4",
+        "at": [
+          34,
+          9,
+          -8
+        ],
+        "yaw": -6,
+        "roll": -24
+      },
+      {
+        "model": "me309",
+        "at": [
+          24,
+          14,
+          14
+        ],
+        "yaw": -4,
+        "roll": -16
+      }
+    ]
+  }
+}
