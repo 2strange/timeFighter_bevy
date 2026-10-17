@@ -9,13 +9,16 @@
     <meta name="theme-color" content="#161421" />
     <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Orbitron (SIL Open Font License, fonts/OFL.txt), served locally: no third-party requests. -->
+    <link rel="preload" href="fonts/Orbitron-Variable.ttf" as="font" type="font/ttf" crossorigin />
     <style>
+      @font-face {
+        font-family: "Orbitron";
+        src: url("fonts/Orbitron-Variable.ttf") format("truetype");
+        font-weight: 400 900;
+        font-style: normal;
+        font-display: swap;
+      }
       /* Same palette and sky as the start page (index.html). */
       :root {
         --hud: #b8ffc7;
@@ -216,7 +219,7 @@
           <li><a href="https://bevy.org/" rel="noopener">Bevy</a></li>
           <li><a href="https://rapier.rs/" rel="noopener">Rapier</a></li>
           <li><a href="https://github.com/wasm-bindgen/wasm-bindgen" rel="noopener">wasm-bindgen</a></li>
-          <li><a href="https://fonts.google.com/specimen/Orbitron" rel="noopener">Orbitron font (OFL)</a></li>
+          <li><a href="https://github.com/theleagueof/orbitron" rel="noopener">Orbitron font (OFL)</a></li>
         </ul>
       </section>
 

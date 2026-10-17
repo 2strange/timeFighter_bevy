@@ -24,13 +24,16 @@
     <meta name="twitter:title" content="TimeFighter – arcade air combat in another timeline" />
     <meta name="twitter:description" content="Free arcade dogfighter in your browser: one F-14 Tomcat, thrown into a parallel timeline, against waves of propeller fighters and bombers over a living city." />
     <meta name="twitter:image" content="https://timefighter.trendgegner.com/img/og-image.jpg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Orbitron (SIL Open Font License, fonts/OFL.txt), served locally: no third-party requests. -->
+    <link rel="preload" href="fonts/Orbitron-Variable.ttf" as="font" type="font/ttf" crossorigin />
     <style>
+      @font-face {
+        font-family: "Orbitron";
+        src: url("fonts/Orbitron-Variable.ttf") format("truetype");
+        font-weight: 400 900;
+        font-style: normal;
+        font-display: swap;
+      }
       :root {
         --hud: #b8ffc7;
         --hud-dim: rgba(184, 255, 199, 0.55);
