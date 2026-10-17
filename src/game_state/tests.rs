@@ -12,7 +12,7 @@ use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use super::{
     Difficulty, GameMode, GameSettings, Mission, Outcome, Pause, PausePlugin, RestartRound, Round,
-    RoundPhase, RoundPlugin, WaveTrigger,
+    RoundPhase, RoundPlugin, SpawnSeed, WaveTrigger,
 };
 use crate::{
     ai::{AiPlugin, Enemy},
@@ -26,6 +26,9 @@ use crate::{
 };
 
 const FRAME: Duration = Duration::from_nanos(16_666_667);
+
+/// Where the waves enter in these tests ([`Mission::scattered`]).
+const TEST_SEED: u64 = 7;
 
 fn app() -> (App, Entity) {
     app_with_jet_at(FlightConfig::default().spawn_transform())
@@ -78,6 +81,8 @@ fn custom_app(jet_at: Transform, settings: GameSettings, city: bool) -> (App, En
     .add_message::<WindowOccluded>()
     .insert_resource(TimeUpdateStrategy::ManualDuration(FRAME));
     app.insert_resource(settings);
+    // The same entry points every run.
+    app.insert_resource(SpawnSeed::fixed(TEST_SEED));
     if city {
         app.add_plugins((
             crate::world::CityPlugin,
@@ -763,12 +768,23 @@ fn missiles_are_counted_per_mode() {
         .iter()
         .map(|d| d.params_for(GameMode::Protect).missiles)
         .collect();
-    assert_eq!(protect, vec![24, 16, 16, 12, 12]);
+    // Two missiles a bomber, times 2.0 / 1.5 / 0.9 / 0.75, rounded up;
+    // Insane keeps its 12.
+    assert_eq!(protect, vec![32, 24, 22, 18, 12]);
+    let hunt: Vec<u32> = Difficulty::PRESETS
+        .iter()
+        .map(|d| d.params_for(GameMode::Hunt).missiles)
+        .collect();
+    // One a fighter: 6, 6, 10, 12 fighters; Insane keeps its 8.
+    assert_eq!(hunt, vec![12, 9, 9, 9, 8]);
     for difficulty in Difficulty::PRESETS {
         assert_eq!(
             difficulty.params_for(GameMode::Hunt),
-            difficulty.params(),
-            "Hunt unchanged"
+            crate::game_state::DifficultyParams {
+                missiles: difficulty.params_for(GameMode::Hunt).missiles,
+                ..difficulty.params()
+            },
+            "only the missiles differ"
         );
     }
     let custom = Difficulty::Custom(crate::game_state::DifficultyParams {
@@ -785,7 +801,7 @@ fn a_protect_round_arms_the_jet_with_the_protect_missiles() {
         protect(Difficulty::Normal),
         true,
     );
-    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 16);
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 22);
     app.insert_resource(GameSettings {
         difficulty: Difficulty::Normal,
         ..default()
@@ -794,7 +810,7 @@ fn a_protect_round_arms_the_jet_with_the_protect_missiles() {
     app.update();
     assert_eq!(
         app.world().get::<MissileRack>(jet).unwrap().count,
-        8,
+        9,
         "Hunt"
     );
 }
@@ -891,9 +907,8 @@ fn battle_waves_are_bombers_with_a_fighter_escort() {
         .map(|d| Mission::battle(*d).enemy_count())
         .collect();
     // SE 2×(4+2), Easy 2×(4+2), Normal 3×(4+2), Hard 3×(4+4), Insane
-    // 4×(4+4); from Normal on plus zeppelins with a double escort each
-    // (Insane three).
-    assert_eq!(totals, vec![12, 12, 18 + 5, 24 + 9, 32 + 3 * 9]);
+    // 4×(4+4); from Normal on plus zeppelins, alone (Insane three).
+    assert_eq!(totals, vec![12, 12, 18 + 1, 24 + 1, 32 + 3]);
     for difficulty in Difficulty::PRESETS {
         let params = difficulty.params();
         let mission = Mission::battle(difficulty);
@@ -904,22 +919,28 @@ fn battle_waves_are_bombers_with_a_fighter_escort() {
             mission.waves.len(),
             bomber_waves + params.zeppelins as usize
         );
-        for (i, wave) in mission.waves.iter().enumerate() {
-            let [bombers, escort] = &wave.groups[..] else {
-                panic!("two groups per wave");
-            };
-            assert!(bombers.members.iter().all(|k| k.is_bomber()));
-            assert!(escort.members.iter().all(|k| !k.is_bomber()));
-            assert_eq!(escort.escorts, Some(0));
-            if i < bomber_waves {
-                assert_eq!(bombers.count(), params.bombers_per_wave);
-                assert_eq!(escort.count(), params.flight_size);
-            } else {
-                // The last waves: a zeppelin each, with a double escort.
-                assert_eq!(bombers.members, vec![EnemyKind::Zeppelin]);
-                assert_eq!(escort.count(), 2 * params.flight_size);
+        let mut bombers_seen = 0;
+        for wave in &mission.waves {
+            match &wave.groups[..] {
+                [bombers, escort] => {
+                    bombers_seen += 1;
+                    assert!(bombers.members.iter().all(|k| k.is_bomber()));
+                    assert_eq!(bombers.count(), params.bombers_per_wave);
+                    assert!(escort.members.iter().all(|k| !k.is_bomber()));
+                    assert_eq!(escort.escorts, Some(0));
+                    assert_eq!(escort.count(), params.flight_size);
+                }
+                // A zeppelin alone, launching its own fighters.
+                [zeppelin] => {
+                    assert_eq!(zeppelin.members, vec![EnemyKind::Zeppelin]);
+                    let carrier = zeppelin.carrier.as_ref().expect("a carrier");
+                    assert_eq!(carrier.max_alive, params.zeppelin_fighters);
+                    assert!(carrier.fighters.iter().all(|k| !k.is_bomber()));
+                }
+                groups => panic!("unexpected wave of {} groups", groups.len()),
             }
         }
+        assert_eq!(bombers_seen, bomber_waves);
         let zeppelins = match difficulty {
             Difficulty::SuperEasy | Difficulty::Easy => 0,
             Difficulty::Insane => 3,
@@ -943,7 +964,23 @@ fn battle_missiles_follow_the_two_for_a_bomber_one_for_a_fighter_rule() {
         .iter()
         .map(|d| d.params_for(GameMode::Battle).missiles)
         .collect();
-    assert_eq!(missiles, vec![24, 20, 32, 20, 36]);
+    // SE 2×(8+2) = 20 needed, Easy the same, Normal 24 + 6 + 9 = 39,
+    // Hard 24 + 12 + 9 = 45; times 2.0 / 1.5 / 0.9 / 0.75. Insane keeps 36.
+    let needed: Vec<u32> = Difficulty::PRESETS
+        .iter()
+        .map(|d| Mission::battle(*d).missiles_needed())
+        .collect();
+    assert_eq!(needed, vec![20, 20, 39, 45, 75]);
+    assert_eq!(missiles, vec![40, 30, 36, 34, 36]);
+    // Carrier fighters are gun work: the count ignores the hangar.
+    let without_hangar = Difficulty::Custom(crate::game_state::DifficultyParams {
+        zeppelin_fighters: 0,
+        ..default()
+    });
+    assert_eq!(
+        Mission::battle(without_hangar).missiles_needed(),
+        Mission::battle(Difficulty::Custom(default())).missiles_needed()
+    );
 }
 
 #[test]
@@ -953,7 +990,7 @@ fn a_battle_round_is_won_when_everything_is_down() {
         battle(Difficulty::SuperEasy),
         true,
     );
-    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 24);
+    assert_eq!(app.world().get::<MissileRack>(jet).unwrap().count, 40);
     let mut kinds: Vec<bool> = app
         .world_mut()
         .query::<&Enemy>()
@@ -1301,7 +1338,7 @@ fn levels_set_gun_ammunition_speed_and_flights() {
             (None, 0.6, 3, 1),
             (Some(2_000), 0.75, 5, 2),
             (Some(1_000), 0.9, 3, 3),
-            (Some(500), 1.0, 4, 4),
+            (Some(1_000), 1.0, 4, 4),
         ]
     );
     assert_eq!(Difficulty::SuperEasy.params().bomber_waves, 2);
@@ -1310,7 +1347,7 @@ fn levels_set_gun_ammunition_speed_and_flights() {
     for (difficulty, ammo) in [
         (Difficulty::SuperEasy, None),
         (Difficulty::Normal, Some(2_000)),
-        (Difficulty::Insane, Some(500)),
+        (Difficulty::Insane, Some(1_000)),
     ] {
         let (mut app, jet) = app();
         app.insert_resource(GameSettings {
@@ -1335,7 +1372,7 @@ fn the_battle_is_only_won_once_the_zeppelin_wreck_has_hit_the_ground() {
         true,
     );
     let mission = app.world().resource::<Mission>().clone();
-    // Down with every wave as it comes, the zeppelin last.
+    // Down with every wave as it comes, the zeppelin between the bombers.
     for _ in 0..mission.waves.len() {
         shoot_down_all(&mut app);
         app.update();
@@ -1363,7 +1400,7 @@ fn the_battle_is_only_won_once_the_zeppelin_wreck_has_hit_the_ground() {
         "not before the impact"
     );
     run_for(&mut app, 40.0);
-    // It came down north of the centre: the city stands, the battle is won.
+    // It came down far out: the city stands, the battle is won.
     assert_eq!(round(&app).phase, RoundPhase::Over(Outcome::Victory));
     let wrecks = app
         .world_mut()
@@ -1451,7 +1488,7 @@ fn several_zeppelins_come_from_different_sides() {
         }))
         .enemy_count()
     };
-    assert_eq!(custom(0) + 5, custom(1), "a zeppelin and its four escorts");
+    assert_eq!(custom(0) + 1, custom(1), "a zeppelin, alone");
     assert_eq!(custom(9), custom(3), "clamped to three");
 }
 
@@ -1462,4 +1499,308 @@ fn gun_assist_is_on_for_the_easy_levels_only() {
         .map(|d| d.params().gun_assist)
         .collect();
     assert_eq!(assist, vec![true, true, false, false, false]);
+}
+
+/// Every mode at an easy and a hard level, scattered with `seed`.
+fn scattered_missions(seed: u64) -> Vec<Mission> {
+    let mut missions = Vec::new();
+    for mode in GameMode::ALL {
+        for difficulty in [Difficulty::Normal, Difficulty::Insane] {
+            let settings = GameSettings {
+                mode,
+                difficulty,
+                ..default()
+            };
+            missions.push(Mission::from_settings(&settings).scattered(seed));
+        }
+    }
+    missions
+}
+
+/// Lead positions and headings of the groups that place themselves (not
+/// escorts), wave by wave.
+fn entries(mission: &Mission) -> Vec<(Vec3, Vec3)> {
+    mission
+        .waves
+        .iter()
+        .flat_map(|w| w.groups.iter().filter(|g| g.escorts.is_none()))
+        .map(|g| (g.lead, g.heading))
+        .collect()
+}
+
+#[test]
+fn waves_enter_somewhere_else_every_seed_but_never_at_the_player() {
+    use crate::{
+        flight::PLAYER_SPAWN,
+        game_state::{MIN_HEAD_ON_ANGLE, SECTORS, bearing_of, clear_of_player},
+    };
+    let sector = |p: Vec3| (bearing_of(p) / (std::f32::consts::TAU / SECTORS as f32)) as usize;
+    for seed in 0..200 {
+        let missions = scattered_missions(seed);
+        assert_eq!(missions, scattered_missions(seed), "seed {seed} replays");
+        for mission in &missions {
+            // Scattering moves the waves, nothing else.
+            let plain = Mission::from_settings(&GameSettings {
+                mode: mission.mode,
+                difficulty: mission.difficulty,
+                ..default()
+            });
+            assert_eq!(mission.enemy_count(), plain.enemy_count());
+            assert_eq!(mission.waves.len(), plain.waves.len());
+            for (lead, _) in entries(mission) {
+                assert!(clear_of_player(lead), "seed {seed}: {lead}");
+            }
+            // Fighter flights: never two in a row from the same sector,
+            // never flying straight at the player.
+            let fighters: Vec<(Vec3, Vec3)> = mission
+                .waves
+                .iter()
+                .flat_map(|w| &w.groups)
+                .filter(|g| g.escorts.is_none() && !g.members[0].is_bomber())
+                .map(|g| (g.lead, g.heading))
+                .collect();
+            for pair in fighters.windows(2) {
+                assert_ne!(sector(pair[0].0), sector(pair[1].0), "seed {seed}");
+            }
+            for (lead, heading) in &fighters {
+                let to_player = (PLAYER_SPAWN - *lead).with_y(0.0);
+                assert!(
+                    heading.angle_between(to_player) >= MIN_HEAD_ON_ANGLE - 1e-3,
+                    "seed {seed}: head-on from {lead}"
+                );
+            }
+        }
+    }
+    let first = |seed| entries(&scattered_missions(seed)[0])[0];
+    let placements: Vec<(Vec3, Vec3)> = (0..20).map(first).collect();
+    for (i, a) in placements.iter().enumerate() {
+        for b in &placements[i + 1..] {
+            assert_ne!(a, b, "every seed its own first wave");
+        }
+    }
+}
+
+#[test]
+fn escorts_keep_their_place_behind_scattered_bombers() {
+    let plain = Mission::battle(Difficulty::Hard);
+    for seed in 0..50 {
+        let mission = plain.clone().scattered(seed);
+        for (before, after) in plain.waves.iter().zip(&mission.waves) {
+            let [bombers, escort] = &after.groups[..] else {
+                continue;
+            };
+            let gap = before.groups[1].lead - before.groups[0].lead;
+            let now = escort.lead - bombers.lead;
+            assert!((gap.length() - now.length()).abs() < 0.1, "seed {seed}");
+            assert!((gap.y - now.y).abs() < 0.1, "same height above");
+            assert!(now.dot(bombers.heading) < 0.0, "behind the bombers");
+            assert!(escort.heading.dot(bombers.heading) > 0.999);
+        }
+    }
+}
+
+#[test]
+fn zeppelins_come_alone_between_the_bombers_and_from_another_side() {
+    use crate::{
+        ai::EnemyKind,
+        game_state::{ZEPPELIN_GAP, bearing_gap, bearing_of, zeppelin_slot},
+    };
+    // Spread over the round, each half an interval after a bomber wave.
+    assert_eq!(zeppelin_slot(0, 1, 3), 1.5);
+    let insane: Vec<f32> = (0..3).map(|z| zeppelin_slot(z, 3, 4)).collect();
+    assert_eq!(insane, vec![0.5, 2.5, 3.5]);
+    for seed in 0..100 {
+        let mission = Mission::battle(Difficulty::Insane).scattered(seed);
+        let times: Vec<f32> = mission
+            .waves
+            .iter()
+            .map(|w| match w.trigger {
+                WaveTrigger::AtStart => 0.0,
+                WaveTrigger::AfterSecondsOrCleared(t) => t,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert!(times.windows(2).all(|t| t[0] < t[1]), "in order: {times:?}");
+        let mut last_bombers = None;
+        for wave in &mission.waves {
+            let lead = wave.groups[0].lead;
+            if wave.groups[0].members == vec![EnemyKind::Zeppelin] {
+                assert_eq!(wave.groups.len(), 1, "alone");
+                let bombers: f32 = last_bombers.expect("bombers come first");
+                assert!(
+                    bearing_gap(bearing_of(lead), bombers) >= ZEPPELIN_GAP,
+                    "seed {seed}: zeppelin too close to the bombers' side"
+                );
+            } else {
+                last_bombers = Some(bearing_of(lead));
+            }
+        }
+    }
+}
+
+#[test]
+fn every_round_scatters_anew_unless_the_seed_is_fixed() {
+    let (mut app, _) = app();
+    let placed = |app: &App| entries(app.world().resource::<Mission>());
+    let fixed = placed(&app);
+    app.world_mut().write_message(RestartRound);
+    app.update();
+    assert_eq!(placed(&app), fixed, "fixed seed: the same again");
+
+    app.insert_resource(SpawnSeed::default());
+    let mut seen = vec![fixed];
+    for _ in 0..3 {
+        app.world_mut().write_message(RestartRound);
+        app.update();
+        let now = placed(&app);
+        assert!(!seen.contains(&now), "a new placement every round");
+        seen.push(now);
+    }
+}
+
+#[test]
+fn a_zeppelin_launches_fighters_that_count_as_enemies() {
+    use crate::ai::{
+        Carrier, EnemyKind, FIRST_LAUNCH_DELAY, FlightGroup, LAUNCH_DROP, LAUNCH_INTERVAL,
+    };
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Custom(crate::game_state::DifficultyParams {
+            bomber_waves: 1,
+            zeppelins: 1,
+            zeppelin_fighters: 2,
+            ..default()
+        })),
+        false,
+    );
+    let mission = app.world().resource::<Mission>().clone();
+    // The bombers first; once they are down the zeppelin comes.
+    shoot_down_all(&mut app);
+    app.update();
+    let zeppelin = enemies(&mut app)[0];
+    let kind = |app: &App, e: Entity| app.world().get::<Enemy>(e).unwrap().kind;
+    assert_eq!(kind(&app, zeppelin), EnemyKind::Zeppelin);
+    let flight = app.world().get::<FlightGroup>(zeppelin).unwrap().id;
+    // A hit wakes it, whether it has seen the player or not.
+    app.world_mut().write_message(Hit {
+        projectile: Entity::PLACEHOLDER,
+        target: zeppelin,
+        point: Vec3::ZERO,
+        team: Team::Player,
+        weapon: Weapon::Gun,
+        damage: 1.0,
+    });
+    run_for(&mut app, FIRST_LAUNCH_DELAY + 0.5);
+    let fighters = |app: &mut App| {
+        app.world_mut()
+            .query::<(Entity, &Enemy, &FlightGroup, &Transform)>()
+            .iter(app.world())
+            .filter(|(_, e, ..)| e.kind != EnemyKind::Zeppelin)
+            .map(|(entity, _, group, tf)| (entity, group.escort, tf.translation))
+            .collect::<Vec<_>>()
+    };
+    let first = fighters(&mut app);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].1, Some(flight), "escorts its zeppelin");
+    let carrier_at = app.world().get::<Transform>(zeppelin).unwrap().translation;
+    assert!(
+        first[0].2.y < carrier_at.y - 0.5 * LAUNCH_DROP,
+        "drops from below the hull"
+    );
+    assert_eq!(
+        round(&app).enemies_left(&mission),
+        2,
+        "zeppelin and fighter"
+    );
+
+    // The next one 20 s later; then the hangar waits at two in the air.
+    run_for(&mut app, LAUNCH_INTERVAL);
+    assert_eq!(fighters(&mut app).len(), 2);
+    run_for(&mut app, LAUNCH_INTERVAL + 1.0);
+    assert_eq!(fighters(&mut app).len(), 2, "at most two at once");
+    assert_eq!(app.world().get::<Carrier>(zeppelin).unwrap().count, 2);
+
+    // One shot down: the replacement comes at once (the interval has
+    // passed), and the round counts all of them.
+    let down = fighters(&mut app)[0].0;
+    app.world_mut().write_message(Hit {
+        projectile: Entity::PLACEHOLDER,
+        target: down,
+        point: Vec3::ZERO,
+        team: Team::Player,
+        weapon: Weapon::Missile,
+        damage: 1_000.0,
+    });
+    run_for(&mut app, 0.2);
+    assert_eq!(fighters(&mut app).len(), 2);
+    assert_eq!(round(&app).enemies_left(&mission), 3);
+
+    // Down with everything: the burning zeppelin launches nothing more.
+    shoot_down_all(&mut app);
+    run_for(&mut app, LAUNCH_INTERVAL + 1.0);
+    assert!(fighters(&mut app).is_empty());
+    assert_eq!(round(&app).enemies_left(&mission), 0);
+}
+
+#[test]
+fn the_largest_round_counts_twelve_fighters_per_carrier() {
+    use crate::ai::MAX_LAUNCHES_PER_CARRIER;
+    let params = crate::game_state::DifficultyParams {
+        bomber_waves: 1,
+        zeppelins: 1,
+        zeppelin_fighters: 6,
+        ..default()
+    };
+    let mission = Mission::battle(Difficulty::Custom(params));
+    assert_eq!(MAX_LAUNCHES_PER_CARRIER, 12);
+    assert_eq!(mission.max_enemy_count(), mission.enemy_count() + 12);
+    let none = Mission::battle(Difficulty::Custom(crate::game_state::DifficultyParams {
+        zeppelin_fighters: 0,
+        ..params
+    }));
+    assert_eq!(none.max_enemy_count(), none.enemy_count());
+    assert_eq!(
+        Mission::battle(Difficulty::Insane).max_enemy_count(),
+        35 + 3 * 12
+    );
+    assert_eq!(
+        Mission::hunt(Difficulty::Insane).max_enemy_count(),
+        Mission::hunt(Difficulty::Insane).enemy_count()
+    );
+}
+
+#[test]
+fn bombers_and_wrecks_sound_bigger_than_fighters() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Custom(crate::game_state::DifficultyParams {
+            bomber_waves: 1,
+            bombers_per_wave: 3,
+            flight_size: 2,
+            zeppelins: 1,
+            zeppelin_fighters: 0,
+            ..default()
+        })),
+        false,
+    );
+    let cues = |app: &App, sound: Sound| {
+        app.world()
+            .resource::<Messages<SoundCue>>()
+            .iter_current_update_messages()
+            .filter(|c| c.sound == sound)
+            .count()
+    };
+    shoot_down_all(&mut app);
+    assert_eq!(cues(&app, Sound::BigExplosion), 3, "three bombers");
+    assert_eq!(cues(&app, Sound::Explosion), 2, "two escorts");
+    // The zeppelin: a big explosion when hit, another when the wreck lands.
+    app.update();
+    shoot_down_all(&mut app);
+    assert_eq!(cues(&app, Sound::BigExplosion), 1);
+    let mut impacts = 0;
+    for _ in 0..(60.0 / FRAME.as_secs_f32()) as u32 {
+        app.update();
+        impacts += cues(&app, Sound::WreckImpact);
+    }
+    assert_eq!(impacts, 1, "the wreck hits the ground once");
 }

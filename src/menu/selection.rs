@@ -71,11 +71,13 @@ pub enum CustomField {
     WaveInterval,
     CityLoss,
     Zeppelins,
+    /// Fighters a zeppelin keeps in the air at most.
+    ZeppelinFighters,
 }
 
 impl CustomField {
     /// In menu order, section by section.
-    pub const ALL: [CustomField; 15] = [
+    pub const ALL: [CustomField; 16] = [
         CustomField::Missiles,
         CustomField::LockTime,
         CustomField::Gun,
@@ -91,6 +93,7 @@ impl CustomField {
         CustomField::WaveInterval,
         CustomField::CityLoss,
         CustomField::Zeppelins,
+        CustomField::ZeppelinFighters,
     ];
 
     pub fn section(self) -> Section {
@@ -108,7 +111,8 @@ impl CustomField {
             | CustomField::BombersPerWave
             | CustomField::WaveInterval
             | CustomField::CityLoss
-            | CustomField::Zeppelins => Section::Tab(EnemyTab::Bombers),
+            | CustomField::Zeppelins
+            | CustomField::ZeppelinFighters => Section::Tab(EnemyTab::Bombers),
         }
     }
 
@@ -118,7 +122,7 @@ impl CustomField {
             // Battle's total comes from its waves (bombers plus escort).
             CustomField::Enemies => mode == MenuMode::Hunt,
             // The end boss comes only in Battle.
-            CustomField::Zeppelins => mode == MenuMode::Battle,
+            CustomField::Zeppelins | CustomField::ZeppelinFighters => mode == MenuMode::Battle,
             _ => true,
         }
     }
@@ -140,6 +144,7 @@ impl CustomField {
             CustomField::WaveInterval => "Interval",
             CustomField::CityLoss => "City loss",
             CustomField::Zeppelins => "Zeppelins",
+            CustomField::ZeppelinFighters => "Zeppelin fighters",
         }
     }
 
@@ -162,16 +167,17 @@ impl CustomField {
             CustomField::CityLoss => "loss",
             // A new key: the old "zeppelin" was a switch.
             CustomField::Zeppelins => "zeppelins",
+            CustomField::ZeppelinFighters => "hangar",
         }
     }
 
     /// Values offered, within the ranges the round accepts.
     fn steps(self) -> &'static [f32] {
         match self {
-            // Includes every level's count in every mode (e.g. 8, 16, 24).
+            // Includes every level's count in every mode (e.g. 9, 22, 34).
             CustomField::Missiles => &[
-                0., 2., 4., 6., 8., 10., 12., 14., 16., 20., 24., 28., 32., 36., 40., 50., 60.,
-                80., 100.,
+                0., 2., 4., 6., 8., 9., 10., 12., 14., 16., 18., 20., 22., 24., 28., 30., 32., 34.,
+                36., 40., 50., 60., 80., 100.,
             ],
             CustomField::Enemies => &[1., 2., 4., 6., 8., 10., 12., 16., 20., 24.],
             CustomField::FlightSize => &[1., 2., 3., 4., 5., 6.],
@@ -179,7 +185,7 @@ impl CustomField {
                 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2,
                 1.25, 1.3, 1.35, 1.4, 1.45, 1.5,
             ],
-            CustomField::EnemyAccuracy => &[0.25, 0.5, 0.7, 0.85, 1.0, 1.2, 1.5, 2.0],
+            CustomField::EnemyAccuracy => &[0.25, 0.5, 0.7, 0.9, 1.0, 1.2, 1.5, 2.0],
             // Index into PILOT_MIXES.
             CustomField::Pilots => &[0., 1., 2., 3.],
             CustomField::Attackers => &[1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12.],
@@ -194,6 +200,7 @@ impl CustomField {
             ],
             CustomField::CityLoss => &[0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6],
             CustomField::Zeppelins => &[0., 1., 2., 3.],
+            CustomField::ZeppelinFighters => &[0., 1., 2., 3., 4., 5., 6.],
             CustomField::GunAssist => &[0., 1.],
         }
     }
@@ -237,6 +244,7 @@ impl CustomField {
             CustomField::WaveInterval => params.wave_interval,
             CustomField::CityLoss => params.city_loss,
             CustomField::Zeppelins => params.zeppelins as f32,
+            CustomField::ZeppelinFighters => params.zeppelin_fighters as f32,
             CustomField::GunAssist => f32::from(u8::from(params.gun_assist)),
         }
     }
@@ -270,6 +278,7 @@ impl CustomField {
             CustomField::WaveInterval => params.wave_interval = value,
             CustomField::CityLoss => params.city_loss = value,
             CustomField::Zeppelins => params.zeppelins = value.round() as u32,
+            CustomField::ZeppelinFighters => params.zeppelin_fighters = value.round() as u32,
             CustomField::GunAssist => params.gun_assist = value > 0.5,
         }
     }
@@ -288,6 +297,9 @@ impl CustomField {
     }
 }
 
+/// Sound volumes offered (percent); 0 switches the sound off.
+pub const SOUND_STEPS: [u32; 5] = [0, 25, 50, 75, 100];
+
 /// The label of unlimited gun ammunition; the menu draws it as a symbol
 /// (the built-in font has only ASCII).
 pub const INFINITY: &str = "∞";
@@ -299,6 +311,7 @@ pub enum RowId {
     Difficulty,
     Custom(CustomField),
     Lighting,
+    Sound,
     /// The tab bar over the enemy values.
     Tabs,
     Start,
@@ -310,7 +323,7 @@ impl RowId {
         match self {
             RowId::Mode | RowId::Difficulty => Section::Top,
             RowId::Custom(field) => field.section(),
-            RowId::Lighting => Section::General,
+            RowId::Lighting | RowId::Sound => Section::General,
             RowId::Tabs => Section::TabBar,
             RowId::Start => Section::Bottom,
         }
@@ -387,6 +400,8 @@ pub struct MenuSelection {
     /// Custom starts from the level picked before).
     pub custom_edited: bool,
     pub lighting: Lighting,
+    /// Sound volume in percent, one of [`SOUND_STEPS`]; 0 is off.
+    pub sound: u32,
     /// The enemy tab last picked (see [`MenuSelection::active_tab`]).
     pub tab: EnemyTab,
 }
@@ -403,6 +418,8 @@ impl Default for MenuSelection {
             custom: Difficulty::Normal.params(),
             custom_edited: false,
             lighting: Lighting::Day,
+            // Near the sound's own default (0.8).
+            sound: 75,
             tab: EnemyTab::default(),
         }
     }
@@ -501,10 +518,12 @@ impl MenuSelection {
             rows.extend(fields(Section::Weapons));
             rows.extend(fields(Section::General));
             rows.push(self.lighting_row());
+            rows.push(self.sound_row());
             rows.push(self.tab_row());
             rows.extend(fields(Section::Tab(self.active_tab())));
         } else {
             rows.push(self.lighting_row());
+            rows.push(self.sound_row());
         }
         rows.push(Row {
             id: RowId::Start,
@@ -541,6 +560,45 @@ impl MenuSelection {
                 .position(|l| *l == self.lighting)
                 .unwrap_or(0),
         }
+    }
+
+    fn sound_row(&self) -> Row<RowId> {
+        Row {
+            id: RowId::Sound,
+            label: "Sound".into(),
+            choices: SOUND_STEPS
+                .iter()
+                .map(|&p| {
+                    Choice::new(if p == 0 {
+                        "Off".to_owned()
+                    } else {
+                        format!("{p}%")
+                    })
+                })
+                .collect(),
+            selected: SOUND_STEPS
+                .iter()
+                .position(|p| *p == self.sound)
+                .unwrap_or(0),
+        }
+    }
+
+    /// The sound settings this selection asks for (`None` leaves the
+    /// volume as it is when switched off).
+    pub fn sound_volume(&self) -> Option<f32> {
+        (self.sound > 0).then(|| self.sound as f32 / 100.0)
+    }
+
+    /// The volume step nearest to `volume` (0-1), never 0.
+    pub fn sound_step(volume: f32) -> u32 {
+        SOUND_STEPS[1..]
+            .iter()
+            .copied()
+            .min_by(|a, b| {
+                let d = |p: u32| (p as f32 / 100.0 - volume).abs();
+                d(*a).total_cmp(&d(*b))
+            })
+            .unwrap_or(75)
     }
 
     /// The tabs with the number of such enemies in the round; a tab the
@@ -611,6 +669,11 @@ impl MenuSelection {
                     self.lighting = *lighting;
                 }
             }
+            RowId::Sound => {
+                if let Some(sound) = SOUND_STEPS.get(index) {
+                    self.sound = *sound;
+                }
+            }
             RowId::Tabs => {
                 if let Some(tab) = EnemyTab::ALL.get(index).filter(|t| t.used_in(self.mode)) {
                     self.tab = *tab;
@@ -673,6 +736,7 @@ impl MenuSelection {
             format!("light={}", self.lighting.label().to_lowercase()),
             format!("edited={}", u8::from(self.custom_edited)),
             format!("tab={}", self.tab.key()),
+            format!("sound={}", self.sound),
         ];
         for field in CustomField::ALL {
             parts.push(format!("{}={}", field.key(), field.get(&self.custom)));
@@ -708,6 +772,11 @@ impl MenuSelection {
                     }
                 }
                 "edited" => selection.custom_edited = value == "1",
+                "sound" => {
+                    if let Some(sound) = value.parse().ok().filter(|p| SOUND_STEPS.contains(p)) {
+                        selection.sound = sound;
+                    }
+                }
                 "tab" => {
                     if let Some(tab) = EnemyTab::ALL.into_iter().find(|t| t.key() == value) {
                         selection.tab = tab;
@@ -732,7 +801,7 @@ impl MenuSelection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game_state::MAX_ZEPPELINS;
+    use crate::game_state::{MAX_ZEPPELIN_FIGHTERS, MAX_ZEPPELINS};
 
     #[test]
     fn default_is_normal_hunt_by_day() {
@@ -854,7 +923,10 @@ mod tests {
         let mut selection = MenuSelection::default();
         selection.select(RowId::Difficulty, 0); // Super Easy
         selection.select(RowId::Difficulty, CUSTOM_LEVEL);
-        assert_eq!(selection.custom, Difficulty::SuperEasy.params());
+        assert_eq!(
+            selection.custom,
+            Difficulty::SuperEasy.params_for(GameMode::Hunt)
+        );
         assert!(
             selection
                 .rows()
@@ -881,7 +953,10 @@ mod tests {
             panic!("custom expected");
         };
         assert_eq!(params.enemies, 6);
-        assert_eq!(params.missiles, Difficulty::SuperEasy.params().missiles);
+        assert_eq!(
+            params.missiles,
+            Difficulty::SuperEasy.params_for(GameMode::Hunt).missiles
+        );
     }
 
     #[test]
@@ -905,6 +980,7 @@ mod tests {
                 CustomField::WaveInterval => (60.0, 300.0),
                 CustomField::CityLoss => (0.1, 0.6),
                 CustomField::Zeppelins => (0.0, MAX_ZEPPELINS as f32),
+                CustomField::ZeppelinFighters => (0.0, MAX_ZEPPELIN_FIGHTERS as f32),
                 CustomField::GunAssist => (0.0, 1.0),
             };
             assert!(lo >= min && hi <= max, "{field:?}");
@@ -964,6 +1040,28 @@ mod tests {
         };
         assert_eq!(params.zeppelins, 3);
         assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+
+        // And how many fighters each keeps in the air.
+        selection.select(RowId::Custom(CustomField::ZeppelinFighters), 2);
+        let Difficulty::Custom(params) = selection.settings().difficulty else {
+            panic!("custom expected");
+        };
+        assert_eq!(params.zeppelin_fighters, 2);
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+    }
+
+    #[test]
+    fn sound_steps_are_stored_and_read_back() {
+        let mut selection = MenuSelection::default();
+        assert_eq!(selection.sound_volume(), Some(0.75));
+        selection.select(RowId::Sound, 0);
+        assert_eq!(selection.sound_volume(), None, "off");
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+        selection.select(RowId::Sound, 4);
+        assert_eq!(selection.sound_volume(), Some(1.0));
+        assert_eq!(MenuSelection::from_line("sound=33").sound, 75, "not a step");
+        assert_eq!(MenuSelection::sound_step(0.0), 25, "never off");
+        assert_eq!(MenuSelection::sound_step(0.8), 75);
     }
 
     #[test]
@@ -1058,7 +1156,7 @@ mod tests {
     #[test]
     fn rows_come_in_sections_with_only_the_open_tab() {
         let mut selection = MenuSelection::default();
-        // Without Custom: mode, level, light, start.
+        // Without Custom: mode, level, light, sound, start.
         let ids = |s: &MenuSelection| s.rows().iter().map(|r| r.id).collect::<Vec<_>>();
         assert_eq!(
             ids(&selection),
@@ -1066,6 +1164,7 @@ mod tests {
                 RowId::Mode,
                 RowId::Difficulty,
                 RowId::Lighting,
+                RowId::Sound,
                 RowId::Start
             ]
         );
@@ -1080,9 +1179,9 @@ mod tests {
                 [
                     vec![Section::Top; 2],
                     vec![Section::Weapons; 4],
-                    vec![Section::General; 3],
+                    vec![Section::General; 4],
                     vec![Section::TabBar],
-                    vec![Section::Tab(tab); if tab == EnemyTab::Fighters { 3 } else { 5 }],
+                    vec![Section::Tab(tab); if tab == EnemyTab::Fighters { 3 } else { 6 }],
                     vec![Section::Bottom],
                 ]
                 .concat(),

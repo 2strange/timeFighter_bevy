@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use super::GameMode;
+use super::{GameMode, Mission};
 use crate::world::Lighting;
 
 /// The player's choices. A round reads them when it starts, so changes
@@ -20,6 +20,9 @@ pub struct GameSettings {
 
 /// Most zeppelins a Battle sends.
 pub const MAX_ZEPPELINS: u32 = 3;
+
+/// Most fighters a zeppelin keeps in the air at once.
+pub const MAX_ZEPPELIN_FIGHTERS: u32 = 6;
 
 /// How hard a round is.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -56,31 +59,37 @@ impl Difficulty {
     }
 
     /// The level's numbers for `mode`: the same table, with the mode's own
-    /// missile count. Protect fights bombers that take two missiles each;
-    /// Super Easy leaves a reserve (24 for 16 needed), Easy has just
-    /// enough, Normal and up leave about four bombers for the gun. A custom level keeps its own
-    /// single missile count in every mode.
+    /// missile count. Missiles follow what the mode's waves need (a
+    /// fighter one, a bomber two, a zeppelin nine; carrier fighters are gun
+    /// work), times the level's [`missile_factor`](Self::missile_factor):
+    /// missiles go astray or off by accident. Insane keeps its tight
+    /// counts. A custom level keeps its own single count in every mode.
     pub fn params_for(&self, mode: GameMode) -> DifficultyParams {
         let params = self.params();
-        let missiles = match (mode, self) {
-            (_, Difficulty::Custom(_)) | (GameMode::Hunt, _) => params.missiles,
-            (GameMode::Protect, Difficulty::SuperEasy) => 24,
-            (GameMode::Protect, Difficulty::Easy) => 16,
-            (GameMode::Protect, Difficulty::Normal) => 16,
-            (GameMode::Protect, Difficulty::Hard) => 12,
-            (GameMode::Protect, Difficulty::Insane) => 12,
-            // Battle: bombers take two missiles, fighters one, a zeppelin
-            // about nine. Super Easy has a reserve (24 for 20 needed), Easy
-            // just enough (20), Normal stays doable (32 for 30 + 9), Hard and
-            // Insane leave much to the gun (20 for 36 + 9; 36 for 48 + 3 × 9,
-            // eight more for each further zeppelin).
-            (GameMode::Battle, Difficulty::SuperEasy) => 24,
-            (GameMode::Battle, Difficulty::Easy) => 20,
-            (GameMode::Battle, Difficulty::Normal) => 32,
-            (GameMode::Battle, Difficulty::Hard) => 20,
-            (GameMode::Battle, Difficulty::Insane) => 36,
+        let missiles = match (self, mode) {
+            (Difficulty::Custom(_), _) => params.missiles,
+            (Difficulty::Insane, GameMode::Hunt) => params.missiles,
+            (Difficulty::Insane, GameMode::Protect) => 12,
+            (Difficulty::Insane, GameMode::Battle) => 36,
+            (level, mode) => {
+                let needed = Mission::for_mode(mode, *level).missiles_needed();
+                // A hair under, so an exact product does not round up.
+                (needed as f32 * level.missile_factor() - 1e-3).ceil() as u32
+            }
         };
         DifficultyParams { missiles, ..params }
+    }
+
+    /// Missiles on board per missile the waves need (Insane and Custom
+    /// count theirs).
+    pub fn missile_factor(&self) -> f32 {
+        match self {
+            Difficulty::SuperEasy => 2.0,
+            Difficulty::Easy => 1.5,
+            Difficulty::Normal => 0.9,
+            Difficulty::Hard => 0.75,
+            Difficulty::Insane | Difficulty::Custom(_) => 1.0,
+        }
     }
 
     /// The numbers behind the level. Change these to tune.
@@ -144,13 +153,14 @@ impl Difficulty {
                 flight_size: 4,
                 pilots: PilotMix::Veterans,
                 enemy_speed: 1.0,
-                enemy_accuracy: 1.2,
-                gun_ammo: 500,
+                enemy_accuracy: 1.0,
+                gun_ammo: 1_000,
                 attackers: 4,
                 lock_time: 1.0,
                 bomber_waves: 4,
                 wave_interval: 90.0,
                 zeppelins: 3,
+                zeppelin_fighters: 6,
                 ..base
             },
             Difficulty::Custom(params) => params,
@@ -201,9 +211,12 @@ pub struct DifficultyParams {
     pub wave_interval: f32,
     /// The round is lost once this share of the city centre is destroyed.
     pub city_loss: f32,
-    /// Battle ends with this many zeppelins (0–3), each in its own last
-    /// wave with an escort, from different sides.
+    /// Battle sends this many zeppelins (0–3), each alone in its own wave,
+    /// between the bomber waves and from other sides.
     pub zeppelins: u32,
+    /// A zeppelin that has spotted the player launches a fighter every
+    /// 20 s, keeping at most this many (0–6) in the air.
+    pub zeppelin_fighters: u32,
     /// The gun's lead circle shows where to aim.
     pub gun_assist: bool,
 }
@@ -217,7 +230,7 @@ impl Default for DifficultyParams {
             flight_size: 2,
             pilots: PilotMix::Mixed,
             enemy_speed: 0.75,
-            enemy_accuracy: 0.85,
+            enemy_accuracy: 0.9,
             unlimited_gun: false,
             gun_ammo: 2_000,
             attackers: 2,
@@ -227,6 +240,7 @@ impl Default for DifficultyParams {
             wave_interval: 110.0,
             city_loss: 0.3,
             zeppelins: 1,
+            zeppelin_fighters: 5,
             gun_assist: false,
         }
     }
@@ -247,6 +261,7 @@ impl DifficultyParams {
             enemy_accuracy: factor(self.enemy_accuracy, 0.1, 3.0),
             attackers: self.attackers.clamp(1, 12),
             zeppelins: self.zeppelins.min(MAX_ZEPPELINS),
+            zeppelin_fighters: self.zeppelin_fighters.min(MAX_ZEPPELIN_FIGHTERS),
             bomber_waves: self.bomber_waves.clamp(1, 12),
             bombers_per_wave: self.bombers_per_wave.clamp(1, 8),
             wave_interval: if self.wave_interval.is_finite() {

@@ -1,11 +1,27 @@
-//! Sound hooks. No playback yet: gameplay messages are translated into
-//! [`SoundCue`]s, so the later audio player only has to read those.
+//! Sound. Gameplay messages become [`SoundCue`]s (headless hooks); the
+//! mixer ([`mix`]) turns cues and the game's state into the loops and
+//! one-shots that should sound now; the player ([`playback`]) plays them.
 
-use bevy::prelude::*;
+pub mod mix;
+#[cfg(target_arch = "wasm32")]
+mod playback;
+#[cfg(test)]
+mod tests;
+
+use bevy::{platform::collections::HashMap, prelude::*};
+
+pub use mix::{
+    AudioUnlocked, Clip, LoopMix, MAX_BOMBER_VOICES, MAX_ZEPPELIN_VOICES, OneShot,
+    SOUND_TOGGLE_KEY, SoundMix, SoundMixPlugin, SoundSettings, Voice,
+};
 
 use crate::{
-    combat::{CombatSystems, Destroyed, Hit, LockOn, LockState, ShotFired, Team, Weapon},
-    flight::PlayerAircraft,
+    ai::{Enemy, EnemyKind},
+    combat::{
+        BombImpact, CombatSystems, Destroyed, DryFire, GoingDown, Hit, LockOn, LockState,
+        ShotFired, Team, Weapon,
+    },
+    flight::{KeyHelpAppExt, KeyHelpSection, PlayerAircraft},
     game_state::{Outcome, Round, RoundPhase, RoundSystems},
 };
 
@@ -30,29 +46,89 @@ pub enum Sound {
     HitEnemy,
     /// Player was hit.
     HitPlayer,
+    /// A fighter blows up.
     Explosion,
+    /// A bomber, a zeppelin or the player's jet blows up.
+    BigExplosion,
+    /// A burning wreck hits the ground.
+    WreckImpact,
+    BombImpact,
+    /// The player pulled the trigger on an empty gun ...
+    GunEmpty,
+    /// ... or asked for a missile with none left.
+    MissileEmpty,
     Victory,
     Defeat,
 }
 
 pub struct SoundHooksPlugin;
 
-impl Plugin for SoundHooksPlugin {
+/// Sound for the game: hooks, mixer, and playback where the build has it.
+pub struct GameAudioPlugin;
+
+impl Plugin for GameAudioPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<SoundCue>().add_systems(
-            Update,
-            (
-                combat_cues.after(CombatSystems::Resolve),
-                round_cues.after(RoundSystems::Track),
-            ),
-        );
+        app.add_key_help(KeyHelpSection::Game, "N", "sound on / off")
+            .add_plugins((SoundHooksPlugin, SoundMixPlugin));
+        #[cfg(target_arch = "wasm32")]
+        app.add_plugins(playback::SoundPlaybackPlugin);
     }
 }
 
+impl Plugin for SoundHooksPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<SoundCue>()
+            .init_resource::<KnownEnemies>()
+            // The combat plugin registers them too.
+            .add_message::<BombImpact>()
+            .add_message::<DryFire>()
+            .add_systems(
+                Update,
+                (
+                    // After the round spawned its waves, so an enemy downed in
+                    // its first frame is known too.
+                    (track_enemies, combat_cues)
+                        .chain()
+                        .after(CombatSystems::Resolve)
+                        .after(RoundSystems::Track),
+                    round_cues.after(RoundSystems::Track),
+                ),
+            );
+    }
+}
+
+/// What each enemy is and where it was last, so its explosion still
+/// knows its size when the entity is already gone.
+#[derive(Resource, Default)]
+struct KnownEnemies {
+    kinds: HashMap<Entity, EnemyKind>,
+    /// Wrecks on their way down, at their last position.
+    falling: HashMap<Entity, Vec3>,
+}
+
+fn track_enemies(
+    mut known: ResMut<KnownEnemies>,
+    added: Query<(Entity, &Enemy), Added<Enemy>>,
+    falling: Query<(Entity, &Transform), With<GoingDown>>,
+) {
+    for (entity, enemy) in &added {
+        known.kinds.insert(entity, enemy.kind);
+    }
+    for (entity, transform) in &falling {
+        known.falling.insert(entity, transform.translation);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn combat_cues(
     mut shots: MessageReader<ShotFired>,
     mut hits: MessageReader<Hit>,
     mut destroyed: MessageReader<Destroyed>,
+    mut bombs: MessageReader<BombImpact>,
+    mut dry: MessageReader<DryFire>,
+    jets: Query<(), With<PlayerAircraft>>,
+    mut known: ResMut<KnownEnemies>,
+    alive: Query<(), With<Enemy>>,
     lock: Query<&LockOn, (With<PlayerAircraft>, Changed<LockOn>)>,
     mut last_lock: Local<Option<std::mem::Discriminant<LockState>>>,
     mut cues: MessageWriter<SoundCue>,
@@ -79,11 +155,52 @@ fn combat_cues(
         });
     }
     for event in destroyed.read() {
+        let big = match event.team {
+            Team::Player => true,
+            Team::Enemy => known
+                .kinds
+                .get(&event.entity)
+                .is_some_and(|kind| kind.is_bomber()),
+        };
         cues.write(SoundCue {
-            sound: Sound::Explosion,
+            sound: if big {
+                Sound::BigExplosion
+            } else {
+                Sound::Explosion
+            },
             position: Some(event.position),
         });
     }
+    for event in dry.read().filter(|d| jets.contains(d.shooter)) {
+        cues.write(SoundCue {
+            sound: match event.weapon {
+                Weapon::Gun => Sound::GunEmpty,
+                Weapon::Missile => Sound::MissileEmpty,
+            },
+            position: None,
+        });
+    }
+    for bomb in bombs.read() {
+        cues.write(SoundCue {
+            sound: Sound::BombImpact,
+            position: Some(bomb.point),
+        });
+    }
+    // A wreck that is gone has hit the ground.
+    let landed: Vec<(Entity, Vec3)> = known
+        .falling
+        .iter()
+        .filter(|(entity, _)| !alive.contains(**entity))
+        .map(|(entity, at)| (*entity, *at))
+        .collect();
+    for (entity, at) in landed {
+        known.falling.remove(&entity);
+        cues.write(SoundCue {
+            sound: Sound::WreckImpact,
+            position: Some(at),
+        });
+    }
+    known.kinds.retain(|entity, _| alive.contains(*entity));
     // Lock tones only when the kind of lock state changes, not every
     // frame of tracking progress.
     if let Ok(lock) = lock.single() {

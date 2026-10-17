@@ -16,6 +16,7 @@ mod effects;
 pub mod hits;
 mod lock;
 mod rng;
+pub mod smoke;
 #[cfg(test)]
 mod tests;
 mod turrets;
@@ -174,6 +175,15 @@ pub struct ShotFired {
     pub position: Vec3,
 }
 
+/// The trigger was pulled with nothing left to fire: once per missile
+/// request, every frame the gun trigger is held on an empty gun. A sound
+/// hook.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct DryFire {
+    pub shooter: Entity,
+    pub weapon: Weapon,
+}
+
 /// Combat stages within a frame, all after the flight simulation.
 /// AI runs before [`CombatSystems::Aim`] so locks and shots see the
 /// enemies' new positions.
@@ -222,6 +232,7 @@ impl Plugin for CombatPlugin {
             .add_message::<Hit>()
             .add_message::<Destroyed>()
             .add_message::<ShotFired>()
+            .add_message::<DryFire>()
             // Registered by the physics plugin too; here so the combat
             // systems also run without it.
             .add_message::<ProjectileHit>()
@@ -280,8 +291,12 @@ impl Plugin for CombatPlugin {
                     (effects::spawn_effects, effects::age_effects)
                         .chain()
                         .after(CombatSystems::Resolve),
+                    (smoke::emit_smoke, smoke::age_smoke)
+                        .chain()
+                        .after(CombatSystems::Resolve),
                 ),
             )
+            .add_systems(Startup, smoke::spawn_pool)
             // Crashes are handled right where the physics reports them, so
             // the frame that shows the impact shows the explosion, not a
             // jet half inside a building (and enemies vanish just as fast).

@@ -6,7 +6,15 @@
       "length": 19.1,
       "forward": "-Z",
       "up": "+Y",
-      "pose": "last"
+      "pose": "last",
+      "textures": [
+        {
+          "material": "^material_7$",
+          "image": "decals/code-monkey.svg",
+          "size": 256,
+          "trim": true
+        }
+      ]
     },
     {
       "name": "mig_29",

@@ -8,6 +8,7 @@
 //! [`AiPlugin`] runs headless; [`EnemyVisualsPlugin`] adds the meshes.
 
 mod bomber;
+mod carrier;
 mod obstacles;
 mod tactics;
 #[cfg(test)]
@@ -19,6 +20,10 @@ use std::f32::consts::PI;
 use bevy::prelude::*;
 
 pub use bomber::{BomberPhase, BomberPilot, bomber_bundle, zeppelin_parts};
+pub use carrier::{
+    CARRIER_SPOT_RANGE, Carrier, CarrierSpec, FIRST_LAUNCH_DELAY, FighterLaunched, LAUNCH_DROP,
+    LAUNCH_INTERVAL, MAX_LAUNCHES_PER_CARRIER,
+};
 pub use obstacles::ObstacleMap;
 pub use tactics::{AttackSlots, FlightGroup, HOLDING_RADIUS, sees};
 pub use visuals::EnemyVisualsPlugin;
@@ -519,6 +524,7 @@ impl Plugin for AiPlugin {
             // The city's damage plugin registers them too.
             .add_message::<BuildingDestroyed>()
             .add_message::<RepairCity>()
+            .add_message::<FighterLaunched>()
             .init_resource::<ObstacleMap>()
             .configure_sets(
                 Update,
@@ -533,6 +539,7 @@ impl Plugin for AiPlugin {
                     obstacles::rebuild_obstacles,
                     tactics::assign_attack_slots,
                     (fly_enemies, bomber::fly_bombers, bomber::fly_wrecks),
+                    carrier::launch_fighters,
                 )
                     .chain()
                     .in_set(AiSystems),

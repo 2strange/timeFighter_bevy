@@ -1,0 +1,8 @@
+[
+  { "mode": "hunt", "level": "normal", "score": 2550, "duration_s": 140, "breakdown": {"kills":{"bf109k4":{"gun":2,"missile":1,"crash":2},"me309":{"gun":2,"missile":2,"crash":1}},"zeppelins_outside":0,"missiles_left":0,"city_percent":null,"victory":true} },
+  { "mode": "hunt", "level": "super-easy", "score": 200, "duration_s": 40, "breakdown": {"kills":{"bf109k4":{"gun":1,"crash":1},"me309":{"missile":1}},"zeppelins_outside":0,"missiles_left":3,"city_percent":null,"victory":false} },
+  { "mode": "protect", "level": "easy", "score": 3638, "duration_s": 200, "breakdown": {"kills":{"he177":{"gun":2,"missile":2,"crash":3},"ju390":{"missile":1}},"zeppelins_outside":0,"missiles_left":6,"city_percent":70,"victory":true} },
+  { "mode": "protect", "level": "hard", "score": 2400, "duration_s": 90, "breakdown": {"kills":{"he177":{"gun":2,"missile":1,"crash":2},"ju390":{"missile":1}},"zeppelins_outside":0,"missiles_left":2,"city_percent":75,"victory":false} },
+  { "mode": "battle", "level": "normal", "score": 8950, "duration_s": 400, "breakdown": {"kills":{"bf109k4":{"gun":1,"missile":1,"crash":1},"me309":{"gun":1,"missile":1,"crash":1},"he177":{"gun":4,"missile":3,"crash":4},"ju390":{"missile":1},"zeppelin":{"missile":1}},"zeppelins_outside":1,"missiles_left":5,"city_percent":80,"victory":true} },
+  { "mode": "battle", "level": "insane", "score": 35125, "duration_s": 900, "breakdown": {"kills":{"bf109k4":{"gun":3,"missile":2,"crash":3},"me309":{"gun":3,"missile":3,"crash":2},"he177":{"gun":5,"missile":5,"crash":5},"ju390":{"missile":1},"zeppelin":{"missile":3}},"zeppelins_outside":1,"missiles_left":1,"city_percent":85,"victory":true} }
+]

@@ -7,6 +7,9 @@
     <meta name="description" content="Free arcade dogfighter in your browser: one F-14 Tomcat, thrown into a parallel timeline, against waves of propeller fighters and bombers over a living city." />
     <link rel="canonical" href="https://timefighter.trendgegner.com/" />
     <meta name="theme-color" content="#161421" />
+    <!-- Online hall of fame: the leaderboard worker's address (leaderboard/README.md),
+         e.g. https://timefighter-api.trendgegner.com. Empty: scores stay on this device. -->
+    <meta name="tf-leaderboard" content="" />
     <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png" />
     <!-- Share preview (WhatsApp, Signal, Telegram, Slack, ...): rendered by tools/render-aircraft. -->
@@ -84,6 +87,8 @@
         margin: 0 0 24px; max-width: 62ch; font-size: 16px; color: var(--ink);
         border-left: 2px solid var(--amber); padding-left: 14px;
       }
+      .story a { color: var(--hud); white-space: nowrap; text-underline-offset: 3px; }
+      .story a:hover, .story a:focus-visible { color: var(--amber); }
 
       h2 {
         margin: 0 0 10px; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
@@ -97,7 +102,9 @@
         color: var(--ink); background: rgba(255, 255, 255, 0.03); border: 1px solid var(--hud-dim);
         font: inherit;
       }
-      .mode img { width: 100%; aspect-ratio: 2 / 1; object-fit: contain; display: block; }
+      /* height: auto, or the img height attribute fixes the height and the
+         picture turns square in a narrow card. */
+      .mode img { width: 100%; height: auto; aspect-ratio: 2 / 1; object-fit: contain; display: block; }
       /* Name on its own line, the one-liner below. */
       .mode div { display: flex; flex-direction: column; gap: 4px; }
       .mode strong {
@@ -129,6 +136,19 @@
       footer { margin-top: 14px; display: flex; gap: 18px; justify-content: center; font-size: 12px; }
       footer a { color: var(--hud-dim); }
 
+      /* Hall of fame: closed by default, one list at a time. */
+      .hof { margin: 0 0 18px; border-top: 1px solid var(--hud-dim); padding-top: 10px; }
+      .hof summary {
+        cursor: pointer; font-family: "Orbitron", system-ui, sans-serif; font-weight: 600;
+        font-size: 12px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--hud-dim);
+      }
+      .hof summary span { color: var(--hud); letter-spacing: 0.12em; margin-left: 8px; }
+      .hof .segments { margin: 10px 0 6px; }
+      .hof .segment { font-size: 12px; padding: 4px 10px; }
+      .hof ol { margin: 0; padding-left: 28px; max-width: 360px; font-variant-numeric: tabular-nums; }
+      .hof li span:last-child { float: right; color: var(--amber); }
+      .hof p { margin: 4px 0 0; font-size: 13px; color: var(--hud-dim); }
+
       @media (max-width: 640px) {
         .card { padding: 20px 16px 16px; }
         .modes { grid-template-columns: 1fr; }
@@ -145,12 +165,9 @@
         <h1 class="logo"><span class="time">TIME</span><span class="fighter">FIGHTER</span></h1>
         <p class="tagline">Arcade air combat · another timeline</p>
         <p class="story">
-          A routine training sortie from your home airbase. A storm front that no
-          forecast saw coming, one blinding flash of lightning, and your jet
-          breaks out of the clouds into a parallel timeline. The city below looks
-          familiar, but your airbase is gone, the radio is only static, and a wave
-          of propeller bombers is heading for the rooftops. You are the only thing
-          in the sky that can stop them.
+          A routine sortie, one flash of lightning, and your jet breaks into a parallel
+          timeline. Propeller bombers are heading for the city, and you are the only one who
+          can stop them. <a href="story.html">Read the story</a>
         </p>
 
         <section>
@@ -192,18 +209,59 @@
           </section>
         </div>
 
+        <details class="hof" id="hof">
+          <summary>Hall of fame<span id="hof-title"></span></summary>
+          <div class="segments" role="group" aria-label="List">
+            <button class="segment" type="button" data-board="local">This device</button>
+            <button class="segment" type="button" data-board="all">Online</button>
+            <button class="segment" type="button" data-board="week">This week</button>
+          </div>
+          <ol id="hof-list"></ol>
+          <p id="hof-note"></p>
+        </details>
+
         <button id="play" type="button" disabled>LOADING</button>
         <div class="status" id="status" aria-live="polite">Loading the game…</div>
 
         <footer>
+          <a href="story.html">Story</a>
           <a href="showroom.html">Aircraft showroom</a>
           <a href="credits.html">Credits</a>
         </footer>
       </main>
     </div>
 
+    <script>
+      // Browsers keep an audio context silent until the page gets a click or
+      // a key. The game opens its context while starting, which may count as
+      // too late (Safari): wake every context on the next click or key.
+      (() => {
+        const Native = window.AudioContext || window.webkitAudioContext;
+        if (!Native) return;
+        const contexts = [];
+        const Tracked = new Proxy(Native, {
+          construct(target, args) {
+            const context = new target(...args);
+            contexts.push(context);
+            return context;
+          },
+        });
+        window.AudioContext = Tracked;
+        window.webkitAudioContext = Tracked;
+        const wake = () => {
+          for (const context of contexts) {
+            if (context.state === 'suspended') context.resume().catch(() => {});
+          }
+        };
+        for (const type of ['pointerdown', 'keydown', 'touchend']) {
+          window.addEventListener(type, wake, { capture: true });
+        }
+      })();
+    </script>
+
     <script type="module">
       import init from './timefighter.js';
+      import { hallOfFame, pumpOutbox } from './leaderboard.js';
 
       const canvas = document.getElementById('game');
       const start = document.getElementById('start');
@@ -287,7 +345,13 @@
           button.setAttribute('aria-pressed', String(button.dataset.light === light));
         }
         document.body.classList.toggle('evening', light === 'evening');
+        const levelButton = document.querySelector(`[data-level="${level}"]`);
+        const modeLabel = mode[0].toUpperCase() + mode.slice(1);
+        showBoard(mode, LEVEL_NAMES[level], `${modeLabel} · ${levelButton.textContent.replace('…', '')}`);
       }
+      const showBoard = hallOfFame();
+      // Scores the game queues go online from here, also during play.
+      pumpOutbox();
       function pick(groupId, attribute, apply) {
         document.getElementById(groupId).addEventListener('click', (event) => {
           const button = event.target.closest(`[data-${attribute}]`);

@@ -2,7 +2,10 @@
 
 use bevy::prelude::*;
 
-use super::{Rung, TargetMarker, edge_point, format_time, gun_target, outcome_title};
+use super::{
+    ALERT, HUD, HealthBar, MissileBox, Rung, SoundSwitch, SpeakerStrike, SpeakerWave, TRACKING,
+    TargetMarker, edge_point, format_time, gun_target, health_tint, outcome_title, selected_target,
+};
 use crate::{GamePlugin, ai::Enemy, test_support::headless_app};
 
 #[test]
@@ -113,4 +116,115 @@ fn the_ladder_has_a_rung_every_ten_degrees() {
         .collect();
     pitches.sort();
     assert_eq!(pitches, (-90..=90).step_by(10).collect::<Vec<_>>());
+}
+
+#[test]
+fn the_selected_target_is_the_tracked_or_locked_one() {
+    use crate::combat::LockState;
+    let target = Entity::from_raw_u32(7).unwrap();
+    assert_eq!(selected_target(LockState::Searching), None);
+    assert_eq!(
+        selected_target(LockState::Tracking {
+            target,
+            progress: 0.2
+        }),
+        Some(target)
+    );
+    assert_eq!(selected_target(LockState::Locked { target }), Some(target));
+    // The bar turns amber below a half, red below a quarter.
+    assert_eq!(health_tint(1.0), HUD);
+    assert_eq!(health_tint(0.4), TRACKING);
+    assert_eq!(health_tint(0.1), ALERT);
+}
+
+#[test]
+fn every_marker_carries_a_health_bar_and_own_missiles_get_a_box() {
+    use crate::combat::{CombatConfig, Missile, Munition, Team, Weapon};
+    let mut app = headless_app(GamePlugin);
+    for _ in 0..5 {
+        app.update();
+    }
+    let markers: Vec<Entity> = app
+        .world_mut()
+        .query_filtered::<Entity, With<TargetMarker>>()
+        .iter(app.world())
+        .collect();
+    assert!(!markers.is_empty());
+    for marker in markers {
+        let bars = app
+            .world()
+            .get::<Children>(marker)
+            .unwrap()
+            .iter()
+            .filter(|c| app.world().get::<HealthBar>(*c).is_some())
+            .count();
+        assert_eq!(bars, 1);
+    }
+
+    let missile = |team| {
+        (
+            Munition {
+                shooter: Entity::PLACEHOLDER,
+                team,
+                weapon: Weapon::Missile,
+                damage: 0.0,
+                fuse_radius: 0.0,
+                last_position: Vec3::new(0.0, 3_000.0, 0.0),
+            },
+            Missile {
+                spec: CombatConfig::default().missile,
+                target: None,
+                speed: 0.0,
+            },
+            Transform::from_xyz(0.0, 3_000.0, 0.0),
+        )
+    };
+    let own = app.world_mut().spawn(missile(Team::Player)).id();
+    app.world_mut().spawn(missile(Team::Enemy));
+    app.update();
+    app.update();
+    let boxes = |app: &mut App| {
+        app.world_mut()
+            .query::<&MissileBox>()
+            .iter(app.world())
+            .map(|b| b.missile)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(boxes(&mut app), vec![own], "only the player's missile");
+    app.world_mut().despawn(own);
+    app.update();
+    app.update();
+    assert!(boxes(&mut app).is_empty(), "gone with its missile");
+}
+
+#[test]
+fn the_speaker_top_left_shows_whether_there_is_sound() {
+    let mut app = headless_app(GamePlugin);
+    app.update();
+    let count = |app: &mut App| {
+        app.world_mut()
+            .query::<&SoundSwitch>()
+            .iter(app.world())
+            .count()
+    };
+    assert_eq!(count(&mut app), 1);
+    let shown = |app: &mut App| {
+        let waves = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<SpeakerWave>>()
+            .iter(app.world())
+            .all(|v| *v != Visibility::Hidden);
+        let strike = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<SpeakerStrike>>()
+            .iter(app.world())
+            .all(|v| *v != Visibility::Hidden);
+        (waves, strike)
+    };
+    assert_eq!(shown(&mut app), (true, false), "on: waves, no line");
+    app.world_mut()
+        .resource_mut::<crate::audio::SoundSettings>()
+        .enabled = false;
+    app.update();
+    assert_eq!(shown(&mut app), (false, true), "off: struck through");
 }

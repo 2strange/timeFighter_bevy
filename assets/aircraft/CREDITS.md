@@ -2,7 +2,7 @@
 
 The models in this folder are based on the following works:
 
-- **f14_tomcat.glb**: "Low poly F14 Tomcat" (https://sketchfab.com/3d-models/low-poly-f14-tomcat-e99d03987b574e80971c1c8cc2b75925) by SIpriv (https://sketchfab.com/S1Priv), licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/). Rescaled, reoriented and recentred.
+- **f14_tomcat.glb**: "Low poly F14 Tomcat" (https://sketchfab.com/3d-models/low-poly-f14-tomcat-e99d03987b574e80971c1c8cc2b75925) by SIpriv (https://sketchfab.com/S1Priv), licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/). Rescaled, reoriented and recentred; emblem replaced.
 - **mig_29.glb**: "Low poly Mig 29" (https://sketchfab.com/3d-models/low-poly-mig-29-c0f08d656dae4214b82b8647614f3ec4) by SIpriv (https://sketchfab.com/S1Priv), licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/). Rescaled, reoriented and recentred.
 - **bf109k4.glb**: "Messerschmitt Bf-109 K4 (low poly)" (https://sketchfab.com/3d-models/messerschmitt-bf-109-k4-low-poly-53ec8c75306340d49d319a65a2e733a1) by Götz von Berlichingen (https://sketchfab.com/vonBerlichingen), licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/). Rescaled, reoriented and recentred.
 - **me309.glb**: "Messerschmitt Me-309 (low poly)" (https://sketchfab.com/3d-models/messerschmitt-me-309-low-poly-f2eafa09a4364832b6d9a3c67ac5d866) by Götz von Berlichingen (https://sketchfab.com/vonBerlichingen), licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/). Rescaled, reoriented and recentred.
