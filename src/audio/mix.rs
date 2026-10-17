@@ -35,11 +35,16 @@ const AUDIBLE: f32 = 0.02;
 const GUN_HOLD: f32 = 0.12;
 /// Enemy gun bursts are heard at most this often (s) ...
 const ENEMY_GUN_INTERVAL: f32 = 0.25;
+/// A missile hit that leaves its target flying bursts at this volume (a
+/// kill: 1).
+const MISSILE_HIT_VOLUME: f32 = 0.7;
 /// An empty gun clicks at most this often while the trigger is held (s).
 const GUN_EMPTY_INTERVAL: f32 = 0.3;
-/// The search tone's volume once the missiles are gone: it still helps to
-/// aim the gun, quieter.
-const EMPTY_SEARCH_VOLUME: f32 = 0.7;
+/// Once the missiles are gone a target coming into the cone gets one
+/// short beep of the search tone at this share of its volume ...
+const SPOTTED_BEEP_VOLUME: f32 = 0.7;
+/// ... and this long: the first beep of the recording (s).
+const SPOTTED_BEEP_LENGTH: f32 = 0.1;
 /// ... and hits on the player's jet (a volley stays a rattle, not a mush),
 /// each a little higher or lower than the last.
 pub const PLAYER_HIT_INTERVAL: f32 = 0.07;
@@ -67,10 +72,20 @@ pub enum Clip {
     PlayerHit,
     GunEmpty,
     MissileEmpty,
+    /// One beep of the search tone.
+    SearchBeep,
 }
 
 impl Clip {
-    pub const ALL: [Clip; 18] = [
+    /// Plays at most this long (s); `None` plays the whole file.
+    pub fn max_length(self) -> Option<f32> {
+        match self {
+            Clip::SearchBeep => Some(SPOTTED_BEEP_LENGTH),
+            _ => None,
+        }
+    }
+
+    pub const ALL: [Clip; 19] = [
         Clip::Engine,
         Clip::Afterburner,
         Clip::Gun,
@@ -89,6 +104,7 @@ impl Clip {
         Clip::PlayerHit,
         Clip::GunEmpty,
         Clip::MissileEmpty,
+        Clip::SearchBeep,
     ];
 
     /// Asset path. Short loops are WAV: compressed loops click at the seam.
@@ -112,6 +128,7 @@ impl Clip {
             Clip::PlayerHit => "audio/player_hit.ogg",
             Clip::GunEmpty => "audio/gun_empty.ogg",
             Clip::MissileEmpty => "audio/missile_empty.ogg",
+            Clip::SearchBeep => "audio/lock_search_double.wav",
         }
     }
 }
@@ -256,6 +273,8 @@ struct MixState {
     enemy_gun_rest: f32,
     player_hit_rest: f32,
     gun_empty_rest: f32,
+    /// The target in the seeker last frame.
+    spotted: Option<Entity>,
     /// Alternates the two small explosions.
     explosions: u32,
     player_hits: u32,
@@ -362,9 +381,21 @@ fn mix(
     }
 
     // Seeker: a search tone while a target is in the cone, the lock tone
-    // once locked. Without missiles no lock tone: the search tone goes on
-    // over a lock too, quieter, as a gun aid.
+    // once locked. Without missiles only one short beep when a new target
+    // comes into the cone, then quiet.
     let armed = rack.is_none_or(|r| r.count > 0);
+    let seen = lock.and_then(|l| match l.state {
+        LockState::Tracking { target, .. } | LockState::Locked { target } => Some(target),
+        LockState::Searching => None,
+    });
+    if !armed && seen.is_some() && seen != state.spotted {
+        out.shots.push(OneShot {
+            clip: Clip::SearchBeep,
+            volume: master * 0.35 * SPOTTED_BEEP_VOLUME,
+            speed: 1.0,
+        });
+    }
+    state.spotted = seen;
     let search = LoopMix {
         voice: Voice::LockSearch,
         clip: Clip::LockSearch,
@@ -379,12 +410,6 @@ fn mix(
             volume: master * 0.32,
             speed: 1.0,
         }),
-        (Some(LockState::Tracking { .. } | LockState::Locked { .. }), false) => {
-            out.loops.push(LoopMix {
-                volume: search.volume * EMPTY_SEARCH_VOLUME,
-                ..search
-            });
-        }
         _ => {}
     }
     if missiles.iter().any(|m| m.target == Some(jet)) {
@@ -437,15 +462,21 @@ fn mix(
                 let v = heard(cue.position);
                 enemy_gun = Some(enemy_gun.map_or(v, |e: f32| e.max(v)));
             }
-            Sound::MissileLaunch => out.shots.push(shot(Clip::Missile, 0.56)),
-            Sound::Explosion => {
+            Sound::MissileLaunch => out.shots.push(shot(Clip::Missile, 0.5)),
+            Sound::Explosion | Sound::MissileHit => {
                 state.explosions += 1;
                 let clip = if state.explosions.is_multiple_of(2) {
                     Clip::ExplosionSmall
                 } else {
                     Clip::ExplosionSmallLong
                 };
-                out.shots.push(shot(clip, 0.9));
+                // A burst on a survivor somewhat quieter than a kill.
+                let loudness = if cue.sound == Sound::MissileHit {
+                    MISSILE_HIT_VOLUME
+                } else {
+                    1.0
+                };
+                out.shots.push(shot(clip, loudness));
             }
             Sound::BigExplosion | Sound::WreckImpact => {
                 out.shots.push(shot(Clip::ExplosionBig, 1.0));

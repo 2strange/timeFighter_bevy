@@ -46,6 +46,8 @@ pub enum Sound {
     HitEnemy,
     /// Player was hit.
     HitPlayer,
+    /// The player's missile struck an enemy that survived.
+    MissileHit,
     /// A fighter blows up.
     Explosion,
     /// A bomber, a zeppelin or the player's jet blows up.
@@ -144,6 +146,7 @@ fn combat_cues(
             position: Some(shot.position),
         });
     }
+    let destroyed: Vec<Destroyed> = destroyed.read().copied().collect();
     for hit in hits.read() {
         let sound = match hit.team {
             Team::Player => Sound::HitEnemy,
@@ -153,8 +156,16 @@ fn combat_cues(
             sound,
             position: Some(hit.point),
         });
+        // A missile that did not bring its target down still bursts.
+        let survived = !destroyed.iter().any(|d| d.entity == hit.target);
+        if hit.team == Team::Player && hit.weapon == Weapon::Missile && survived {
+            cues.write(SoundCue {
+                sound: Sound::MissileHit,
+                position: Some(hit.point),
+            });
+        }
     }
-    for event in destroyed.read() {
+    for event in &destroyed {
         let big = match event.team {
             Team::Player => true,
             Team::Enemy => known

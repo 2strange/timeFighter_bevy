@@ -103,6 +103,11 @@ pub struct FallsWhenDestroyed {
     pub impact_strength: f32,
 }
 
+/// Takes only this share of gun damage (missiles hit in full): for a
+/// target so big that the gun can hardly miss it.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct GunResistance(pub f32);
+
 /// A destroyed aircraft on its way down. Counted as shot down already; it
 /// is removed when it hits the ground or a building.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]

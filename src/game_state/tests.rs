@@ -1804,3 +1804,43 @@ fn bombers_and_wrecks_sound_bigger_than_fighters() {
     }
     assert_eq!(impacts, 1, "the wreck hits the ground once");
 }
+
+#[test]
+fn a_missile_that_leaves_its_target_flying_still_bursts() {
+    let (mut app, _) = custom_app(
+        FlightConfig::default().spawn_transform(),
+        battle(Difficulty::Custom(crate::game_state::DifficultyParams {
+            bomber_waves: 1,
+            ..default()
+        })),
+        false,
+    );
+    let bomber = app
+        .world_mut()
+        .query::<(Entity, &Enemy)>()
+        .iter(app.world())
+        .find(|(_, e)| e.kind.is_bomber())
+        .unwrap()
+        .0;
+    let missile = |app: &mut App, damage| {
+        app.world_mut().write_message(Hit {
+            projectile: Entity::PLACEHOLDER,
+            target: bomber,
+            point: Vec3::ZERO,
+            team: Team::Player,
+            weapon: Weapon::Missile,
+            damage,
+        });
+        app.update();
+        app.world()
+            .resource::<Messages<SoundCue>>()
+            .iter_current_update_messages()
+            .map(|c| c.sound)
+            .collect::<Vec<_>>()
+    };
+    let survived = missile(&mut app, 1.0);
+    assert!(survived.contains(&Sound::MissileHit), "{survived:?}");
+    let killed = missile(&mut app, 10_000.0);
+    assert!(!killed.contains(&Sound::MissileHit), "{killed:?}");
+    assert!(killed.contains(&Sound::BigExplosion));
+}

@@ -262,6 +262,19 @@ fn explosions_bombs_and_guns() {
     small.sort_by_key(|c| *c == Clip::ExplosionSmall);
     assert_eq!(small, vec![Clip::ExplosionSmallLong, Clip::ExplosionSmall]);
 
+    // A missile burst on a survivor: a small explosion, quieter than a kill.
+    cue(&mut app, Sound::MissileHit, Some(Vec3::ZERO));
+    app.update();
+    let burst = shots(&app)[0];
+    cue(&mut app, Sound::Explosion, Some(Vec3::ZERO));
+    app.update();
+    let kill = shots(&app)[0];
+    assert!(matches!(
+        burst.clip,
+        Clip::ExplosionSmall | Clip::ExplosionSmallLong
+    ));
+    assert!((burst.volume / kill.volume - 0.7).abs() < 1e-3);
+
     for (sound, clip) in [
         (Sound::BigExplosion, Clip::ExplosionBig),
         (Sound::WreckImpact, Clip::ExplosionBig),
@@ -329,28 +342,49 @@ fn explosions_bombs_and_guns() {
 }
 
 #[test]
-fn without_missiles_no_lock_tone_and_a_quieter_search_tone() {
+fn without_missiles_a_new_target_gets_one_beep_and_then_quiet() {
     let (mut app, jet) = unlocked_app();
-    let target = app.world_mut().spawn_empty().id();
+    let (first, second) = (
+        app.world_mut().spawn_empty().id(),
+        app.world_mut().spawn_empty().id(),
+    );
     app.world_mut()
         .entity_mut(jet)
-        .insert(MissileRack::new(CombatConfig::default().missile, 2));
-    app.world_mut().get_mut::<LockOn>(jet).unwrap().state = LockState::Tracking {
+        .insert(MissileRack::new(CombatConfig::default().missile, 0));
+    let seek = |app: &mut App, state| {
+        app.world_mut().get_mut::<LockOn>(jet).unwrap().state = state;
+        app.update();
+        let m = mix(app);
+        let beeps = m
+            .shots
+            .iter()
+            .filter(|s| s.clip == Clip::SearchBeep)
+            .count();
+        let tones = m.voice(Voice::LockSearch).is_some() || m.voice(Voice::LockTone).is_some();
+        (beeps, tones)
+    };
+    let tracking = |target| LockState::Tracking {
         target,
         progress: 0.5,
     };
-    app.update();
-    let armed = mix(&app).voice(Voice::LockSearch).unwrap().volume;
+    assert_eq!(seek(&mut app, tracking(first)), (1, false), "one beep");
+    assert_eq!(seek(&mut app, tracking(first)), (0, false), "then quiet");
+    assert_eq!(
+        seek(&mut app, LockState::Locked { target: first }),
+        (0, false),
+        "no lock tone"
+    );
+    assert_eq!(seek(&mut app, tracking(second)), (1, false), "a new one");
+    assert_eq!(seek(&mut app, LockState::Searching), (0, false));
+    assert_eq!(seek(&mut app, tracking(second)), (1, false), "back in");
+    assert_eq!(Clip::SearchBeep.max_length(), Some(0.1), "short");
 
-    app.world_mut().get_mut::<MissileRack>(jet).unwrap().count = 0;
-    app.update();
-    let empty = mix(&app).voice(Voice::LockSearch).unwrap().volume;
-    assert!((empty / armed - 0.7).abs() < 1e-3, "{armed} {empty}");
-    // Locked: still only the search tone.
-    app.world_mut().get_mut::<LockOn>(jet).unwrap().state = LockState::Locked { target };
-    app.update();
-    assert!(mix(&app).voice(Voice::LockTone).is_none());
-    assert_eq!(mix(&app).voice(Voice::LockSearch).unwrap().volume, empty);
+    // With missiles: the tones as ever, no beep.
+    app.world_mut().get_mut::<MissileRack>(jet).unwrap().count = 2;
+    assert_eq!(seek(&mut app, tracking(first)), (0, true));
+    assert!(mix(&app).voice(Voice::LockSearch).is_some());
+    seek(&mut app, LockState::Locked { target: first });
+    assert!(mix(&app).voice(Voice::LockTone).is_some());
 }
 
 #[test]
