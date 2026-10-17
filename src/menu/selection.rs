@@ -68,10 +68,11 @@ pub enum CustomField {
     BombersPerWave,
     WaveInterval,
     CityLoss,
+    Zeppelin,
 }
 
 impl CustomField {
-    pub const ALL: [CustomField; 14] = [
+    pub const ALL: [CustomField; 15] = [
         CustomField::Missiles,
         CustomField::Enemies,
         CustomField::FlightSize,
@@ -86,6 +87,7 @@ impl CustomField {
         CustomField::BombersPerWave,
         CustomField::WaveInterval,
         CustomField::CityLoss,
+        CustomField::Zeppelin,
     ];
 
     /// Only meaningful with bombers (Protect, Battle).
@@ -115,6 +117,7 @@ impl CustomField {
             CustomField::BombersPerWave => "Bombers per wave",
             CustomField::WaveInterval => "Time between waves",
             CustomField::CityLoss => "City lost at",
+            CustomField::Zeppelin => "Zeppelin at the end",
         }
     }
 
@@ -134,6 +137,7 @@ impl CustomField {
             CustomField::BombersPerWave => "bombers",
             CustomField::WaveInterval => "interval",
             CustomField::CityLoss => "loss",
+            CustomField::Zeppelin => "zeppelin",
         }
     }
 
@@ -162,12 +166,15 @@ impl CustomField {
                 200., 210., 220., 230., 240., 250., 260., 270., 280., 290., 300.,
             ],
             CustomField::CityLoss => &[0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6],
+            CustomField::Zeppelin => &[0., 1.],
         }
     }
 
     fn step_label(self, value: f32) -> String {
         match self {
-            CustomField::UnlimitedGun => if value > 0.5 { "On" } else { "Off" }.into(),
+            CustomField::UnlimitedGun | CustomField::Zeppelin => {
+                if value > 0.5 { "On" } else { "Off" }.into()
+            }
             CustomField::Pilots => PILOT_MIXES
                 .get(value.round() as usize)
                 .map_or("", |(_, label)| label)
@@ -202,6 +209,7 @@ impl CustomField {
             CustomField::BombersPerWave => params.bombers_per_wave as f32,
             CustomField::WaveInterval => params.wave_interval,
             CustomField::CityLoss => params.city_loss,
+            CustomField::Zeppelin => f32::from(u8::from(params.zeppelin)),
         }
     }
 
@@ -225,6 +233,7 @@ impl CustomField {
             CustomField::BombersPerWave => params.bombers_per_wave = value.round() as u32,
             CustomField::WaveInterval => params.wave_interval = value,
             CustomField::CityLoss => params.city_loss = value,
+            CustomField::Zeppelin => params.zeppelin = value > 0.5,
         }
     }
 
@@ -344,6 +353,8 @@ impl MenuSelection {
                 .filter(|f| bombers || !f.bombers_only())
                 // Battle's total comes from its waves (bombers plus escort).
                 .filter(|f| !(self.mode == MenuMode::Battle && **f == CustomField::Enemies))
+                // The end boss comes only in Battle.
+                .filter(|f| self.mode == MenuMode::Battle || **f != CustomField::Zeppelin)
                 // Ammunition only counts while the gun is limited.
                 .filter(|f| !(self.custom.unlimited_gun && **f == CustomField::GunAmmo));
             rows.extend(fields.map(|&field| {
@@ -568,6 +579,7 @@ mod tests {
         let has = |s: &MenuSelection, f| s.rows().iter().any(|r| r.id == RowId::Custom(f));
         assert!(has(&selection, CustomField::BomberWaves));
         assert!(has(&selection, CustomField::FlightSize));
+        assert!(has(&selection, CustomField::Zeppelin));
         // The enemy total follows from the waves in Battle.
         assert!(!has(&selection, CustomField::Enemies));
         // Custom starts from Normal's values for Battle.
@@ -602,8 +614,10 @@ mod tests {
         let has = |s: &MenuSelection, f| s.rows().iter().any(|r| r.id == RowId::Custom(f));
         assert!(!has(&selection, CustomField::BomberWaves));
         assert!(has(&selection, CustomField::Missiles));
+        assert!(!has(&selection, CustomField::Zeppelin));
 
         selection.select(RowId::Mode, 1);
+        assert!(!has(&selection, CustomField::Zeppelin), "Battle only");
         for field in [
             CustomField::BomberWaves,
             CustomField::BombersPerWave,
@@ -687,6 +701,7 @@ mod tests {
                 CustomField::BombersPerWave => (1.0, 8.0),
                 CustomField::WaveInterval => (60.0, 300.0),
                 CustomField::CityLoss => (0.1, 0.6),
+                CustomField::Zeppelin => (0.0, 1.0),
             };
             assert!(lo >= min && hi <= max, "{field:?}");
             assert!(
@@ -720,6 +735,24 @@ mod tests {
         assert_eq!(snapped.custom.missiles, 6);
         assert_eq!(snapped.custom.enemy_speed, 0.9);
         assert_eq!(snapped.custom.gun_ammo, 1_000);
+    }
+
+    #[test]
+    fn zeppelin_can_be_switched_on_in_an_easy_battle() {
+        let mut selection = MenuSelection::default();
+        selection.select(RowId::Mode, 2);
+        selection.select(RowId::Difficulty, 1);
+        selection.select(RowId::Difficulty, CUSTOM_LEVEL);
+        // Easy has no end boss; Custom starts from that.
+        assert!(!selection.custom.zeppelin);
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
+
+        selection.select(RowId::Custom(CustomField::Zeppelin), 1);
+        let Difficulty::Custom(params) = selection.settings().difficulty else {
+            panic!("custom expected");
+        };
+        assert!(params.zeppelin);
+        assert_eq!(MenuSelection::from_line(&selection.to_line()), selection);
     }
 
     #[test]
