@@ -168,6 +168,16 @@ impl EnemyKind {
         0.5 * self.model().size().span()
     }
 
+    /// The pilot that comes with the type, if any: in the second set the
+    /// Bf 109 is flown by rookies, the Me 309 by veterans.
+    pub fn pilot(self) -> Option<PilotSkill> {
+        match self {
+            EnemyKind::Bf109K4 => Some(PilotSkill::ROOKIE),
+            EnemyKind::Me309 => Some(PilotSkill::VETERAN),
+            _ => None,
+        }
+    }
+
     /// Bombers fly bomb runs at the city; fighters fight.
     pub fn is_bomber(self) -> bool {
         matches!(

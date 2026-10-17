@@ -402,7 +402,12 @@ fn spawn_waves(mut commands: Commands, mission: Res<Mission>, mut round: ResMut<
                     commands.spawn((bomber_bundle(kind, group.tuning, transform, id), flight));
                 } else {
                     commands.spawn((
-                        enemy_bundle(kind, group.skill, group.tuning, transform),
+                        enemy_bundle(
+                            kind,
+                            kind.pilot().unwrap_or(group.skill),
+                            group.tuning,
+                            transform,
+                        ),
                         flight,
                     ));
                 }

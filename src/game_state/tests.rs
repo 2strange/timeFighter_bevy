@@ -840,15 +840,12 @@ fn the_second_set_flies_mixed_pairs_and_ju_390_led_bombers() {
         set: EnemySet::Second,
         ..default()
     };
+    // Hard: rookies first (Bf 109 flights), veterans after (Me 309).
     let hunt = Mission::hunt(Difficulty::Hard, &config);
+    assert_eq!(hunt.waves[0].groups[0].members, vec![EnemyKind::Bf109K4; 4]);
     assert_eq!(
-        hunt.waves[0].groups[0].members,
-        vec![
-            EnemyKind::Bf109K4,
-            EnemyKind::Me309,
-            EnemyKind::Bf109K4,
-            EnemyKind::Me309
-        ]
+        hunt.waves.last().unwrap().groups[0].members,
+        vec![EnemyKind::Me309; 4]
     );
     let protect = Mission::protect(Difficulty::Normal, &config);
     assert_eq!(
@@ -924,7 +921,8 @@ fn a_second_set_round_spawns_the_mixed_flight() {
         .map(|e| format!("{:?}", e.kind))
         .collect();
     kinds.sort();
-    assert_eq!(kinds, vec!["Bf109K4", "Bf109K4", "Me309", "Me309"]);
+    // Rookies first: the first flight is all Bf 109.
+    assert_eq!(kinds, vec!["Bf109K4"; 4]);
     run_for(&mut app, 5.0);
     assert_eq!(round(&app).phase, RoundPhase::Running);
 }
@@ -1019,12 +1017,8 @@ fn battle_waves_are_bombers_with_a_fighter_escort() {
     assert_eq!(second.waves[0].groups[0].members[0], EnemyKind::Ju390);
     assert_eq!(
         second.waves[0].groups[1].members,
-        vec![
-            EnemyKind::Bf109K4,
-            EnemyKind::Me309,
-            EnemyKind::Bf109K4,
-            EnemyKind::Me309
-        ]
+        vec![EnemyKind::Bf109K4; 4],
+        "Hard: rookie escorts (Bf 109) first"
     );
     assert!(GameMode::ALL.contains(&GameMode::Battle));
 }
@@ -1381,4 +1375,72 @@ fn the_battle_is_only_won_once_the_zeppelin_wreck_has_hit_the_ground() {
         .iter(app.world())
         .count();
     assert_eq!(wrecks, 0);
+}
+
+#[test]
+fn in_the_second_set_the_pilots_pick_the_fighter_type() {
+    use crate::{
+        ai::{EnemyKind, PilotSkill},
+        game_state::{EnemySet, PilotMix},
+    };
+    use EnemyKind::{Bf109K4 as Bf, Me309 as Me};
+    let second = EnemySet::Second;
+    assert_eq!(second.fighters(4, PilotMix::Rookies, 0, 2), vec![Bf; 4]);
+    assert_eq!(second.fighters(4, PilotMix::Veterans, 0, 2), vec![Me; 4]);
+    // Mixed: alternating, the slower Bf 109 leads.
+    assert_eq!(
+        second.fighters(4, PilotMix::Mixed, 0, 2),
+        vec![Bf, Me, Bf, Me]
+    );
+    assert_eq!(
+        second.fighters(2, PilotMix::RookiesThenVeterans, 0, 3),
+        vec![Bf; 2]
+    );
+    assert_eq!(
+        second.fighters(2, PilotMix::RookiesThenVeterans, 2, 3),
+        vec![Me; 2]
+    );
+    // The first set stays Spitfires whatever the pilots.
+    for mix in [PilotMix::Rookies, PilotMix::Veterans, PilotMix::Mixed] {
+        assert!(
+            EnemySet::First
+                .fighters(2, mix, 0, 1)
+                .iter()
+                .all(|k| *k == EnemyKind::Spitfire)
+        );
+    }
+    // The type brings its pilot.
+    assert_eq!(Bf.pilot(), Some(PilotSkill::ROOKIE));
+    assert_eq!(Me.pilot(), Some(PilotSkill::VETERAN));
+    assert_eq!(EnemyKind::Spitfire.pilot(), None);
+
+    // In a round, a mixed flight's members fly with their type's pilot.
+    let (mut app, _) = app();
+    app.insert_resource(GameSettings {
+        difficulty: Difficulty::Custom(crate::game_state::DifficultyParams {
+            pilots: PilotMix::Mixed,
+            flight_size: 4,
+            ..default()
+        }),
+        ..default()
+    });
+    app.insert_resource(MissionConfig {
+        set: EnemySet::Second,
+        ..default()
+    });
+    app.world_mut().write_message(RestartRound);
+    app.update();
+    let pilots: Vec<(EnemyKind, PilotSkill)> = app
+        .world_mut()
+        .query::<(&Enemy, &crate::ai::EnemyPilot)>()
+        .iter(app.world())
+        .map(|(e, p)| (e.kind, p.skill))
+        .collect();
+    assert_eq!(pilots.len(), 4);
+    assert!(
+        pilots
+            .iter()
+            .all(|(kind, skill)| Some(*skill) == kind.pilot()),
+        "{pilots:?}"
+    );
 }

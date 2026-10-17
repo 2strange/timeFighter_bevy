@@ -206,7 +206,12 @@ impl Mission {
                         WaveTrigger::WhenEnemiesAtMost(params.flight_size / 4)
                     },
                     groups: vec![SpawnGroup {
-                        members: config.set.fighters(count),
+                        members: config.set.fighters(
+                            count,
+                            params.pilots,
+                            i as usize,
+                            flights as usize,
+                        ),
                         lead,
                         heading,
                         formation: Formation::Vic { spacing: 45.0 },
@@ -295,7 +300,9 @@ impl Mission {
             };
             // The escort trails the bombers, a little higher.
             wave.groups.push(SpawnGroup {
-                members: config.set.fighters(params.flight_size),
+                members: config
+                    .set
+                    .fighters(params.flight_size, params.pilots, i, waves as usize),
                 lead: bombers.lead - heading * ESCORT_TRAIL + Vec3::Y * ESCORT_ABOVE,
                 heading,
                 formation: Formation::Vic { spacing: 45.0 },
@@ -324,7 +331,12 @@ impl Mission {
                         escorts: None,
                     },
                     SpawnGroup {
-                        members: config.set.fighters(2 * params.flight_size),
+                        members: config.set.fighters(
+                            2 * params.flight_size,
+                            params.pilots,
+                            i,
+                            i + 1,
+                        ),
                         lead: lead - escort_heading * ESCORT_TRAIL + Vec3::Y * ESCORT_ABOVE,
                         heading,
                         formation: Formation::Vic { spacing: 45.0 },
