@@ -14,5 +14,5 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 # Custom domain (README.md, step 3); remove to use the workers.dev address.
 [[routes]]
-pattern = "api.timefighter.trendgegner.com"
+pattern = "timefighter-api.trendgegner.com"
 custom_domain = true

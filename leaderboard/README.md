@@ -69,12 +69,15 @@ Or in the dashboard: **Workers & Pages → Create → Worker**, name it
 
 ### 3. Custom domain
 
-`wrangler.toml` already asks for `api.timefighter.trendgegner.com`; with
+`timefighter-api.trendgegner.com`: one level below `trendgegner.com`, so
+Cloudflare's free Universal SSL certificate (`*.trendgegner.com`) covers it
+(a second level such as `api.timefighter.…` could need a paid one).
+`wrangler.toml` already asks for it; with
 `wrangler deploy` Cloudflare creates the DNS record and the certificate.
 In the dashboard: **Worker → Settings → Domains & Routes → Add → Custom
-domain** → `api.timefighter.trendgegner.com`.
+domain** → `timefighter-api.trendgegner.com`.
 
-Check: `https://api.timefighter.trendgegner.com/scores?mode=hunt&level=normal`
+Check: `https://timefighter-api.trendgegner.com/scores?mode=hunt&level=normal`
 answers `{"entries":[]}`.
 
 ### 4. Switch the game on
@@ -82,7 +85,7 @@ answers `{"entries":[]}`.
 In `web/index.html` set
 
 ```html
-<meta name="tf-leaderboard" content="https://api.timefighter.trendgegner.com" />
+<meta name="tf-leaderboard" content="https://timefighter-api.trendgegner.com" />
 ```
 
 and deploy the game as usual. Without this address (or with it empty) the

@@ -246,8 +246,13 @@
         <h2>Hall of fame and privacy</h2>
         <p class="note">
           Scores are kept in your browser. When you save one under a pilot name (fixed levels
-          only), it also goes to the online hall of fame, which stores just the name, score,
-          mode, level and date. No IP address is kept.
+          only), it also goes to the online hall of fame: a Cloudflare Worker at
+          timefighter-api.trendgegner.com receives the name, score, mode, level and the round's
+          breakdown (kills, missiles left, city, time) and keeps only name, score, mode, level and
+          date. As the provider, Cloudflare technically sees your IP address with each request;
+          we do not store it. Opening the online tab of the hall of fame loads the list from the
+          same address. As long as the online list is not switched on, the game sends no request
+          anywhere.
         </p>
       </section>
 
