@@ -1,0 +1,23 @@
+{
+  "hunt": {
+    "super-easy": { "factor": 0.5, "par_s": 90, "missiles": 24, "fighters": 6, "bombers": 0, "zeppelins": 0, "city": false },
+    "easy": { "factor": 0.75, "par_s": 90, "missiles": 12, "fighters": 6, "bombers": 0, "zeppelins": 0, "city": false },
+    "normal": { "factor": 1, "par_s": 150, "missiles": 8, "fighters": 10, "bombers": 0, "zeppelins": 0, "city": false },
+    "hard": { "factor": 1.5, "par_s": 180, "missiles": 8, "fighters": 12, "bombers": 0, "zeppelins": 0, "city": false },
+    "insane": { "factor": 2.5, "par_s": 240, "missiles": 8, "fighters": 16, "bombers": 0, "zeppelins": 0, "city": false }
+  },
+  "protect": {
+    "super-easy": { "factor": 0.5, "par_s": 160, "missiles": 24, "fighters": 0, "bombers": 8, "zeppelins": 0, "city": true },
+    "easy": { "factor": 0.75, "par_s": 160, "missiles": 16, "fighters": 0, "bombers": 8, "zeppelins": 0, "city": true },
+    "normal": { "factor": 1, "par_s": 240, "missiles": 16, "fighters": 0, "bombers": 12, "zeppelins": 0, "city": true },
+    "hard": { "factor": 1.5, "par_s": 240, "missiles": 12, "fighters": 0, "bombers": 12, "zeppelins": 0, "city": true },
+    "insane": { "factor": 2.5, "par_s": 320, "missiles": 12, "fighters": 0, "bombers": 16, "zeppelins": 0, "city": true }
+  },
+  "battle": {
+    "super-easy": { "factor": 0.5, "par_s": 220, "missiles": 24, "fighters": 4, "bombers": 8, "zeppelins": 0, "city": true },
+    "easy": { "factor": 0.75, "par_s": 220, "missiles": 20, "fighters": 4, "bombers": 8, "zeppelins": 0, "city": true },
+    "normal": { "factor": 1, "par_s": 480, "missiles": 32, "fighters": 10, "bombers": 12, "zeppelins": 1, "city": true },
+    "hard": { "factor": 1.5, "par_s": 630, "missiles": 20, "fighters": 20, "bombers": 12, "zeppelins": 1, "city": true },
+    "insane": { "factor": 2.5, "par_s": 1190, "missiles": 36, "fighters": 40, "bombers": 16, "zeppelins": 3, "city": true }
+  }
+}
