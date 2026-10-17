@@ -1102,3 +1102,65 @@ fn a_zeppelin_wreck_falls_slowly_and_wrecks_the_city_where_it_lands() {
     );
     assert_eq!(outside, 1.0, "nothing lost outside the city");
 }
+
+#[test]
+fn a_zeppelin_launches_only_once_it_spots_the_player() {
+    use super::{CARRIER_SPOT_RANGE, Carrier, CarrierSpec, Enemy, FIRST_LAUNCH_DELAY};
+    let mut app = app(30.0, false);
+    let at = Vec3::new(0.0, 800.0, 0.0);
+    let zeppelin = app
+        .world_mut()
+        .spawn((
+            super::bomber_bundle(
+                EnemyKind::Zeppelin,
+                EnemyTuning::default(),
+                Transform::from_translation(at),
+                3,
+            ),
+            super::zeppelin_parts(),
+            Carrier::new(
+                CarrierSpec {
+                    fighters: vec![EnemyKind::Bf109K4],
+                    max_alive: 4,
+                },
+                PilotSkill::ROOKIE,
+                EnemyTuning::default(),
+                3,
+            ),
+        ))
+        .id();
+    // The player far away, flying off: nothing happens.
+    let jet = spawn_ghost_player(
+        &mut app,
+        Transform::from_xyz(0.0, 800.0, 2.0 * CARRIER_SPOT_RANGE).looking_to(Vec3::Z, Vec3::Y),
+        80.0,
+        FlightInput::default(),
+    );
+    let fighters = |app: &mut App| {
+        app.world_mut()
+            .query::<&Enemy>()
+            .iter(app.world())
+            .filter(|e| e.kind == EnemyKind::Bf109K4)
+            .count()
+    };
+    for _ in 0..30 * 30 {
+        app.update();
+    }
+    assert_eq!(fighters(&mut app), 0, "asleep while the player is far");
+    assert!(!app.world().get::<Carrier>(zeppelin).unwrap().awake);
+
+    // The player comes close: after the scramble the first fighter drops.
+    let near = app.world().get::<Transform>(zeppelin).unwrap().translation
+        + Vec3::new(0.0, 0.0, 0.5 * CARRIER_SPOT_RANGE);
+    app.world_mut()
+        .get_mut::<Transform>(jet)
+        .unwrap()
+        .translation = near;
+    app.update();
+    assert!(app.world().get::<Carrier>(zeppelin).unwrap().awake);
+    assert_eq!(fighters(&mut app), 0, "not at once");
+    for _ in 0..((FIRST_LAUNCH_DELAY + 0.5) * 30.0) as u32 {
+        app.update();
+    }
+    assert_eq!(fighters(&mut app), 1);
+}

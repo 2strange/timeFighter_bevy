@@ -21,6 +21,9 @@ pub struct GameSettings {
 /// Most zeppelins a Battle sends.
 pub const MAX_ZEPPELINS: u32 = 3;
 
+/// Most fighters a zeppelin keeps in the air at once.
+pub const MAX_ZEPPELIN_FIGHTERS: u32 = 6;
+
 /// How hard a round is.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Difficulty {
@@ -151,6 +154,7 @@ impl Difficulty {
                 bomber_waves: 4,
                 wave_interval: 90.0,
                 zeppelins: 3,
+                zeppelin_fighters: 6,
                 ..base
             },
             Difficulty::Custom(params) => params,
@@ -201,9 +205,12 @@ pub struct DifficultyParams {
     pub wave_interval: f32,
     /// The round is lost once this share of the city centre is destroyed.
     pub city_loss: f32,
-    /// Battle ends with this many zeppelins (0–3), each in its own last
-    /// wave with an escort, from different sides.
+    /// Battle sends this many zeppelins (0–3), each alone in its own wave,
+    /// between the bomber waves and from other sides.
     pub zeppelins: u32,
+    /// A zeppelin that has spotted the player launches a fighter every
+    /// 20 s, keeping at most this many (0–6) in the air.
+    pub zeppelin_fighters: u32,
     /// The gun's lead circle shows where to aim.
     pub gun_assist: bool,
 }
@@ -227,6 +234,7 @@ impl Default for DifficultyParams {
             wave_interval: 110.0,
             city_loss: 0.3,
             zeppelins: 1,
+            zeppelin_fighters: 5,
             gun_assist: false,
         }
     }
@@ -247,6 +255,7 @@ impl DifficultyParams {
             enemy_accuracy: factor(self.enemy_accuracy, 0.1, 3.0),
             attackers: self.attackers.clamp(1, 12),
             zeppelins: self.zeppelins.min(MAX_ZEPPELINS),
+            zeppelin_fighters: self.zeppelin_fighters.min(MAX_ZEPPELIN_FIGHTERS),
             bomber_waves: self.bomber_waves.clamp(1, 12),
             bombers_per_wave: self.bombers_per_wave.clamp(1, 8),
             wave_interval: if self.wave_interval.is_finite() {
