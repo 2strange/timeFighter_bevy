@@ -3,7 +3,7 @@
 // within what the mission allows. test/vectors.json (written by the game's
 // tests) holds example rounds both sides must score alike.
 
-import { checkName } from './names.js';
+import { checkName, cleanName } from './names.js';
 
 export const KILL_POINTS = { bf109k4: 100, me309: 150, he177: 200, ju390: 400, zeppelin: 1500 };
 const CLASS = {
@@ -99,7 +99,8 @@ export function checkBreakdown(breakdown, level) {
  */
 export function checkSubmission(body, limits) {
   if (typeof body !== 'object' || body === null) return { ok: false, reason: 'not an object' };
-  const { name, mode, level, score: claimed, duration_s, version, breakdown } = body;
+  const { mode, level, score: claimed, duration_s, version, breakdown } = body;
+  const name = cleanName(body.name);
   const nameProblem = checkName(name);
   if (nameProblem) return { ok: false, reason: nameProblem };
   const limit = limits[mode]?.[level];

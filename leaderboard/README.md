@@ -14,8 +14,10 @@ player's browser.
 - Stored per score: pilot name, score, date (mode and level are in the key).
   **No IP address is stored.** The rate limit (one score per minute per
   address) keeps a salted hash of the address for 60 seconds only.
-- Names: 3 to 12 characters of A-Z, 0-9, space, `-` and `_`, plus a short
-  block list. Custom levels never go online.
+- Names: 1 to 18 printable characters of any script; control and invisible
+  characters are removed and the ends trimmed, plus a short block list.
+  Names are only ever shown as text (never as HTML). Custom levels never go
+  online.
 - CORS only for `https://timefighter.trendgegner.com` (`ALLOWED_ORIGIN` in
   `wrangler.toml`).
 

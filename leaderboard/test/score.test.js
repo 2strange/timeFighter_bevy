@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import limits from '../limits.json' with { type: 'json' };
 import vectors from './vectors.json' with { type: 'json' };
 import { checkSubmission, score } from '../src/score.js';
-import { checkName } from '../src/names.js';
+import { checkName, cleanName } from '../src/names.js';
 
 function submission(vector, changes = {}) {
   return {
@@ -95,11 +95,24 @@ test('custom levels and unknown modes do not go online', () => {
   assert.equal(checkSubmission(submission(vector, { mode: 'dogfight' }), limits).reason, 'unknown mode or level');
 });
 
-test('names follow the game and keep the list clean', () => {
-  for (const good of ['ACE', 'RED-5', 'TOP_GUN', 'ICE MAN', 'GOOSE 2']) assert.equal(checkName(good), null, good);
-  for (const bad of ['AB', 'THIRTEEN-CHAR', 'ace', 'ICE  MAN', ' ACE', 'A<B>', 'HITLER', 'N4ZI', 'SIEG HEIL', 'ACE 88', 'X1488', 'F_U_C_K']) {
-    assert.notEqual(checkName(bad), null, bad);
+test('names take any printable characters, cleaned, up to eighteen', () => {
+  for (const good of ['Trendgegner', 'A', 'ICE  MAN', 'Jürgen Weiß', 'Пилот', '飛行士', '<b>&"x"', 'eighteen-chars-xyz', 'PILOT 1988']) {
+    assert.equal(checkName(cleanName(good)), null, good);
   }
-  // Numbers in general are fine.
-  assert.equal(checkName('PILOT 1988'), null);
+  assert.equal(cleanName('  Mav\u0007er\u200Bick \n'), 'Maverick');
+  assert.equal(cleanName('Cafe\u0301'), 'Café', 'NFC');
+  for (const bad of ['', '   ', '\u200B', 'nineteen-characters']) {
+    assert.notEqual(checkName(cleanName(bad)), null, JSON.stringify(bad));
+  }
+  for (const blocked of ['HITLER', 'Hítler', 'N4ZI', 'Sieg Heil', 'ACE 88', 'X1488', 'F_U_C_K']) {
+    assert.equal(checkName(cleanName(blocked)), 'name not allowed', blocked);
+  }
+});
+
+test('the stored name is the cleaned one', () => {
+  const vector = vectors[0];
+  const checked = checkSubmission(submission(vector, { name: '  Jürgen\u200B ✈\t' }), limits);
+  assert.ok(checked.ok, checked.reason);
+  assert.equal(checked.entry.name, 'Jürgen ✈');
+  assert.equal(checkSubmission(submission(vector, { name: ' \u0000 ' }), limits).reason, 'no name');
 });

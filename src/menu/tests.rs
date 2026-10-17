@@ -163,6 +163,10 @@ fn result_screen_offers_the_menu_on_m() {
 
     app.world_mut().resource_mut::<Round>().phase = RoundPhase::Over(Outcome::Victory);
     app.update();
+    // The name dialog comes first and holds every key, M too.
+    tap(&mut app, MENU_KEY);
+    assert!(!menu(&app).open);
+    tap(&mut app, KeyCode::Escape);
     tap(&mut app, MENU_KEY);
     assert!(menu(&app).open);
     assert_eq!(menu(&app).cursor, RowId::Start);

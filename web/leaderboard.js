@@ -2,11 +2,13 @@
 // shows the top 10 for the chosen mode and level.
 //
 // The game (src/score/store.rs) writes to localStorage:
-//   timefighter.top.<mode>.<level>  local top 10, "NAME|score;NAME|score"
+//   timefighter.top.<mode>.<level>  local top 10, one "name<TAB>score" line each
 //   timefighter.outbox              JSON array of scores to send
 // and reads back the answer to the last one sent:
-//   timefighter.online              "id\nrank all\nrank week\nNAME|score;..."
-//                                   or "id\nerror\nreason"
+//   timefighter.online              "id\nrank all\nrank week" and the top 10
+//                                   like a local list, or "id\nerror\nreason"
+// Names may hold any printable character (never a tab or line break); they
+// are only ever shown with textContent.
 // The online list's address comes from <meta name="tf-leaderboard">; when it
 // is missing or empty, everything stays on this device.
 
@@ -26,15 +28,20 @@ function storage() {
 }
 
 export function localList(mode, level) {
-  const line = storage()?.getItem(`timefighter.top.${mode}.${level}`) ?? '';
-  return line
-    .split(';')
-    .map((item) => item.split('|'))
+  const text = storage()?.getItem(`timefighter.top.${mode}.${level}`) ?? '';
+  // Lists from before names took any character: "NAME|score;...".
+  const legacy = !text.includes('\t') && text.includes('|');
+  const items = legacy
+    ? text.split(';').map((item) => item.split('|'))
+    : text.split('\n').map((line) => line.split('\t'));
+  return items
     .filter(([name, score]) => name && /^\d+$/.test(score ?? ''))
     .map(([name, score]) => ({ name, score: Number(score) }));
 }
 
-const asLine = (entries) => entries.map((e) => `${e.name}|${e.score}`).join(';');
+/** Names from the server cannot hold tabs or line breaks; to be safe anyway. */
+const flat = (name) => String(name).replace(/[\t\n\r]/g, ' ');
+const asLines = (entries) => entries.map((e) => `${flat(e.name)}\t${e.score}`).join('\n');
 
 async function send(item) {
   const { id, ...score } = item;
@@ -57,7 +64,7 @@ async function send(item) {
     const rank = (r) => (Number.isInteger(r) ? r : '-');
     store?.setItem(
       ONLINE,
-      `${id}\n${rank(answer.rank_all)}\n${rank(answer.rank_week)}\n${asLine(answer.top ?? [])}`,
+      `${id}\n${rank(answer.rank_all)}\n${rank(answer.rank_week)}\n${asLines(answer.top ?? [])}`,
     );
   } catch {
     store?.setItem(ONLINE, `${id}\nerror\noffline`);

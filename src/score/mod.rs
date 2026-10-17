@@ -10,10 +10,14 @@
 //! are also queued for the online list, which the page's script sends to
 //! the leaderboard worker (see [`store`]).
 //!
-//! Keys on the result screen: the first Enter submits (or, without a
-//! stored name, opens the name field); R restarts at once and submits on
-//! the way; C changes the name (N is the sound). While the name field is open it takes every
-//! key, so nothing else reacts to typing.
+//! When the result screen shows, a name dialog opens over everything, like
+//! the menu: it takes every key and click while open, so typing never
+//! restarts the round or reaches the game. It types like a keyboard (any
+//! printable character, the layout's own via Bevy's text events), up to
+//! 18 characters, prefilled with the last name. Enter saves (local list,
+//! and online unless Custom), Escape closes it without saving; then the
+//! usual keys apply again, and C opens it once more until a score is
+//! saved.
 
 pub mod board;
 pub mod rules;
@@ -31,7 +35,9 @@ use bevy::{
     prelude::*,
 };
 
-use board::{Entry, LOCAL_TOP, NameField, format_list, insert, parse_list, valid_name};
+use board::{
+    Entry, LOCAL_TOP, NameField, format_list, insert, json_escape, parse_list, valid_name,
+};
 use rules::{Breakdown, KillWeapon, Level, ScoreSheet, grouped, level_key, mode_key};
 use store::{NAME_KEY, ONLINE_KEY, OnlineAnswer, Store, parse_online, top_key};
 
@@ -60,8 +66,8 @@ pub struct ScoreState {
     /// Set when the result screen shows.
     pub result: Option<RoundResult>,
     pub field: NameField,
-    /// The name field takes the keys.
-    pub editing: bool,
+    /// The name dialog is open and takes every key and click.
+    pub dialog: bool,
     pub submitted: Option<Submitted>,
     /// Numbers submissions, so a late answer is not shown for a new round.
     next_id: u64,
@@ -99,7 +105,7 @@ impl Plugin for ScorePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Store>()
             .init_resource::<ScoreState>()
-            .add_systems(Startup, spawn_ui)
+            .add_systems(Startup, (load_font, spawn_ui).chain())
             // Before anything else reads the keys of the frame.
             .add_systems(PreUpdate, result_keys.after(InputSystems))
             .add_systems(
@@ -113,6 +119,7 @@ impl Plugin for ScorePlugin {
                     poll_online,
                     update_live,
                     update_panel,
+                    update_dialog,
                 )
                     .chain()
                     .after(RoundSystems::Track),
@@ -120,17 +127,13 @@ impl Plugin for ScorePlugin {
     }
 }
 
-/// A new round: what the old one left unsubmitted goes out under the
-/// name in the field, then everything is cleared. (A result while the
-/// round is no longer over also means a new round, should the start have
-/// passed within one frame.)
-fn start_round(round: Res<Round>, mut state: ResMut<ScoreState>, mut store: ResMut<Store>) {
+/// A new round clears everything; a score not saved by then is not
+/// saved. (A result while the round is no longer over also means a new
+/// round, should the start have passed within one frame.)
+fn start_round(round: Res<Round>, mut state: ResMut<ScoreState>) {
     let left_result = state.result.is_some() && !matches!(round.phase, RoundPhase::Over(_));
     if round.phase != RoundPhase::Starting && !left_result {
         return;
-    }
-    if state.result.is_some() && state.submitted.is_none() {
-        submit(&mut state, &mut store);
     }
     let next_id = state.next_id;
     *state = ScoreState {
@@ -239,13 +242,10 @@ fn finish_round(
         .and(city.as_deref())
         .map(|health| (health.center_intact_ratio.clamp(0.0, 1.0) * 100.0).round() as u32);
     let breakdown = rules::score(&sheet, Level::of(&settings));
-    // The field opens on Enter or N only, so M, R and the rest keep
-    // working on the result screen.
+    // The name dialog opens by itself, with the last name.
     let saved = store.get(NAME_KEY).filter(|n| valid_name(n));
-    state.editing = false;
-    state.field = NameField {
-        text: saved.unwrap_or_default(),
-    };
+    state.dialog = true;
+    state.field = NameField::with_text(&saved.unwrap_or_default());
     state.result = Some(RoundResult {
         settings,
         sheet,
@@ -278,7 +278,8 @@ fn submit(state: &mut ScoreState, store: &mut Store) {
     state.next_id += 1;
     let online = if rules::online(&result.settings) {
         store.push_outbox(&format!(
-            "{{\"id\":{id},\"name\":\"{name}\",\"mode\":\"{mode}\",\"level\":\"{level}\",\"score\":{},\"duration_s\":{},\"version\":\"{}\",\"breakdown\":{}}}",
+            "{{\"id\":{id},\"name\":\"{}\",\"mode\":\"{mode}\",\"level\":\"{level}\",\"score\":{},\"duration_s\":{},\"version\":\"{}\",\"breakdown\":{}}}",
+            json_escape(&name),
             result.breakdown.total,
             result.sheet.duration_s,
             env!("CARGO_PKG_VERSION"),
@@ -288,7 +289,7 @@ fn submit(state: &mut ScoreState, store: &mut Store) {
     } else {
         Online::Off
     };
-    state.editing = false;
+    state.dialog = false;
     state.submitted = Some(Submitted {
         id,
         name,
@@ -297,20 +298,23 @@ fn submit(state: &mut ScoreState, store: &mut Store) {
     });
 }
 
-/// Keys on the result screen, before the rest of the game sees them.
+/// Keys on the result screen, before the rest of the game sees them:
+/// while the dialog is open it gets every key, and nothing else gets any
+/// key or click.
 fn result_keys(
     mut keys: ResMut<ButtonInput<KeyCode>>,
+    mouse: Option<ResMut<ButtonInput<MouseButton>>>,
     mut typed: MessageReader<KeyboardInput>,
     pause: Option<Res<Pause>>,
     mut state: ResMut<ScoreState>,
     mut store: ResMut<Store>,
 ) {
-    let held = pause.is_some_and(|p| p.menu || p.player);
-    if state.result.is_none() || held {
+    let menu_open = pause.is_some_and(|p| p.menu);
+    if state.result.is_none() || menu_open {
         typed.clear();
         return;
     }
-    if state.editing {
+    if state.dialog {
         for event in typed.read() {
             if !event.state.is_pressed() {
                 continue;
@@ -321,97 +325,58 @@ fn result_keys(
                         submit(&mut state, &mut store);
                     }
                 }
-                KeyCode::Escape => state.editing = false,
+                KeyCode::Escape => state.dialog = false,
                 KeyCode::Backspace => {
                     state.field.backspace();
                 }
-                code => {
-                    if let Some(c) = typed_char(&event.logical_key, code) {
-                        state.field.type_char(c);
+                KeyCode::Delete => {
+                    state.field.delete();
+                }
+                KeyCode::ArrowLeft => state.field.left(),
+                KeyCode::ArrowRight => state.field.right(),
+                KeyCode::Home => state.field.home(),
+                KeyCode::End => state.field.end(),
+                _ => {
+                    if let Some(text) = typed_text(event) {
+                        state.field.type_text(&text);
                     }
                 }
             }
         }
-        // Typing is not flying: nothing else sees these keys.
+        // A dialog, like the menu: nothing else sees a key or a click.
         keys.reset_all();
+        if let Some(mut mouse) = mouse {
+            mouse.reset_all();
+        }
         return;
     }
     typed.clear();
-    if state.submitted.is_none() {
-        if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
-            if state.field.name().is_some() {
-                submit(&mut state, &mut store);
-            } else {
-                state.editing = true;
-            }
-            keys.clear_just_pressed(KeyCode::Enter);
-            keys.clear_just_pressed(KeyCode::NumpadEnter);
-        } else if keys.just_pressed(KeyCode::KeyC) {
-            state.editing = true;
-            keys.clear_just_pressed(KeyCode::KeyC);
-        }
+    if state.submitted.is_none() && keys.just_pressed(KeyCode::KeyC) {
+        state.dialog = true;
+        keys.clear_just_pressed(KeyCode::KeyC);
     }
 }
 
-/// The character a key press types: the layout's character where the
-/// platform gives one, else the key's label.
-fn typed_char(logical: &Key, code: KeyCode) -> Option<char> {
-    if let Key::Character(text) = logical {
-        let mut chars = text.chars();
-        if let (Some(c), None) = (chars.next(), chars.next()) {
-            return Some(c);
-        }
+/// What a key press types: the text the platform made of it (layout,
+/// Shift, dead keys), else the logical key's character, else, where the
+/// platform gives neither (tests), the key's label.
+fn typed_text(event: &KeyboardInput) -> Option<String> {
+    if let Some(text) = &event.text {
+        return Some(text.to_string());
     }
-    if matches!(logical, Key::Space) || code == KeyCode::Space {
-        return Some(' ');
+    match &event.logical_key {
+        Key::Character(text) => return Some(text.to_string()),
+        Key::Space => return Some(" ".into()),
+        _ => {}
     }
-    let letters = [
-        KeyCode::KeyA,
-        KeyCode::KeyB,
-        KeyCode::KeyC,
-        KeyCode::KeyD,
-        KeyCode::KeyE,
-        KeyCode::KeyF,
-        KeyCode::KeyG,
-        KeyCode::KeyH,
-        KeyCode::KeyI,
-        KeyCode::KeyJ,
-        KeyCode::KeyK,
-        KeyCode::KeyL,
-        KeyCode::KeyM,
-        KeyCode::KeyN,
-        KeyCode::KeyO,
-        KeyCode::KeyP,
-        KeyCode::KeyQ,
-        KeyCode::KeyR,
-        KeyCode::KeyS,
-        KeyCode::KeyT,
-        KeyCode::KeyU,
-        KeyCode::KeyV,
-        KeyCode::KeyW,
-        KeyCode::KeyX,
-        KeyCode::KeyY,
-        KeyCode::KeyZ,
-    ];
-    let digits = [
-        KeyCode::Digit0,
-        KeyCode::Digit1,
-        KeyCode::Digit2,
-        KeyCode::Digit3,
-        KeyCode::Digit4,
-        KeyCode::Digit5,
-        KeyCode::Digit6,
-        KeyCode::Digit7,
-        KeyCode::Digit8,
-        KeyCode::Digit9,
-    ];
-    if let Some(i) = letters.iter().position(|k| *k == code) {
-        return Some((b'A' + i as u8) as char);
+    let label = format!("{:?}", event.key_code);
+    if let Some(letter) = label.strip_prefix("Key").filter(|l| l.len() == 1) {
+        return Some(letter.into());
     }
-    if let Some(i) = digits.iter().position(|k| *k == code) {
-        return Some((b'0' + i as u8) as char);
+    if let Some(digit) = label.strip_prefix("Digit").filter(|d| d.len() == 1) {
+        return Some(digit.into());
     }
-    (code == KeyCode::Minus).then_some('-')
+    (event.key_code == KeyCode::Space).then(|| " ".into())
 }
 
 /// Looks for the page's answer to the last submission, twice a second.
@@ -441,6 +406,24 @@ struct LiveScore;
 #[derive(Component)]
 struct ResultPanel;
 
+#[derive(Component)]
+struct NameDialog;
+
+#[derive(Component)]
+struct NameText;
+
+/// A font for names: the built-in one has only ASCII, names may use any
+/// script (DejaVu Sans Mono, free licence, see `assets/fonts/`).
+#[derive(Resource, Clone, Default)]
+struct NameFont(Handle<Font>);
+
+const NAME_FONT: &str = "fonts/DejaVuSansMono.ttf";
+
+fn load_font(mut commands: Commands, assets: Option<Res<AssetServer>>) {
+    let handle = assets.map_or_else(Handle::default, |a| a.load(NAME_FONT));
+    commands.insert_resource(NameFont(handle));
+}
+
 fn label(content: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     (
         Text::new(content),
@@ -452,7 +435,20 @@ fn label(content: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     )
 }
 
-fn spawn_ui(mut commands: Commands) {
+/// Text in the name font.
+fn name_label(font: &NameFont, content: impl Into<String>, size: f32, color: Color) -> impl Bundle {
+    (
+        Text::new(content),
+        TextFont {
+            font: (&font.0).into(),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(color),
+    )
+}
+
+fn spawn_ui(mut commands: Commands, font: Res<NameFont>) {
     commands.spawn((
         LiveScore,
         label("", 20.0, HUD),
@@ -483,6 +479,77 @@ fn spawn_ui(mut commands: Commands) {
         GlobalZIndex(6),
         Visibility::Hidden,
     ));
+    // The name dialog: over everything, the rest dimmed, like the menu.
+    commands
+        .spawn((
+            NameDialog,
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+            GlobalZIndex(20),
+            Visibility::Hidden,
+        ))
+        .with_child((
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: px(10),
+                padding: UiRect::axes(px(28), px(20)),
+                border: UiRect::all(px(1)),
+                min_width: px(380),
+                ..default()
+            },
+            BackgroundColor(PANEL),
+            BorderColor::all(DIM),
+            children![
+                label("YOUR NAME FOR THE HALL OF FAME", 14.0, DIM),
+                (
+                    Node {
+                        padding: UiRect::axes(px(12), px(6)),
+                        border: UiRect::all(px(2)),
+                        min_width: px(300),
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BorderColor::all(AMBER),
+                    children![(NameText, name_label(&font, "", 24.0, AMBER))],
+                ),
+                label("Enter: save    Esc: cancel", 14.0, DIM),
+            ],
+        ));
+}
+
+/// Shows the dialog while it is open, the name with its cursor.
+fn update_dialog(
+    state: Res<ScoreState>,
+    pause: Option<Res<Pause>>,
+    mut dialog: Query<&mut Visibility, With<NameDialog>>,
+    mut text: Query<&mut Text, With<NameText>>,
+) {
+    if !state.is_changed() && !pause.as_ref().is_some_and(|p| p.is_changed()) {
+        return;
+    }
+    let open = state.dialog && state.result.is_some() && !pause.is_some_and(|p| p.menu);
+    for mut visibility in &mut dialog {
+        visibility.set_if_neq(if open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        });
+    }
+    let (before, after) = state.field.split();
+    for mut text in &mut text {
+        let content = format!("{before}|{after}");
+        if text.0 != content {
+            text.0 = content;
+        }
+    }
 }
 
 /// Points so far: the kills and zeppelin bonuses times the level factor.
@@ -512,7 +579,8 @@ fn update_live(
     }
 }
 
-/// Lines of the result panel: `(left, right, color)`.
+/// Lines of the result panel: `(left, right, color)`; names may use any
+/// script, so the panel uses the name font.
 pub fn panel_lines(state: &ScoreState, store: &Store) -> Vec<(String, String, Color)> {
     let Some(result) = &state.result else {
         return Vec::new();
@@ -549,18 +617,12 @@ pub fn panel_lines(state: &ScoreState, store: &Store) -> Vec<(String, String, Co
     lines.push((String::new(), String::new(), DIM));
 
     // Name and what happens next.
-    let cursor = if state.editing { "_" } else { "" };
-    lines.push((
-        format!("Pilot  {}{cursor}", state.field.text),
-        String::new(),
-        if state.editing { AMBER } else { HUD },
-    ));
+    lines.push((format!("Pilot  {}", state.field.text()), String::new(), HUD));
     // Short lines: the panel is narrow.
-    let hints: Vec<String> = match (&state.submitted, state.editing) {
-        (_, true) => vec!["Type your name".into(), "Enter: save  Esc: back".into()],
-        (None, false) if state.field.name().is_none() => vec!["Enter: type your name".into()],
-        (None, false) => vec!["Enter: save score".into(), "C: change name".into()],
-        (Some(submitted), false) => {
+    let hints: Vec<String> = match (&state.submitted, state.dialog) {
+        (None, true) => vec!["Enter your name".into()],
+        (None, false) => vec!["Not saved".into(), "C: save it after all".into()],
+        (Some(submitted), _) => {
             let local = submitted
                 .local_place
                 .map_or("Not in the local top 10".to_owned(), |p| {
@@ -621,6 +683,7 @@ fn update_panel(
     mut commands: Commands,
     state: Res<ScoreState>,
     store: Res<Store>,
+    font: Res<NameFont>,
     pause: Option<Res<Pause>>,
     panel: Query<(Entity, &mut Visibility), With<ResultPanel>>,
 ) {
@@ -647,8 +710,8 @@ fn update_panel(
                         ..default()
                     })
                     .with_children(|line| {
-                        line.spawn(label(left, 15.0, color));
-                        line.spawn(label(right, 15.0, color));
+                        line.spawn(name_label(&font, left, 15.0, color));
+                        line.spawn(name_label(&font, right, 15.0, color));
                     });
             }
         });

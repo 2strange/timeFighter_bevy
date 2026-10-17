@@ -55,7 +55,7 @@ test('a queued score is sent once and the answer is left for the game', async ()
   const vector = vectors[0];
   const item = {
     id: 3,
-    name: 'MAVERICK',
+    name: 'Jürgen ✈',
     mode: vector.mode,
     level: vector.level,
     score: vector.score,
@@ -68,7 +68,7 @@ test('a queued score is sent once and the answer is left for the game', async ()
   tick();
   assert.equal(storage.get('timefighter.outbox'), '[]', 'emptied before sending');
   await settle();
-  assert.equal(storage.get('timefighter.online'), `3\n1\n1\nMAVERICK|${vector.score}`);
+  assert.equal(storage.get('timefighter.online'), `3\n1\n1\nJürgen ✈\t${vector.score}`);
 
   // A refused one comes back as an error line.
   storage.set('timefighter.outbox', JSON.stringify([{ ...item, id: 4, score: 1 }]));
@@ -77,7 +77,12 @@ test('a queued score is sent once and the answer is left for the game', async ()
   assert.equal(storage.get('timefighter.online'), '4\nerror\nscore does not add up');
 });
 
-test('local lists are read in the game\'s form', () => {
+test('local lists are read in the game\'s form, and the old one', () => {
+  storage.set('timefighter.top.hunt.normal', 'Jürgen | ;\t900\nbad\nBOB\t500');
+  assert.deepEqual(page.localList('hunt', 'normal'), [
+    { name: 'Jürgen | ;', score: 900 },
+    { name: 'BOB', score: 500 },
+  ]);
   storage.set('timefighter.top.hunt.normal', 'ACE|900;bad;BOB|500');
   assert.deepEqual(page.localList('hunt', 'normal'), [
     { name: 'ACE', score: 900 },

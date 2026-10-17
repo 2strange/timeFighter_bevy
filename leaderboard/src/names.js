@@ -1,15 +1,21 @@
-// Pilot names: the game's alphabet (src/score/board.rs) and a short list of
-// words that do not go on a public list.
+// Pilot names: 1 to 18 printable characters of any script, as the game
+// takes them (src/score/board.rs), plus a short list of words that do not
+// go on a public list. Names are only ever shown as text (textContent in
+// the page, plain text in the game), never as HTML.
 
-const ALLOWED = /^[A-Z0-9_-]+( [A-Z0-9_-]+)*$/;
+export const NAME_MAX = 18;
 
-// Checked against the name without spaces, dashes and underscores, with
-// digits read as the letters they stand in for.
+// Control and invisible formatting characters (Cc, Cf), and the
+// replacement character a broken encoding leaves.
+const INVISIBLE = /[\p{Cc}\p{Cf}�]/gu;
+
+// Checked against the name folded to A-Z and 0-9 (accents dropped, digits
+// read as the letters they stand in for).
 const BLOCKED = [
   'NAZI',
   'HITLER',
-  'HEIL',
-  'SIEG',
+  'HEILH',
+  'SIEGHEIL',
   'FUHRER',
   'FUEHRER',
   'HOLOCAUST',
@@ -30,21 +36,31 @@ const BLOCKED = [
   'PENIS',
   'VAGINA',
 ];
-// Number codes of the far right, checked on the raw name.
+// Number codes of the far right, checked as whole digit groups.
 const BLOCKED_CODES = ['88', '1488'];
 const LEET = { 0: 'O', 1: 'I', 3: 'E', 4: 'A', 5: 'S', 7: 'T', 8: 'B' };
 
-/** A reason why `name` cannot go on the list, or null. */
+/** The name as it is stored: invisible characters out, trimmed, NFC. */
+export function cleanName(name) {
+  if (typeof name !== 'string') return '';
+  return name.normalize('NFC').replace(INVISIBLE, '').trim();
+}
+
+/** A reason why `name` (already cleaned) cannot go on the list, or null. */
 export function checkName(name) {
-  if (typeof name !== 'string') return 'no name';
-  if (name.length < 3 || name.length > 12) return 'name must have 3 to 12 characters';
-  if (!ALLOWED.test(name)) return 'name may use A-Z, 0-9, space, - and _';
-  const squeezed = name.replace(/[ _-]/g, '');
-  const read = squeezed.replace(/[0-9]/g, (d) => LEET[d] ?? d);
-  if (BLOCKED.some((word) => squeezed.includes(word) || read.includes(word))) {
+  if (typeof name !== 'string' || name.length === 0) return 'no name';
+  const length = Array.from(name).length;
+  if (length > NAME_MAX) return `name must have 1 to ${NAME_MAX} characters`;
+  const folded = name
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  const read = folded.replace(/[0-9]/g, (d) => LEET[d] ?? d);
+  if (BLOCKED.some((word) => folded.includes(word) || read.includes(word))) {
     return 'name not allowed';
   }
-  const digits = name.replace(/[^0-9]/g, ' ').trim().split(/ +/);
+  const digits = name.match(/[0-9]+/g) ?? [];
   if (digits.some((group) => BLOCKED_CODES.includes(group))) return 'name not allowed';
   return null;
 }

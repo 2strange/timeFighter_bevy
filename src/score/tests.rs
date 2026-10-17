@@ -300,55 +300,104 @@ fn kills_count_live_with_the_weapon_that_scored_them() {
     );
 }
 
+/// Types `text` as a browser would: one key event per character, with the
+/// character as its text (so Shift, umlauts and any script come through).
+fn type_text(app: &mut App, text: &str) {
+    use bevy::input::{
+        ButtonState,
+        keyboard::{Key, NativeKeyCode},
+    };
+    for c in text.chars() {
+        let key_code = match c.to_ascii_uppercase() {
+            'R' => KeyCode::KeyR,
+            'M' => KeyCode::KeyM,
+            'N' => KeyCode::KeyN,
+            'C' => KeyCode::KeyC,
+            ' ' => KeyCode::Space,
+            _ => KeyCode::Unidentified(NativeKeyCode::Unidentified),
+        };
+        for state in [ButtonState::Pressed, ButtonState::Released] {
+            app.world_mut().write_message(KeyboardInput {
+                key_code,
+                logical_key: Key::Character(c.to_string().into()),
+                state,
+                text: state.is_pressed().then(|| c.to_string().into()),
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+            app.update();
+        }
+    }
+}
+
+fn over(app: &App) -> bool {
+    matches!(app.world().resource::<Round>().phase, RoundPhase::Over(_))
+}
+
 #[test]
-fn a_new_pilot_types_a_name_and_the_score_is_saved() {
+fn the_dialog_opens_by_itself_and_takes_every_key() {
+    let mut app = game();
+    shoot_down_all(&mut app, Weapon::Missile);
+    end_round(&mut app, Outcome::ShotDown);
+    assert!(state(&app).dialog, "opens at the round's end");
+    assert_eq!(state(&app).field.text(), "", "no name stored yet");
+
+    // Austin's name: the R does not restart, the M opens no menu, N does
+    // not switch the sound.
+    type_text(&mut app, "Trendgegner");
+    assert!(over(&app));
+    assert!(!app.world().resource::<crate::menu::Menu>().open);
+    assert_eq!(state(&app).field.text(), "Trendgegner");
+    tap(&mut app, KeyCode::KeyM);
+    tap(&mut app, KeyCode::KeyN);
+    assert!(over(&app));
+    assert!(!app.world().resource::<crate::menu::Menu>().open);
+    assert!(
+        app.world()
+            .resource::<crate::audio::SoundSettings>()
+            .enabled
+    );
+    // No click gets through either.
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Left);
+    app.update();
+    assert!(
+        !app.world()
+            .resource::<ButtonInput<MouseButton>>()
+            .just_pressed(MouseButton::Left)
+    );
+}
+
+#[test]
+fn enter_saves_any_name_locally_and_online() {
     let mut app = game();
     shoot_down_all(&mut app, Weapon::Missile);
     end_round(&mut app, Outcome::ShotDown);
     let result = state(&app).result.clone().expect("result");
-    assert!(!result.sheet.victory);
-    assert!(
-        !state(&app).editing,
-        "the field waits, so M and R still work"
-    );
-    // No stored name: Enter opens the field.
+    type_text(&mut app, "Jürgen \"Ace\" ✈");
     tap(&mut app, KeyCode::Enter);
-    assert!(state(&app).editing);
-    assert!(state(&app).submitted.is_none());
-
-    // R types, it does not restart.
-    for key in [
-        KeyCode::KeyR,
-        KeyCode::Digit2,
-        KeyCode::KeyD,
-        KeyCode::Space,
-        KeyCode::Digit2,
-    ] {
-        tap(&mut app, key);
-    }
-    assert!(matches!(
-        app.world().resource::<Round>().phase,
-        RoundPhase::Over(_)
-    ));
-    assert_eq!(state(&app).field.text, "R2D 2");
-    tap(&mut app, KeyCode::Backspace);
-    tap(&mut app, KeyCode::Enter);
-    assert!(matches!(
-        app.world().resource::<Round>().phase,
-        RoundPhase::Over(_)
-    ));
+    assert!(over(&app), "Enter saves, it does not restart");
+    assert!(!state(&app).dialog);
 
     let submitted = state(&app).submitted.clone().expect("submitted");
-    assert_eq!(submitted.name, "R2D");
+    assert_eq!(submitted.name, "Jürgen \"Ace\" ✈");
     assert_eq!(submitted.local_place, Some(0));
-    assert_eq!(store(&app).get(NAME_KEY).as_deref(), Some("R2D"));
+    assert_eq!(
+        store(&app).get(NAME_KEY).as_deref(),
+        Some("Jürgen \"Ace\" ✈")
+    );
     assert_eq!(
         store(&app).get(&top_key("hunt", "normal")),
-        Some(format!("R2D|{}", result.breakdown.total))
+        Some(format!("Jürgen \"Ace\" ✈\t{}", result.breakdown.total))
     );
     let outbox = split_outbox(&store(&app).get(OUTBOX_KEY).unwrap());
     assert_eq!(outbox.len(), 1);
-    assert!(outbox[0].contains("\"name\":\"R2D\""), "{}", outbox[0]);
+    assert!(
+        outbox[0].contains(r#""name":"Jürgen \"Ace\" ✈""#),
+        "{}",
+        outbox[0]
+    );
     assert!(outbox[0].contains("\"mode\":\"hunt\",\"level\":\"normal\""));
     assert_eq!(submitted.online, Online::Waiting);
 
@@ -356,7 +405,7 @@ fn a_new_pilot_types_a_name_and_the_score_is_saved() {
     app.world_mut().resource_mut::<Store>().set(
         ONLINE_KEY,
         &format!(
-            "{}\n4\n1\nACE|99999;R2D|{}",
+            "{}\n4\n1\nACE\t99999\nJürgen \"Ace\" ✈\t{}",
             submitted.id, result.breakdown.total
         ),
     );
@@ -371,7 +420,7 @@ fn a_new_pilot_types_a_name_and_the_score_is_saved() {
         })
     ));
 
-    // Now Enter flies again, as before.
+    // Now the usual keys again: Enter flies again.
     tap(&mut app, KeyCode::Enter);
     app.update();
     assert!(app.world().resource::<Round>().is_running());
@@ -379,25 +428,53 @@ fn a_new_pilot_types_a_name_and_the_score_is_saved() {
 }
 
 #[test]
-fn a_known_pilot_restarting_with_r_still_saves_the_score() {
+fn the_name_stops_at_eighteen_characters_and_needs_a_visible_one() {
     let mut app = game();
     app.world_mut()
         .resource_mut::<Store>()
-        .set(NAME_KEY, "ICEMAN");
+        .set(NAME_KEY, "MAVERICK");
+    end_round(&mut app, Outcome::ShotDown);
+    assert_eq!(state(&app).field.text(), "MAVERICK", "the last name");
+    for _ in 0..8 {
+        tap(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "   ");
+    tap(&mut app, KeyCode::Enter);
+    assert!(state(&app).submitted.is_none(), "only spaces: not saved");
+    assert!(state(&app).dialog);
+    type_text(&mut app, "abcdefghijklmnopqrstuvwxyz");
+    assert_eq!(state(&app).field.text().chars().count(), 18);
+    tap(&mut app, KeyCode::Enter);
+    assert_eq!(
+        state(&app).submitted.as_ref().unwrap().name,
+        "   abcdefghijklmno".trim()
+    );
+}
+
+#[test]
+fn escape_closes_without_saving_and_c_opens_it_again() {
+    let mut app = game();
+    app.world_mut()
+        .resource_mut::<Store>()
+        .set(NAME_KEY, "VIPER");
     shoot_down_all(&mut app, Weapon::Gun);
     end_round(&mut app, Outcome::Victory);
-    assert!(!state(&app).editing);
-    assert_eq!(state(&app).field.text, "ICEMAN");
-    let total = state(&app).result.as_ref().unwrap().breakdown.total;
-    assert!(total > 1_000, "victory bonus: {total}");
+    tap(&mut app, KeyCode::Escape);
+    assert!(!state(&app).dialog);
+    assert!(over(&app), "Escape only closes the dialog");
+    assert!(store(&app).get(&top_key("hunt", "normal")).is_none());
 
+    tap(&mut app, KeyCode::KeyC);
+    assert!(state(&app).dialog);
+    assert_eq!(state(&app).field.text(), "VIPER");
+    tap(&mut app, KeyCode::Escape);
+
+    // Closed: R restarts as usual, and the score was never saved.
     tap(&mut app, KeyCode::KeyR);
     app.update();
     assert!(app.world().resource::<Round>().is_running());
-    assert_eq!(
-        store(&app).get(&top_key("hunt", "normal")),
-        Some(format!("ICEMAN|{total}"))
-    );
+    assert!(store(&app).get(&top_key("hunt", "normal")).is_none());
+    assert!(store(&app).get(OUTBOX_KEY).is_none());
 }
 
 #[test]
@@ -413,22 +490,6 @@ fn custom_rounds_stay_local() {
     assert_eq!(state(&app).submitted.as_ref().unwrap().online, Online::Off);
     assert!(store(&app).get(OUTBOX_KEY).is_none());
     assert!(store(&app).get(&top_key("hunt", "custom")).is_some());
-}
-
-#[test]
-fn c_opens_the_name_field_and_escape_leaves_it() {
-    let mut app = game();
-    app.world_mut()
-        .resource_mut::<Store>()
-        .set(NAME_KEY, "VIPER");
-    end_round(&mut app, Outcome::ShotDown);
-    tap(&mut app, KeyCode::KeyC);
-    assert!(state(&app).editing);
-    tap(&mut app, KeyCode::Backspace);
-    tap(&mut app, KeyCode::Escape);
-    assert!(!state(&app).editing);
-    assert_eq!(state(&app).field.text, "VIPE");
-    assert!(state(&app).submitted.is_none());
 }
 
 #[test]

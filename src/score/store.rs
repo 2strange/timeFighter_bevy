@@ -3,11 +3,13 @@
 //!
 //! Keys shared with the page's script (`web/index.html`):
 //! - `timefighter.name`: the pilot name
-//! - `timefighter.top.<mode>.<level>`: local top 10 (`NAME|score;...`)
+//! - `timefighter.top.<mode>.<level>`: local top 10, one `name<TAB>score`
+//!   line per entry
 //! - `timefighter.outbox`: JSON array of scores for the online list; the
 //!   page sends them and empties it
 //! - `timefighter.online`: the answer for the last one sent, as lines:
-//!   id, rank all time, rank this week, top list (or id, `error`, reason)
+//!   id, rank all time, rank this week, then the top list like a local one
+//!   (or id, `error`, reason)
 
 use std::collections::HashMap;
 
@@ -69,14 +71,25 @@ impl Store {
     }
 }
 
-/// The objects of an outbox array written by [`Store::push_outbox`] (flat
-/// objects, one level of nesting for the breakdown).
+/// The objects of an outbox array written by [`Store::push_outbox`].
+/// Braces inside strings (a name may hold any character) do not count.
 pub fn split_outbox(array: &str) -> Vec<String> {
     let inner = array.trim().trim_start_matches('[').trim_end_matches(']');
     let mut items = Vec::new();
     let (mut depth, mut start) = (0usize, None);
+    let (mut in_string, mut escaped) = (false, false);
     for (i, c) in inner.char_indices() {
+        if in_string {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
         match c {
+            '"' => in_string = true,
             '{' => {
                 if depth == 0 {
                     start = Some(i);
@@ -120,10 +133,12 @@ pub fn parse_online(text: &str, id: u64) -> Option<OnlineAnswer> {
             lines.next().unwrap_or("not sent").trim().to_owned(),
         ));
     }
+    let all_time = second.parse().ok();
+    let week = lines.next().and_then(|l| l.trim().parse().ok());
     Some(OnlineAnswer::Ranked {
-        all_time: second.parse().ok(),
-        week: lines.next().and_then(|l| l.trim().parse().ok()),
-        top: lines.next().unwrap_or_default().trim().to_owned(),
+        all_time,
+        week,
+        top: lines.collect::<Vec<_>>().join("\n"),
     })
 }
 
@@ -135,8 +150,9 @@ mod tests {
     fn outbox_keeps_the_last_five_objects() {
         let mut store = Store::default();
         for i in 0..7 {
+            // A name with braces, a quote and a backslash.
             store.push_outbox(&format!(
-                "{{\"id\":{i},\"breakdown\":{{\"victory\":true}}}}"
+                r#"{{"id":{i},"name":"a}}{{\"b\\","breakdown":{{"victory":true}}}}"#
             ));
         }
         let items = split_outbox(&store.get(OUTBOX_KEY).unwrap());
@@ -151,14 +167,14 @@ mod tests {
 
     #[test]
     fn online_answers_count_only_for_their_submission() {
-        let text = "7\n12\n3\nACE|900;BOB|500";
+        let text = "7\n12\n3\nACE\t900\nJürgen | ;\t500";
         assert_eq!(parse_online(text, 6), None);
         assert_eq!(
             parse_online(text, 7),
             Some(OnlineAnswer::Ranked {
                 all_time: Some(12),
                 week: Some(3),
-                top: "ACE|900;BOB|500".into()
+                top: "ACE\t900\nJürgen | ;\t500".into()
             })
         );
         assert_eq!(

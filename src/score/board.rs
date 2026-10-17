@@ -1,59 +1,113 @@
 //! Pilot names and the local top-10 lists, without ECS.
 //!
-//! A list is stored per mode and level as `NAME|score;NAME|score;...`,
-//! best first; the start page reads the same form. Names are restricted to
-//! a small alphabet, so neither `|` nor `;` can occur in them.
+//! A name is 1 to 18 printable characters, any script: control characters
+//! are dropped and the ends trimmed. A list is stored per mode and level
+//! as one `name<TAB>score` line per entry, best first; names cannot hold a
+//! tab or a line break, so the form needs no escaping. The start page
+//! reads the same form.
 
-/// Longest and shortest name.
-pub const NAME_MIN: usize = 3;
-pub const NAME_MAX: usize = 12;
+/// Longest and shortest name, in characters.
+pub const NAME_MIN: usize = 1;
+pub const NAME_MAX: usize = 18;
 /// Entries a local list keeps.
 pub const LOCAL_TOP: usize = 10;
 
-/// Whether `c` may appear in a name (after upper-casing).
-pub fn name_char(c: char) -> bool {
-    c.is_ascii_uppercase() || c.is_ascii_digit() || matches!(c, ' ' | '-' | '_')
+/// `text` without control characters, trimmed.
+pub fn clean_name(text: &str) -> String {
+    let kept: String = text.chars().filter(|c| !c.is_control()).collect();
+    kept.trim().to_owned()
 }
 
-/// A valid name: 3-12 allowed characters, no space at either end, not two
-/// in a row.
+/// A valid name: already clean, 1-18 characters.
 pub fn valid_name(name: &str) -> bool {
     let len = name.chars().count();
-    (NAME_MIN..=NAME_MAX).contains(&len)
-        && name.chars().all(name_char)
-        && !name.starts_with(' ')
-        && !name.ends_with(' ')
-        && !name.contains("  ")
+    (NAME_MIN..=NAME_MAX).contains(&len) && clean_name(name) == name
 }
 
-/// The name being typed on the result screen.
+/// The name being typed, with a cursor (in characters).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NameField {
-    pub text: String,
+    chars: Vec<char>,
+    cursor: usize,
 }
 
 impl NameField {
-    /// Adds a typed character (upper-cased); others and overlong input are
-    /// ignored. Returns whether the text changed.
-    pub fn type_char(&mut self, c: char) -> bool {
-        let c = c.to_ascii_uppercase();
-        if !name_char(c) || self.text.chars().count() >= NAME_MAX {
+    /// A field holding `text`, the cursor at its end.
+    pub fn with_text(text: &str) -> Self {
+        let chars: Vec<char> = text
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(NAME_MAX)
+            .collect();
+        let cursor = chars.len();
+        Self { chars, cursor }
+    }
+
+    pub fn text(&self) -> String {
+        self.chars.iter().collect()
+    }
+
+    /// The text before and after the cursor.
+    pub fn split(&self) -> (String, String) {
+        (
+            self.chars[..self.cursor].iter().collect(),
+            self.chars[self.cursor..].iter().collect(),
+        )
+    }
+
+    /// Types `text` at the cursor; control characters are skipped, and
+    /// nothing goes past [`NAME_MAX`]. Returns whether anything changed.
+    pub fn type_text(&mut self, text: &str) -> bool {
+        let mut changed = false;
+        for c in text.chars().filter(|c| !c.is_control()) {
+            if self.chars.len() >= NAME_MAX {
+                break;
+            }
+            self.chars.insert(self.cursor, c);
+            self.cursor += 1;
+            changed = true;
+        }
+        changed
+    }
+
+    /// Deletes before the cursor.
+    pub fn backspace(&mut self) -> bool {
+        if self.cursor == 0 {
             return false;
         }
-        if c == ' ' && (self.text.is_empty() || self.text.ends_with(' ')) {
-            return false;
-        }
-        self.text.push(c);
+        self.cursor -= 1;
+        self.chars.remove(self.cursor);
         true
     }
 
-    pub fn backspace(&mut self) -> bool {
-        self.text.pop().is_some()
+    /// Deletes at the cursor.
+    pub fn delete(&mut self) -> bool {
+        if self.cursor >= self.chars.len() {
+            return false;
+        }
+        self.chars.remove(self.cursor);
+        true
     }
 
-    /// The name to submit, if the text is one.
+    pub fn left(&mut self) {
+        self.cursor = self.cursor.saturating_sub(1);
+    }
+
+    pub fn right(&mut self) {
+        self.cursor = (self.cursor + 1).min(self.chars.len());
+    }
+
+    pub fn home(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn end(&mut self) {
+        self.cursor = self.chars.len();
+    }
+
+    /// The name to save, if the text has a visible character.
     pub fn name(&self) -> Option<String> {
-        let name = self.text.trim_end().to_owned();
+        let name = clean_name(&self.text());
         valid_name(&name).then_some(name)
     }
 }
@@ -65,11 +119,22 @@ pub struct Entry {
     pub score: u32,
 }
 
-/// Reads a stored list; damaged entries are skipped.
-pub fn parse_list(line: &str) -> Vec<Entry> {
-    line.split(';')
-        .filter_map(|item| {
-            let (name, score) = item.split_once('|')?;
+/// Reads a stored list; damaged entries are skipped. Lists from before
+/// names took any character (`NAME|score;...`) still read.
+pub fn parse_list(text: &str) -> Vec<Entry> {
+    let legacy = !text.contains('\t') && text.contains('|');
+    let items: Vec<(&str, &str)> = if legacy {
+        text.split(';')
+            .filter_map(|item| item.split_once('|'))
+            .collect()
+    } else {
+        text.lines()
+            .filter_map(|line| line.split_once('\t'))
+            .collect()
+    };
+    items
+        .into_iter()
+        .filter_map(|(name, score)| {
             let score = score.trim().parse().ok()?;
             valid_name(name).then(|| Entry {
                 name: name.to_owned(),
@@ -82,9 +147,9 @@ pub fn parse_list(line: &str) -> Vec<Entry> {
 pub fn format_list(entries: &[Entry]) -> String {
     entries
         .iter()
-        .map(|e| format!("{}|{}", e.name, e.score))
+        .map(|e| format!("{}\t{}", e.name, e.score))
         .collect::<Vec<_>>()
-        .join(";")
+        .join("\n")
 }
 
 /// Inserts `entry` below equal scores (the earlier one keeps its place) and
@@ -103,90 +168,124 @@ pub fn insert(entries: &mut Vec<Entry>, entry: Entry, top: usize) -> Option<usiz
     Some(place)
 }
 
+/// `text` as the inside of a JSON string.
+pub fn json_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn names_take_letters_digits_space_dash_underscore() {
+    fn names_take_any_printable_characters_up_to_eighteen() {
         for good in [
-            "ACE",
-            "MAVERICK",
-            "RED-5",
-            "TOP_GUN",
+            "Trendgegner",
             "ICE MAN",
-            "A1B2C3D4E5F6",
+            "Jürgen Weiß",
+            "Ølaf-Ærø",
+            "Пилот",
+            "飛行士",
+            "A",
+            "<b>&\"x\";|",
+            "eighteen-chars-xyz",
         ] {
             assert!(valid_name(good), "{good}");
         }
         for bad in [
-            "AB",
-            "THIRTEEN-CHAR",
-            "ace",
-            "ÄRGER",
+            "",
+            "   ",
             " ACE",
             "ACE ",
-            "TWO  SPACES",
-            "A|B",
-            "A;B",
-            "<B>",
+            "TAB\tNAME",
+            "nineteen-characters",
+            "LINE\nBREAK",
         ] {
-            assert!(!valid_name(bad), "{bad}");
+            assert!(!valid_name(bad), "{bad:?}");
         }
+        assert_eq!(clean_name("  Mav\u{7}erick \n"), "Maverick");
     }
 
     #[test]
-    fn typing_upper_cases_and_skips_what_does_not_fit() {
-        let mut field = NameField::default();
-        for c in " ice  man!x".chars() {
-            field.type_char(c);
-        }
-        assert_eq!(field.text, "ICE MANX");
-        assert_eq!(field.name().as_deref(), Some("ICE MANX"));
-        for c in "ABCDEFGHIJ".chars() {
-            field.type_char(c);
-        }
-        assert_eq!(field.text.chars().count(), NAME_MAX);
-        field.text = "AB ".into();
-        assert_eq!(field.name(), None, "too short once trimmed");
+    fn the_field_edits_at_its_cursor() {
+        let mut field = NameField::with_text("Trendgegner");
+        assert_eq!(field.name().as_deref(), Some("Trendgegner"));
+        field.home();
+        field.type_text("Der ");
+        assert_eq!(field.text(), "Der Trendgegner");
+        field.right();
         assert!(field.backspace());
-        assert_eq!(field.text, "AB");
+        assert_eq!(field.text(), "Der rendgegner");
+        field.end();
+        field.left();
+        assert!(field.delete());
+        assert_eq!(field.text(), "Der rendgegne");
+        assert_eq!(field.split(), ("Der rendgegne".into(), String::new()));
+        // Never past 18 characters; control characters never get in.
+        field.type_text("\u{1b}ÄÖÜäöüß");
+        assert_eq!(field.text().chars().count(), NAME_MAX);
+        assert!(!field.type_text("x"));
+        let mut blank = NameField::with_text("  ");
+        assert_eq!(blank.name(), None, "only spaces");
+        blank.type_text("x");
+        assert_eq!(blank.name().as_deref(), Some("x"));
     }
 
     #[test]
-    fn lists_keep_the_best_ten_and_ties_keep_their_order() {
-        let mut list = parse_list("ACE|900;BOB|500;bad;CAT|x;DAN|500");
-        assert_eq!(list.len(), 3, "damaged entries skipped: {list:?}");
-        let place = insert(
-            &mut list,
-            Entry {
-                name: "EVE".into(),
-                score: 500,
-            },
-            LOCAL_TOP,
-        );
-        assert_eq!(place, Some(3), "after the earlier 500s");
-        for i in 0..10 {
+    fn lists_keep_the_best_ten_with_any_names() {
+        let mut list = Vec::new();
+        for (name, score) in [("Jürgen|;", 900), ("飛行士", 500), ("A", 500)] {
             insert(
                 &mut list,
                 Entry {
-                    name: format!("P{i:02}"),
+                    name: name.into(),
+                    score,
+                },
+                LOCAL_TOP,
+            );
+        }
+        assert_eq!(list[2].name, "A", "ties keep their order");
+        assert_eq!(parse_list(&format_list(&list)), list);
+        assert_eq!(
+            parse_list("ACE|900;bad;CAT|x;BOB|500"),
+            [
+                Entry {
+                    name: "ACE".into(),
+                    score: 900
+                },
+                Entry {
+                    name: "BOB".into(),
+                    score: 500
+                }
+            ],
+            "the old form still reads"
+        );
+        for i in 0..12 {
+            insert(
+                &mut list,
+                Entry {
+                    name: format!("P{i}"),
                     score: 1_000 + i,
                 },
                 LOCAL_TOP,
             );
         }
         assert_eq!(list.len(), LOCAL_TOP);
-        assert_eq!(list[0].score, 1_009);
-        let low = insert(
-            &mut list,
-            Entry {
-                name: "LOW".into(),
-                score: 1,
-            },
-            LOCAL_TOP,
-        );
-        assert_eq!(low, None);
-        assert_eq!(parse_list(&format_list(&list)), list);
+        assert_eq!(list[0].score, 1_011);
+    }
+
+    #[test]
+    fn json_strings_are_escaped() {
+        assert_eq!(json_escape("a\"b\\c"), "a\\\"b\\\\c");
+        assert_eq!(json_escape("Jürgen"), "Jürgen");
     }
 }
