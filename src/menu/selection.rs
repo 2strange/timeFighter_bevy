@@ -170,7 +170,8 @@ impl CustomField {
         match self {
             // Includes every level's count in every mode (e.g. 8, 16, 24).
             CustomField::Missiles => &[
-                0., 2., 4., 6., 8., 10., 12., 14., 16., 20., 24., 28., 32., 36., 40.,
+                0., 2., 4., 6., 8., 10., 12., 14., 16., 20., 24., 28., 32., 36., 40., 50., 60.,
+                80., 100.,
             ],
             CustomField::Enemies => &[1., 2., 4., 6., 8., 10., 12., 16., 20., 24.],
             CustomField::FlightSize => &[1., 2., 3., 4., 5., 6.],
@@ -889,7 +890,7 @@ mod tests {
             let steps = field.steps();
             let (lo, hi) = (steps[0], steps[steps.len() - 1]);
             let (min, max) = match field {
-                CustomField::Missiles => (0.0, 40.0),
+                CustomField::Missiles => (0.0, 100.0),
                 CustomField::Enemies => (1.0, 24.0),
                 CustomField::FlightSize => (1.0, 6.0),
                 CustomField::EnemySpeed => (0.5, 1.5),

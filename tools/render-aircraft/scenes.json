@@ -1,7 +1,7 @@
 {
   "mode-hunt": {
     "width": 480,
-    "height": 270,
+    "height": 240,
     "fov": 26,
     "view": {
       "yaw": 40,
@@ -23,7 +23,7 @@
   },
   "mode-protect": {
     "width": 480,
-    "height": 270,
+    "height": 240,
     "fov": 26,
     "view": {
       "yaw": 34,
@@ -50,7 +50,7 @@
   },
   "mode-battle": {
     "width": 480,
-    "height": 270,
+    "height": 240,
     "fov": 26,
     "view": {
       "yaw": 34,

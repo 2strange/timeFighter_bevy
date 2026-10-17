@@ -97,7 +97,7 @@
         color: var(--ink); background: rgba(255, 255, 255, 0.03); border: 1px solid var(--hud-dim);
         font: inherit;
       }
-      .mode img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; display: block; }
+      .mode img { width: 100%; aspect-ratio: 2 / 1; object-fit: contain; display: block; }
       /* Name on its own line, the one-liner below. */
       .mode div { display: flex; flex-direction: column; gap: 4px; }
       .mode strong {
@@ -157,15 +157,15 @@
           <h2>Mode</h2>
           <div class="modes" id="modes" role="group" aria-label="Mode">
             <button class="mode" type="button" data-mode="hunt">
-              <img src="img/mode-hunt.webp" alt="A fighter" width="480" height="270" />
+              <img src="img/mode-hunt.webp" alt="A fighter" width="480" height="240" />
               <div><strong>HUNT</strong><span>Shoot down every fighter.</span></div>
             </button>
             <button class="mode" type="button" data-mode="protect">
-              <img src="img/mode-protect.webp" alt="Two bombers" width="480" height="270" />
+              <img src="img/mode-protect.webp" alt="Two bombers" width="480" height="240" />
               <div><strong>PROTECT</strong><span>Stop the bomber waves before they wreck the city centre.</span></div>
             </button>
             <button class="mode" type="button" data-mode="battle">
-              <img src="img/mode-battle.webp" alt="Bombers with fighter escort" width="480" height="270" />
+              <img src="img/mode-battle.webp" alt="Bombers with fighter escort" width="480" height="240" />
               <div><strong>BATTLE</strong><span>Bombers with a fighter escort: protect the city and survive.</span></div>
             </button>
           </div>
