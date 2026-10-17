@@ -12,12 +12,14 @@ mod showroom;
 mod tests;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Collider;
 
-use crate::physics::{AircraftSize, Layer, aircraft_body_sized};
+use crate::physics::{AircraftSize, Layer, aircraft_body_with};
 
 pub use showroom::{ShowroomPage, ShowroomPlugin, ShowroomScene, ShowroomView, scenes};
 
-/// A gun position on an aircraft (m, model frame: nose −Z, +Y up).
+/// A named point on an aircraft, such as a gun position or an engine
+/// (m, model frame: nose −Z, +Y up).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GunMount {
     pub name: &'static str,
@@ -72,6 +74,26 @@ const JU287_MOUNTS: [GunMount; 2] = [
     GunMount::new("rear_gun", 0.00, -0.97, 8.46),
 ];
 
+// The airship has no turrets of its own: the front gun sits under the
+// control car, the rear gun in the tail cone, two on the back of the hull
+// and one under the passenger deck. The name gives the gunner's facing:
+// front −Z, rear +Z, top +Y, gondola −Y.
+const ZEPPELIN_MOUNTS: [GunMount; 5] = [
+    GunMount::new("front_gun", 0.00, -21.59, -84.77),
+    GunMount::new("rear_gun", 0.00, 0.45, 122.34),
+    GunMount::new("top_fore", 0.00, 20.39, -70.00),
+    GunMount::new("top_aft", 0.00, 19.56, 42.46),
+    GunMount::new("gondola_belly", 0.00, -21.33, -19.27),
+];
+
+// The four engine cars, the outer part of each (mounts.json).
+const ZEPPELIN_ENGINES: [GunMount; 4] = [
+    GunMount::new("engine_fore_left", -22.93, -12.48, -10.08),
+    GunMount::new("engine_fore_right", 22.93, -12.48, -10.08),
+    GunMount::new("engine_aft_left", -14.71, -17.36, 46.41),
+    GunMount::new("engine_aft_right", 14.71, -17.36, 46.41),
+];
+
 /// Normalised aircraft models available in `assets/aircraft/`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AircraftModel {
@@ -92,7 +114,7 @@ pub enum AircraftModel {
     Me264,
     Ju390,
     Ju287,
-    /// An airship, 245 m long; showroom only for now.
+    /// An airship, 245 m long: the end boss of Battle.
     Zeppelin,
 }
 
@@ -194,13 +216,33 @@ impl AircraftModel {
             AircraftModel::Me264 => &ME264_MOUNTS,
             AircraftModel::Ju390 => &JU390_MOUNTS,
             AircraftModel::Ju287 => &JU287_MOUNTS,
+            AircraftModel::Zeppelin => &ZEPPELIN_MOUNTS,
             _ => &[],
+        }
+    }
+
+    /// Engine cars of models whose engines can be shot out one by one
+    /// (m, model frame; mounts.json), left before right; empty for the
+    /// others.
+    pub fn engine_pods(self) -> &'static [GunMount] {
+        match self {
+            AircraftModel::Zeppelin => &ZEPPELIN_ENGINES,
+            _ => &[],
+        }
+    }
+
+    /// Collider of this model: the generic aircraft shape from its size
+    /// (see [`AircraftSize::collider`]), the airship its own.
+    pub fn collider(self) -> Collider {
+        match self {
+            AircraftModel::Zeppelin => zeppelin_collider(),
+            _ => self.size().collider(),
         }
     }
 
     /// Kinematic body and collider for this model on `layer`.
     pub fn body(self, layer: Layer) -> impl Bundle {
-        aircraft_body_sized(layer, self.size())
+        aircraft_body_with(layer, self.collider())
     }
 
     /// Asset path of the model's scene, relative to `assets/`.
@@ -212,4 +254,48 @@ impl AircraftModel {
     pub fn scene(self, assets: &AssetServer) -> WorldAssetRoot {
         WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(self.scene_path())))
     }
+}
+
+/// The airship as capsules along its axis (y = 0.5): a slim nose, the
+/// 43.6 m thick hull and a slim tail cone, plus the cross of tail fins, the
+/// control car and the four engine cars. Measured from the model; a plain
+/// capsule over the full length would bulge far beyond nose and tail.
+fn zeppelin_collider() -> Collider {
+    const AXIS_Y: f32 = 0.5;
+    // Capsule along Z from `front` to `back` (m) with `radius`.
+    let capsule = |front: f32, back: f32, radius: f32| {
+        (
+            Vec3::new(0.0, AXIS_Y, (front + back) / 2.0),
+            Quat::IDENTITY,
+            Collider::capsule_z((back - front) / 2.0 - radius, radius),
+        )
+    };
+    let size = AircraftModel::Zeppelin.size();
+    let (fin_z, fin_half_length) = (90.5, 18.5);
+    let mut parts = vec![
+        capsule(size.min.z, -92.0, 11.0),
+        capsule(-112.0, 75.0, 21.8),
+        capsule(55.0, size.max.z, 11.0),
+        // Tail fins: horizontal pair and vertical pair.
+        (
+            Vec3::new(0.0, AXIS_Y, fin_z),
+            Quat::IDENTITY,
+            Collider::cuboid(size.max.x - 0.1, 0.8, fin_half_length),
+        ),
+        (
+            Vec3::new(0.0, (size.min.y + size.max.y) / 2.0, fin_z),
+            Quat::IDENTITY,
+            Collider::cuboid(0.8, (size.max.y - size.min.y) / 2.0 - 0.1, fin_half_length),
+        ),
+        // Control car under the nose.
+        (
+            Vec3::new(0.0, -20.85, -85.0),
+            Quat::IDENTITY,
+            Collider::cuboid(2.5, 1.1, 7.0),
+        ),
+    ];
+    for engine in &ZEPPELIN_ENGINES {
+        parts.push((engine.position, Quat::IDENTITY, Collider::ball(1.2)));
+    }
+    Collider::compound(parts)
 }

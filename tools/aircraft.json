@@ -242,7 +242,106 @@
       "up": "+Y",
       "pose": "rest",
       "drop_materials": "^(platte|Hangar)$",
-      "drop_nodes": "Zeppelin\\.1"
+      "drop_nodes": "Zeppelin\\.1",
+      "mounts": [
+        {
+          "name": "front_gun",
+          "materials": "^Zeppelin$",
+          "pick": "bottom",
+          "z": [
+            -92,
+            -78
+          ]
+        },
+        {
+          "name": "rear_gun",
+          "materials": "^Zeppelin$",
+          "pick": "rear"
+        },
+        {
+          "name": "top_fore",
+          "materials": "^Zeppelin$",
+          "pick": "top",
+          "z": [
+            -75,
+            -60
+          ]
+        },
+        {
+          "name": "top_aft",
+          "materials": "^Zeppelin$",
+          "pick": "top",
+          "z": [
+            30,
+            50
+          ]
+        },
+        {
+          "name": "gondola_belly",
+          "materials": "^Zeppelin$",
+          "pick": "bottom",
+          "z": [
+            -25,
+            -15
+          ]
+        },
+        {
+          "name": "engine_fore_left",
+          "materials": "^Zeppelin$",
+          "x": [
+            -25,
+            -21.95
+          ],
+          "z": [
+            -16,
+            -4
+          ]
+        },
+        {
+          "name": "engine_fore_right",
+          "materials": "^Zeppelin$",
+          "x": [
+            21.95,
+            25
+          ],
+          "z": [
+            -16,
+            -4
+          ]
+        },
+        {
+          "name": "engine_aft_left",
+          "materials": "^Zeppelin$",
+          "x": [
+            -18,
+            -12
+          ],
+          "y": [
+            -20,
+            -15.5
+          ],
+          "z": [
+            42,
+            51
+          ]
+        },
+        {
+          "name": "engine_aft_right",
+          "materials": "^Zeppelin$",
+          "x": [
+            12,
+            18
+          ],
+          "y": [
+            -20,
+            -15.5
+          ],
+          "z": [
+            42,
+            51
+          ]
+        }
+      ]
     }
   ]
 }

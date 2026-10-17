@@ -32,7 +32,9 @@
 //                              "rear" / "top" / "bottom" the centre of its
 //                              part within 1.5 m of that extreme; "z": [a, b]
 //                              limits the search to that length range (m,
-//                              nose at -Z). Written to mounts.json.
+//                              nose at -Z), "x" and "y" likewise across and
+//                              up (to single out e.g. an engine car on a
+//                              one-mesh airship). Written to mounts.json.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -275,8 +277,11 @@ function measureMounts(sources, apply, entry) {
   const result = {};
   for (const { spec, points: raw } of sources) {
     let points = raw.map(apply);
-    if (spec.z) points = points.filter((p) => p[2] >= spec.z[0] && p[2] <= spec.z[1]);
-    if (!points.length) fail(`${entry.name}: mount "${spec.name}" has nothing in its z range`);
+    for (const [k, axis] of ['x', 'y', 'z'].entries()) {
+      const range = spec[axis];
+      if (range) points = points.filter((p) => p[k] >= range[0] && p[k] <= range[1]);
+    }
+    if (!points.length) fail(`${entry.name}: mount "${spec.name}" has nothing in its range`);
     const axis = { front: [2, -1], rear: [2, 1], top: [1, 1], bottom: [1, -1] }[spec.pick];
     if (axis) {
       const [k, sign] = axis;

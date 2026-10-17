@@ -48,6 +48,9 @@ pub enum EnemyKind {
     Me264,
     Ju390,
     Ju287,
+    /// Battle's end boss, registered with model, guns, engines and collider;
+    /// provisional stats until its behaviour is built.
+    Zeppelin,
 }
 
 /// Strength and handling of an enemy type. Metres, seconds, radians.
@@ -142,6 +145,18 @@ impl EnemyKind {
                 turn_rate: 0.22,
                 ..EnemyKind::Lancaster.stats()
             },
+            // Provisional: slow and very tough. Hits count by distance from
+            // the centre for now, which misses most of a 245 m hull.
+            EnemyKind::Zeppelin => EnemyStats {
+                health: 2_000.0,
+                hitbox_radius: self.model().size().span() * 0.5,
+                min_speed: 30.0,
+                cruise_speed: 40.0,
+                max_speed: 50.0,
+                acceleration: 2.0,
+                turn_rate: 0.05,
+                ..EnemyKind::Lancaster.stats()
+            },
         }
     }
 
@@ -182,6 +197,7 @@ impl EnemyKind {
             EnemyKind::Me264 => AircraftModel::Me264,
             EnemyKind::Ju390 => AircraftModel::Ju390,
             EnemyKind::Ju287 => AircraftModel::Ju287,
+            EnemyKind::Zeppelin => AircraftModel::Zeppelin,
         }
     }
 }

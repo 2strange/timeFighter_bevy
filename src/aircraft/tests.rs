@@ -226,7 +226,7 @@ fn sizes_match_the_files() {
 fn colliders_fill_but_do_not_exceed_the_models() {
     for model in AircraftModel::ALL {
         let size = model.size();
-        let aabb = size.collider().raw.compute_local_aabb();
+        let aabb = model.collider().raw.compute_local_aabb();
         let (min, max) = (
             [aabb.mins.x, aabb.mins.y, aabb.mins.z],
             [aabb.maxs.x, aabb.maxs.y, aabb.maxs.z],
@@ -261,7 +261,12 @@ fn gun_mounts_match_the_normaliser_output() {
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
     for model in AircraftModel::ALL {
         let stored = json.get(model.file_stem());
-        let mounts = model.gun_mounts();
+        // Gun positions and engines are both measured points.
+        let mounts: Vec<_> = model
+            .gun_mounts()
+            .iter()
+            .chain(model.engine_pods())
+            .collect();
         assert_eq!(
             stored.map_or(0, |m| m.as_object().unwrap().len()),
             mounts.len(),
@@ -305,6 +310,35 @@ fn bomber_mounts_sit_on_the_aircraft_front_and_rear() {
         assert!(mounts[0].position.z < size.min.z + 2.0, "{model:?} front");
         assert!(mounts[1].position.z > size.max.z - 2.0, "{model:?} rear");
     }
+}
+
+#[test]
+fn zeppelin_collider_holds_its_guns_and_engines_but_not_the_air_around_the_nose() {
+    let model = AircraftModel::Zeppelin;
+    let collider = model.collider();
+    let distance = |p: Vec3| collider.raw.distance_to_local_point(p, true);
+    for point in model.gun_mounts().iter().chain(model.engine_pods()) {
+        assert!(distance(point.position) < 0.5, "{point:?} outside");
+    }
+    assert_eq!(model.gun_mounts().len(), 5);
+    // The gunners' facing comes from the name: exactly one direction word.
+    for mount in model.gun_mounts() {
+        let words = ["front", "rear", "tail", "top", "gondola"];
+        let hits = words.iter().filter(|w| mount.name.contains(*w)).count();
+        assert_eq!(hits, 1, "{}", mount.name);
+    }
+    assert_eq!(model.engine_pods().len(), 4);
+    // Engines in pairs, mirrored left and right.
+    for pair in model.engine_pods().chunks(2) {
+        assert!((pair[0].position.x + pair[1].position.x).abs() < 0.01);
+        assert!(pair[0].position.x < 0.0, "left first");
+    }
+    // The nose tapers: 7.5 m behind the tip the hull is about 10 m in
+    // radius, so a point 14 m off the axis there is in the air.
+    let size = model.size();
+    assert!(distance(Vec3::new(14.0, 0.5, size.min.z + 7.5)) > 1.0);
+    // The middle of the hull is solid up to its 21.8 m radius.
+    assert_eq!(distance(Vec3::new(0.0, 21.0, -20.0)), 0.0);
 }
 
 #[test]

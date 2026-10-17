@@ -180,9 +180,14 @@ pub fn aircraft_body(layer: Layer) -> impl Bundle {
 /// frame (see [`CrashSweep`]), so a fast jet cannot pass through a thin
 /// wall between two frames.
 pub fn aircraft_body_sized(layer: Layer, size: AircraftSize) -> impl Bundle {
+    aircraft_body_with(layer, size.collider())
+}
+
+/// Like [`aircraft_body_sized`], with a collider of its own (the airship).
+pub fn aircraft_body_with(layer: Layer, collider: Collider) -> impl Bundle {
     (
         RigidBody::KinematicPositionBased,
-        size.collider(),
+        collider,
         layer.groups(),
         ActiveEvents::COLLISION_EVENTS,
         // Kinematic bodies ignore static and other kinematic ones by
